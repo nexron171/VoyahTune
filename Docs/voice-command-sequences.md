@@ -156,6 +156,7 @@ RestoreMode заранее разрешает ссылки на сплиты, Na
 ## Влияние на релиз
 
 Изменены общие APK RestoreMode и Native, поэтому нужен новый payload и обновление каталога
-(`make_release.sh <версия> --payload`, затем `verify-payload` и `update-catalog.py`).
+(`make_release.sh <версия> --payload --minimum-ota-version <минимум-OTA>`, затем
+`verify-payload`; публикация выполняется отдельно по актуальному процессу).
 Пересборка GUI установщика не требуется, пока не менялись встроенный recovery/remover, движок или
 контракт payload; `minInstallerVersion` не повышается.

@@ -1,7 +1,7 @@
 # Состав и сборка общего payload
 
 Новый `payload_VERSION.zip` един для USB-установщика и OTA: Native, RestoreMode,
-RunYN, root-служба и runtime из `Packaging/new/`. Версия не содержит `-pi`/`-od`.
+RunYN, root-служба и runtime из `Packaging/new/`. Версия не содержит инфраструктурных суффиксов.
 Исходные `Packaging/od/` и `Packaging/pi/` сохранены для прежних релизов.
 
 В manifest используется `infrastructure: unified`, payload schema 4 и recipe
@@ -35,7 +35,7 @@ USB/OTA полностью удаляют RunYN вместе с данными �
 Boot-wrapper использует прежнее имя init-сервиса `voyahtune_load`.
 
 Оба исполнителя применяют тот же recipe: останавливают загрузчик, заменяют файлы,
-удаляют старые OD/PI loader, Frida, hooks и lock-каталоги по точным путям, затем
+удаляют прежние loader, Frida, hooks и lock-каталоги по точным путям, затем
 перезагружают Android. Перезагрузка обязательна для выгрузки eternalized-хуков.
 Накопительный список старых файлов находится в `Packaging/new/config/retired-files.txt`
 и общем spec. Отдельного скрипта миграции или второго движка установки нет.
@@ -65,9 +65,9 @@ remover; для его сборки готовый новый runtime не тр�
 
 ## Контракт APK и сборка
 
-Java-база Native/RestoreMode остаётся общей. Её существующий профиль metadata `od`
+Java-база Native/RestoreMode остаётся общей. Её совместимое значение metadata `od`
 включает необходимые `acc-hooks`/`driveHookV2`; общий сборщик использует этот контракт.
-Внешний manifest и root-служба имеют профиль `unified`. Валидатор проверяет эту
+Внешний manifest и root-служба используют `infrastructure: unified`. Валидатор проверяет эту
 пару, версию APK, подписи, точные runtime-хеши и digest recipe. Перепаковка старых APK
 с новыми хуками не создаёт полноценного проверенного payload: при выпуске нужны
 APK с актуальными подписанными metadata.
@@ -80,8 +80,8 @@ APK с актуальными подписанными metadata.
 
 Результат: `Releases/dist/payload_4.5.0.zip`, `payload_4.5.0.json` и
 `Releases/build/installer-payload-4.5.0/`. GUI собирается отдельно. Публикация —
-отдельное действие. Каталог 4+ — `Releases/ota/index-v4.json`; для beta используется
-отдельный `index-v4-beta.json` по явному поручению.
+отдельное действие. Клиенты читают серверный каталог
+`https://voyahtune.ru/api/v1/releases`; локальные JSON-индексы не обновляются.
 
 Без сборки APK можно проверить runtime и получить recipe:
 

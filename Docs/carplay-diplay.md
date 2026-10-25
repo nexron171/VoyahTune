@@ -2143,10 +2143,12 @@ UI-проверки выше работают в Robolectric (SDK 30, русск
 [подключение](../RestoreMode/diplay/common/src/test/java/com/shilapi/xcertplay/VoyahConnectionUiTest.kt).
 
 Примеры команд из корня; настроить JAVA_HOME/SDK/NDK и внешний DIPLAY_AUTH_ASSETS_DIR.
-Не копировать локальные пути Gradle cache/SDK из машины автора.
+Не копировать локальные пути Gradle cache/SDK из машины автора. Значение
+`voyahInfrastructure=od` ниже — внутренний совместимый контракт APK, используемый
+общим сборщиком; версия берётся без инфраструктурного суффикса.
 
 ```sh
-voyah_release_version="$(python3 -c 'import json; print(json.load(open("versions.json"))["voyahtune"])')-od"
+voyah_release_version="$(python3 -c 'import json; print(json.load(open("versions.json"))["voyahtune"])')"
 
 RestoreMode/gradlew -p RestoreMode :app:assembleDebug \
   -PvoyahReleaseVersion="$voyah_release_version" -PvoyahInfrastructure=od

@@ -1,6 +1,6 @@
 # Процесс установки GUI: порт классических скриптов
 
-Актуально для общего Installer 1.5.0 и PI/OD payload. GUI не запускает host install/remove:
+Актуально для Installer 1.8.1 и единого payload. GUI не запускает host install/remove:
 порядок и команды исполняет Rust. [Контракт recipe](installer-protocol.md).
 
 ## Где менять процесс
@@ -15,9 +15,9 @@
 - `Installer/desktop/src/App.svelte`: отображение событий, текущего шага,
   завершённых шагов, ошибок и журнала. Здесь нет логики установки на автомобиль.
 
-Эталоны: `Packaging/pi/installer/device/install.sh`, `remove.sh` и соответствующие `.bat`
-для PI; `Packaging/od/installer/device/` для OD. GUI общий, использует инфраструктуру
-проверенного payload и умеет удалять компоненты обоих профилей. Единое удаление использует полный remover независимо
+Источники перенесённых команд: `Packaging/pi/installer/device/install.sh`, `remove.sh`,
+соответствующие `.bat` и `Packaging/od/installer/device/`. Это исторические эталоны;
+новый релиз собирается из `Packaging/new/`. GUI применяет проверенный общий recipe. Единое удаление использует полный remover независимо
 от установленного набора, как было согласовано для GUI.
 
 ## Порядок действий
@@ -27,13 +27,12 @@
 | Root/system | root, remount, при необходимости reboot | root, remount и проверка записи |
 | Backup/signatures | Backup системных/runtime-файлов, без копий Native/RestoreMode APK; при другом APK-ключе reset данных | Без проверки APK-подписей |
 | Runtime/files | Остановка loader, полный recipe, legacy init.logcat и boot transaction | Остановка, восстановление DNS/legacy, удаление runtime |
-| Apps | Native/whitelist, RestoreMode и RunYN для PI | PackageManager uninstall и удаление системных файлов |
+| Apps | Native/whitelist, RestoreMode и RunYN по условию модели | PackageManager uninstall и удаление системных файлов |
 | Завершение | Reboot, CE/DE и запуск Native | Reboot |
 
-Прежняя проверка checked/best-effort результатов сохранена. Релиз с той же
-инфраструктурой обновляется поверх. Для смены PI/OD пользователь сначала удаляет
-VoyahTune, затем выбирает и устанавливает другой релиз. Специального сценария
-перехода между инфраструктурами нет.
+Прежняя проверка checked/best-effort результатов сохранена. Единый релиз
+устанавливается поверх предыдущего: recipe заменяет runtime и очищает старые
+компоненты. Перезагрузка выгружает прежние eternalized-хуки.
 
 Windows-вариант старого permission-check допускает неизвестного владельца;
 эта особенность сохранена. Проверка синтаксиса legacy init.logcat через локальный
@@ -42,15 +41,11 @@ Windows-вариант старого permission-check допускает неи
 
 ## Явно согласованные отличия и интерфейс
 
-- GUI при владельце WRITE_CANBUS `com.voyah.hl.service` **или** наличии этого
-  пакета у пользователя 0 показывает уведомление
-  и предлагает удалить VoyahHlCTRL. Только после отдельного согласия сохраняется
-  системная папка на компьютере, подготавливается `/system`, выполняются force-stop,
-  uninstall для user 0, удаление `/system/priv-app/VoyahHlCTRL` и очистка package_cache.
-  Затем обязательны reboot, ожидание Android/root и повторная проверка владельца разрешения и наличия пакета.
-  Ошибка бэкапа или сохранение конфликта после reboot останавливают процесс.
-  Эта ветка GUI находится в `engine.rs::resolve_canbus_conflict`, согласие —
-  в `canbus.rs`. Классические `.sh/.bat` сохраняют прежний отказ при этом владельце.
+- Подготовительный шаг отключает известные конфликтующие решения. При обнаружении
+  VoyahHlCTRL системная папка сохраняется на компьютере, выполняются force-stop,
+  uninstall с `-k`, очистка системных файлов и перезагрузка. Ошибка резервирования
+  или сохраняющийся конфликт останавливают процесс. Порядок задаётся в
+  `engine.rs::resolve_canbus_conflict`; [подробности подготовки](installer-architecture.md#подготовка-без-дополнительных-диалогов).
 - Пользователь вручную подтверждает единственный подключённый автомобиль.
 - При несовпадении подписи Native/RestoreMode соответствующее приложение удаляется
   с данными и устанавливается заново. Native требует промежуточного reboot, чтобы
@@ -81,11 +76,11 @@ SHA/подписи всего payload проверяются при сборке
 python3 Installer/scripts/sync-classic-commands.py --check
 cargo test --manifest-path Installer/Cargo.toml -p installer-core -p installer-build
 cargo build --release --manifest-path Installer/Cargo.toml -p installer-core --example fixture-driver
-VOYAH_TEST_PAYLOAD="$PWD/Releases/build/installer-payload-VERSION-od" python3 Installer/tests/test_canbus.py
+VOYAH_TEST_PAYLOAD="$PWD/Releases/build/installer-payload-VERSION" python3 Installer/tests/test_canbus.py
 python3 Installer/tests/test_release.py
-VOYAH_TEST_PAYLOAD="$PWD/Releases/build/installer-payload-VERSION-od" \
+VOYAH_TEST_PAYLOAD="$PWD/Releases/build/installer-payload-VERSION" \
   python3 Installer/tests/test_classic_port.py
-VOYAH_TEST_PAYLOAD="$PWD/Releases/build/installer-payload-VERSION-od" \
+VOYAH_TEST_PAYLOAD="$PWD/Releases/build/installer-payload-VERSION" \
   python3 Installer/tests/integration.py
 ```
 

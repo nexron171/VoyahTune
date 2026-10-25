@@ -1,11 +1,11 @@
 # Единая инфраструктура загрузчика и хуков
 
-Исходники нового решения находятся в `Packaging/new/`. Go-supervisor развивает модель загрузчика PI, а раннее восстановление по ACC, подмена OEM-сбросов и контроль состояния агентов взяты из OD. Оригинальные `Packaging/od/` и `Packaging/pi/` не изменяются.
+Исходники единого runtime находятся в `Packaging/new/`: Go-supervisor, восстановление по ACC, подмена OEM-сбросов и контроль состояния агентов. Различия прошивок учитываются адаптерами; прежние каталоги сохранены для совместимости и очистки старых установок.
 
 ## Состав и выбор прошивки
 
 - `loader/` — независимый Go-модуль без сторонних зависимостей. Точное имя процесса, Linux boot ID и `/proc/<pid>/stat` защищают от повторного использования PID. Записи попыток сохраняются между перезапусками загрузчика.
-- `runtime/adapters.js` — выбор возможностей по доступным классам и сигнатурам методов непосредственно в целевом процессе. Единого глобального флага «прошивка OD/PI» нет: OEM-пакеты могут иметь разные версии.
+- `runtime/adapters.js` — выбор возможностей по доступным классам и сигнатурам методов непосредственно в целевом процессе. Возможности определяются для каждого процесса: OEM-пакеты могут иметь разные версии.
 - `agents/` — ACC, OEM reset, Power Hold, Apollo, руль, окна/DPI, MultiDisplay, телефон, клавиатура и клиентские исправления. Navigation-source принадлежит только app-client; работа внутри приборки — только cluster-агенту.
 - `adapters/launcher/` — два варианта OEM lifecycle: раздельные `NavigationBarMain/Second` и общий `NavigationBar` с `mScreenId`. Общий вход выбирает один вариант после проверки ABI. Их обработчики transfer, All Apps и пассажирского экрана сохранены вместе, поскольку зависят от внутренних классов launcher. Возможности соответствуют выбранному варианту: настройка Home/All Apps и управление CarPlay chrome — в split; пассажирский Home → All Apps — в shared.
 - `config/agents.json` — процессы, ready-маркеры, условия, таймауты и бюджеты попыток. `config/bundles.json` задаёт состав standalone-агентов, `config/install-layout.json` — размещение boot-ресурсов.
@@ -30,7 +30,7 @@ sh Packaging/new/check.sh
 sh Packaging/new/build.sh
 ```
 
-Результат: `build/runtime/` с Android ARM64 PIE loader, Frida 16.2.1, агентами и конфигурацией; `build/system/` с init/wrapper/stop; `build/install-layout.json` со схемой размещения. Runtime самодостаточен. ARM64 Frida читается из OD, официальный ARM32 — из `tools/`; оба бинарника проверяются по закреплённым SHA-256. Хеши готовых runtime-файлов записаны в `build/runtime/runtime-manifest.json`.
+Результат: `build/runtime/` с Android ARM64 PIE loader, Frida 16.2.1, агентами и конфигурацией; `build/system/` с init/wrapper/stop; `build/install-layout.json` со схемой размещения. Runtime самодостаточен. ARM64 Frida читается из `Packaging/od/tools/`, официальный ARM32 — из `tools/`; оба бинарника проверяются по закреплённым SHA-256. Хеши готовых runtime-файлов записаны в `build/runtime/runtime-manifest.json`.
 
 `check.sh` выполняет проверки нового Go-модуля, все `tests/*.test.js` и десять существующих сценарных fixtures с перенаправлением чтения production-кода на новые исходники. Проверяются ACC, reset, Power Hold, Apollo, dock, RDS, окна после сна, CarPlay, navigation-source, cluster units, выбор адаптеров, rollback и lifecycle загрузчика. OEM/Frida окружение моделируется; исполнение на автомобиле этими тестами не подтверждается.
 
@@ -38,9 +38,9 @@ sh Packaging/new/build.sh
 
 ## Контракт установки и диагностика
 
-Для нового runtime необходимы общие Native/RestoreMode с контрактом `driveHookV2` и политикой восстановления `acc-hooks`. В текущей общей Java-базе эта политика включена профилем APK **OD**. APK с прежним профилем PI сохраняет собственное Java-восстановление и для такой установки не подходит. Это свойство APK не является определением OEM-прошивки. Новых копий Java-приложений здесь нет; их исходники и старые профили не менялись.
+Для нового runtime необходимы общие Native/RestoreMode с контрактом `driveHookV2` и политикой восстановления `acc-hooks`. Общий сборщик использует совместимое внутреннее значение APK metadata `od`; оно не задаёт отдельный вариант релиза. Старые APK с другим контрактом восстановления для этого runtime не подходят. Подробности — в [контракте payload](../../Docs/installer-payload.md).
 
-Boot-ресурсы используют существующий сервис `voyahtune_load`. `build.sh` создаёт `build/release-inputs.json`; общий сборщик включает его в единый USB/OTA payload без суффикса PI/OD. Штатные исполнители recipe заменяют runtime и удаляют прежние OD/PI loader, Frida и хуки по точным путям из `config/retired-files.txt` и общего spec. Смена eternalized-хуков требует перезагрузки Android.
+Boot-ресурсы используют существующий сервис `voyahtune_load`. `build.sh` создаёт `build/release-inputs.json`; общий сборщик включает его в единый USB/OTA payload без инфраструктурного суффикса. Штатные исполнители recipe заменяют runtime и удаляют прежние loader, Frida и хуки по точным путям из `config/retired-files.txt` и общего spec. Смена eternalized-хуков требует перезагрузки Android.
 
 В общем архиве есть RunYN с условием `except-h97xy`: USB и OTA пропускают его на H97X/H97Y, устанавливают на остальных моделях. Проверяется несколько свойств, поскольку `frombrand=H97C` может встречаться на H97X. Для перехода нужны Installer 1.8.1 и root-служба с `unified-runtime-v1`; дальнейшие совместимые OTA сохраняют бинарник службы. [Состав, минимумы и команды выпуска](../../Docs/installer-payload.md).
 
@@ -61,11 +61,11 @@ Boot-ресурсы используют существующий сервис `
 
 Известное ограничение: остановка между ready и завершением Frida может сохранить преждевременный active, который переживает restart. Проверка статусов не доказывает успешную инъекцию в этом случае; исправление lifecycle отложено.
 
-Перед использованием на машине остаются проверки на конкретных OD/PI прошивках: холодный старт, ACC OFF/ON и сон, явный выбор режимов, Power Hold, оба экрана и NAVI_FULL/RunYN. Локальные декомпиляции H97C и VehicleSettings PI Rest 2023 rc7.2 подтверждают исследованные точки расширения, но не доказывают совместимость всех версий OEM-пакетов.
+Перед использованием на машине остаются проверки на конкретных OEM-прошивках: холодный старт, ACC OFF/ON и сон, явный выбор режимов, Power Hold, оба экрана и NAVI_FULL/RunYN. Локальные декомпиляции H97C и VehicleSettings PI Rest 2023 rc7.2 подтверждают исследованные точки расширения, но не доказывают совместимость всех версий OEM-пакетов.
 
 ## Локальный комплект VoyEmu
 
-`sh Packaging/new/build-voyemu.sh` собирает runtime и общие Native/RestoreMode с OD-контрактом и хешами нового runtime. Нужны JDK 21, Android SDK/NDK, локальный Gradle cache и ранее собранный release APK RunYN. Результат находится в `build/voyemu/`; `build-manifest.json` содержит хеши комплекта. Скрипт не устанавливает и не публикует его.
+`sh Packaging/new/build-voyemu.sh` собирает runtime и общие Native/RestoreMode с контрактом `acc-hooks`/`driveHookV2` и хешами нового runtime. Нужны JDK 21, Android SDK/NDK, локальный Gradle cache и ранее собранный release APK RunYN. Результат находится в `build/voyemu/`; `build-manifest.json` содержит хеши комплекта. Скрипт не устанавливает и не публикует его.
 
 Только staged init для VoyEmu сохраняет SELinux Enforcing и отключает ART JIT: политика Android 11 запрещает Frida изменять исполняемый JIT-cache system_server. Автомобильный init этим не меняется. Общий bootstrap использует cache приложения для DEX, а supervisor сериализует Frida-инъекции и управляет Frida напрямую: завершает группу при ошибке/таймауте и задаёт Android parent-death signal. Health-файлы получают права и SELinux-метку целевого приложения. Готовность eternalized-агента требует ready-маркеров и успешного выхода Frida.
 

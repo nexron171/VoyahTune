@@ -1,92 +1,84 @@
 # Контракт установщика и payload
 
-Версия GUI/движка определяется `Installer/Cargo.toml` (текущая версия —
-1.5.0). Версия VoyahTune внутри payload независима от неё. Публичный каталог имеет простой формат `releases[]`,
-новый payload — schema 4, recipe — schema 3 / engine `qinggan-v3`.
+Версии задаются в [versions.json](../versions.json): `installer` для GUI/движка,
+`voyahtune` для stable-релиза. Производные Cargo/Tauri/Gradle metadata синхронизируются
+при сборке. Новый payload единый: schema 4, recipe schema 3 / engine `qinggan-v3`.
+Один ZIP используется USB-установщиком и OTA.
 
 ## Совместимость
 
 До обращения к автомобилю проверяются `requirements.minInstallerVersion` (SemVer)
-и `requirements.requiredCapabilities`. Текущие возможности: `qinggan-v3`,
-`single-package-v1`, `files-v1`, `ota-bootstrap-v1`, `infrastructure-v1`. Новые PI/OD payload
-требуют Installer 1.5.0. Изменение состава в рамках этих операций не требует
-пересборки GUI. Новый обработчик/семантика получает новую capability и минимальную
-версию; неизвестные schema, поля операций и capability отклоняются целиком.
-Ошибка `INSTALLER_UPDATE_REQUIRED` сообщает требуемую и текущую версию.
+и `requirements.requiredCapabilities`. Текущий единый контракт требует Installer
+**1.8.1** и capabilities `qinggan-v3`, `single-package-v1`, `files-v1`,
+`ota-bootstrap-v1`, `infrastructure-v1`, `restoremode-ota-ui-v1`, `unified-runtime-v1`.
+Имена capability являются стабильными идентификаторами протокола.
 
-`infrastructure` имеет значение `pi` или `od`. Сборка всегда задаёт его явно в manifest
-и в подписанных metadata Native/RestoreMode; суффикс версии `-pi`/`-od` должен
-соответствовать этому полю. GUI и remover общие: процесс выбирается по payload.
-Root-служба собирается для своего профиля и отклоняет чужой payload с
-`INFRASTRUCTURE_MISMATCH`. Android читает профиль из APK asset `voyahtune-build.json`.
-Старые Rust metadata без поля трактуются как OD, неизвестное значение отклоняется.
+Manifest и root-служба используют `infrastructure: unified`. Версия нового релиза
+имеет вид `4.5.0` или `4.5.0-beta`, без инфраструктурного суффикса. Общие
+Native/RestoreMode собираются с политикой `acc-hooks` и контрактом `driveHookV2`.
+Внутреннее значение APK metadata `od` пока сохраняется ради совместимости Java-кода;
+сборщик и валидатор явно сопоставляют его с общим manifest. Это не отдельная сборка
+и не параметр выбора пользователя. Подробности — [состав payload](installer-payload.md).
 
-Архивы прежних схем не преобразуются и не устанавливаются новым движком.
-Релиз с той же инфраструктурой можно установить поверх предыдущего.
-Для смены PI/OD пользователь сначала удаляет VoyahTune, затем выбирает другой релиз.
-Автоматического определения перехода и специальной миграции нет.
+Старые идентификаторы и поддерживаемые форматы читаются для совместимости и удаления
+прежних установок. Неизвестные schema, поля операций и capabilities отклоняются.
+Новая операция или семантика требует реализации, capability и соответствующего
+минимума Installer. Изменение файлов в рамках поддерживаемого recipe само по себе
+не требует нового GUI. `INSTALLER_UPDATE_REQUIRED` сообщает требуемую версию.
 
 ## Каталог
 
-Общий установщик и root-службы PI/OD по умолчанию читают [Releases/ota/index.json](../Releases/ota/index.json):
-`https://raw.githubusercontent.com/nexron171/VoyahTune/master-od/Releases/ota/index.json`.
-Формат — объект с массивом `releases`; у записи только `version`, `url`, `size`, `sha256`.
-[Описание полей и проверки](ota-release-format.md).
-Один каталог содержит отдельные версии `3.22.0-pi` и `3.22.0-od`. Эти суффиксы
-признаются стабильными профильными релизами; GUI показывает оба для выбора.
-OTA отбирает свой профиль до определения последней версии и скачивания. Старые
-номера без суффикса относятся к OD. После скачивания проверяются manifest,
-подписанные metadata и соответствие профиля; суффикс не заменяет эту проверку.
+GUI и root-служба используют `https://voyahtune.ru/api/v1/releases` либо сохранённый
+пользовательский HTTPS-источник. Каталог обслуживается сервером; локальные
+JSON-индексы больше не ведутся.
 
-Старый `Installer/releases/index.json` сохраняет прежний формат и прежние релизы.
-Новый клиент не обращается к нему и использует отдельный файл локального кэша.
-Невалидный/недоступный каталог не заменяет последнюю сохранённую копию.
-Сортировка — SemVer. Совместимость проверяется после скачивания по манифесту архива;
-в публичном каталоге нет requirements, installerDownloads или ссылок на описание выпуска.
-Локальный импорт ZIP и ранее скачанные релизы доступны без сети.
+Запись содержит `version`, `url`, `size`, `sha256`, `minimumInstallerVersion` и
+`minimumOtaVersion`. Сортировка — SemVer, beta допускается содержимым
+выбранного каталога. Единая root-служба выбирает релизы без инфраструктурных суффиксов.
+[Правила выбора, переустановки и минимумов](ota-release-format.md).
+
+Проверки архива и manifest выполняются независимо от предварительных ограничений
+каталога. Невалидный ответ не заменяет последнюю сохранённую копию. Локальный импорт
+ZIP и ранее скачанные релизы доступны без сети.
 
 ## Payload и файловые операции
 
 В корне ZIP лежит `manifest.json`: `schema`, `product`, `releaseVersion`,
-`buildRevision`, `infrastructure`, `requirements`, `recipe`, `artifacts`. Для удаления существует
-внутренний архив ресурсов с `removalOnly: true`, непригодный для установки.
-Артефакт имеет `name`, относительный `path`, `size`, `sha256`; в schema 4 нет `variant`. В архиве одна пара Native/RestoreMode APK; PI дополнительно содержит RunYN
-(`runyn.apk`, пакет `big.town.runyn`) для навигационной карточки приборной панели.
-DNS APK общий.
-Подписанные APK metadata schema 3 содержат `infrastructure`, `recipeSha256` и `runtimeHashes`.
+`buildRevision`, `infrastructure`, `requirements`, `recipe`, `artifacts`. Для удаления
+существует внутренний архив ресурсов с `removalOnly: true`, непригодный для установки.
+Артефакт имеет `name`, относительный `path`, `size`, `sha256`; в schema 4 нет `variant`.
+В архиве одна пара Native/RestoreMode APK, RunYN (`runyn.apk`, `big.town.runyn`),
+общий runtime и необходимые роли OTA/DNS.
 
-Источник recipe — [общий spec](../Packaging/installer/payload-spec.json).
-Сборщик выбирает loader по инфраструктуре и добавляет RunYN только для PI.
-Сборщик добавляет обнаруженные `.js/.json` из `Packaging/pi/inject` либо `Packaging/od/inject`, формирует recipe
-и передаёт его в обе Gradle-сборки. Пример новой конфигурации:
+RunYN использует `condition: except-h97xy`: USB и OTA пропускают установку на H97X/H97Y
+и устанавливают на остальных моделях. Его версия независима от версии VoyahTune.
+Тот же предикат используется при проверке результата; имеющийся RunYN на H97X/H97Y
+автоматически не удаляется.
 
-```json
-{
-  "artifact": "voyahtune_example.json",
-  "destination": "/data/local/bin/voyahtune_example.json",
-  "mode": 420,
-  "phase": "files"
-}
-```
+Источник recipe — [общий spec](../Packaging/installer/payload-spec.json) и
+`Packaging/new/build/release-inputs.json`, создаваемый сборкой runtime. Общий сборщик
+объединяет их, передаёт recipe/source mapping в Gradle и проверяет подписанные APK
+metadata schema 3: `infrastructure`, `recipeSha256`, `runtimeHashes`.
+Ручная перепаковка старых APK с новыми агентами не создаёт проверенный payload.
 
-`files` копирует/атомарно заменяет файл с владельцем root:root и правами 0644 (420)
-или 0755 (493). Все файлы относятся к одной версии релиза.
-`directories` создаёт собственные каталоги; `attributes` задаёт права уже существующего
-собственного пути. Элементы обоих массивов: `path`, `mode`.
-`removeFiles` — накопительный перечень устаревших собственных файлов; текущие цели
-recipe исключаются из очистки при обновлении. При удалении очищаются также текущие
-файлы recipe. `removeDirectories` — точные собственные каталоги для полного удаления.
-Tombstones старых выпусков сохраняются: пользователь может пропускать версии.
+`files` копирует или атомарно заменяет файл с владельцем root:root и правами 0644
+либо 0755. `directories` создаёт собственные каталоги, `attributes` задаёт права
+существующих собственных путей. Элементы этих массивов содержат `path`, `mode`.
+`removeFiles` — накопительный список устаревших файлов, `removeDirectories` — точные
+устаревшие каталоги. Текущие цели recipe исключаются из очистки при обновлении;
+при удалении очищаются также текущие файлы recipe. Tombstones сохраняются для
+пользователей, пропускавших версии.
+
 В schema 3 нет произвольного shell/exec, произвольных package IDs или prefix-delete.
-RunYN — явно поддержанный PI-пакет; его хеш включён в подписанный состав релиза.
-Системные пути ограничены существующими ролями; новые собственные файлы допускаются
-под `voyahtune_`/`voyahtune-` в поддерживаемых `/data/local/bin`, `/data/local/tmp`
-и `/sdcard/tmp`. Для каталогов/attributes поддерживается только `/data/local`.
+Системные пути ограничены поддерживаемыми ролями. Собственные файлы допускаются
+под разрешёнными именами `voyahtune_`/`voyahtune-` в `/data/local/bin`, `/data/local/tmp`
+и `/sdcard/tmp`, а runtime — в `/data/local/bin/voyahtune-new/`.
+Для directories/attributes поддерживается только `/data/local`.
 
-Native, whitelist, RestoreMode, PI RunYN, boot и DNS остаются типизированными обработчиками.
-Их fixed destination и обязательные роли нельзя переопределить файловым recipe.
-Изменение содержимого произвольного файла задаётся его заменой; общего текстового
-редактора чужих системных файлов в протоколе нет.
+Native, whitelist, RestoreMode, RunYN, boot и DNS остаются типизированными
+обработчиками. Их fixed destination нельзя переопределять файловым recipe.
+Изменение содержимого собственного файла задаётся его заменой; общего редактора
+чужих системных файлов, включая ресурсы QNX, в протоколе нет.
 
 ## Фазы и восстановление
 
@@ -94,16 +86,16 @@ Native, whitelist, RestoreMode, PI RunYN, boot и DNS остаются типи�
 | --- | --- |
 | Проверка локального payload | Все хеши, metadata APK, recipe и совместимость до записи на ГУ |
 | Root и диагностика | Root/wait/root, общий OTA lock, остановка updater и выгрузка прежних логов |
-| CAN permission | Прежняя проверка; удаление VoyahHlCTRL только с отдельным согласием |
+| CAN permission | Проверка и обработка известного конфликта VoyahHlCTRL по плану установки |
 | Remount | Прежняя процедура, включая перезагрузку при необходимости |
 | Backup / подписи | Копии только системных/runtime-файлов; Native/RestoreMode APK не копируются; CE/DE reset только при смене подписи |
-| Runtime / files | Остановка hooks, runtime выбранного профиля и файловый recipe |
+| Runtime / files | Остановка hooks, единый runtime и файловый recipe |
 | Boot | Backup/миграция init.logcat, staging/publish/rollback boot-hook |
-| Native / RestoreMode / RunYN / DNS | APK, whitelist, дополнительный RunYN в PI и DNS overlay |
-| Reboot / verify | Ожидание загрузки, проверка Native, регистрации updater APK, init-службы и IPC 1 |
+| Native / RestoreMode / RunYN / DNS | APK, whitelist, RunYN по условию модели и DNS overlay |
+| Reboot / verify | Ожидание загрузки, проверка приложений, нового загрузчика, init-службы OTA и IPC 1 |
 | Remove | Отключение, DNS restore, boot cleanup, recipe cleanup, настройки, приложения, reboot |
 
-В OD начиная с Installer 1.7.2 финальная проверка ждёт до 180 секунд и требует
+Финальная проверка ждёт до 180 секунд и требует
 10 секунд устойчивой готовности: ответы Native `health` и RestoreMode `otaHealth`
 с версией выбранного релиза, совпадение активных APK и ответ работающей OTA-службы
 через `voyahtune-updater --health`. Требуется payload с обновлённой root-службой;
@@ -125,12 +117,15 @@ Native, whitelist, RestoreMode, PI RunYN, boot и DNS остаются типи�
 ## Единая установка
 
 Единственные действия — `install` и `remove`. Все APK и runtime-файлы применяются
-одним релизом. Профиль задаётся при сборке `--pi`/`--od`; отдельного переключателя
-в GUI или настройках Android нет. Native выбирает совместимый путь восстановления
-по metadata: PI — native door/Drive, OD — ACC hooks. Обновление поверх выполняется
-в рамках той же инфраструктуры. Для смены PI/OD сначала удаляют VoyahTune,
-затем пользователь выбирает и устанавливает другой релиз. Это инструкция,
-а не дополнительный запрет GUI; специального сценария перехода нет.
+одним релизом. Общий recipe заменяет прежние загрузчики и агенты, удаляет известные
+устаревшие пути и перезагружает Android для выгрузки eternalized-хуков.
+Предварительное удаление VoyahTune для перехода на единый релиз не требуется.
+Первое обновление несовместимой root-службы выполняется через USB; совместимая
+служба использует тот же payload через OTA.
+
+После reboot дополнительно проверяется `voyahtune-loader --check-hooks`:
+active должен относиться к текущим PID/startTicks, waiting допустим без процесса,
+disabled — у условных агентов. Ошибка хука не подтверждает успешную установку runtime.
 
 При одинаковых APK-подписях сохраняются данные; при смене ключа остаётся прежняя
 процедура с предупреждением о сбросе. Remove удаляет приложения и данные.

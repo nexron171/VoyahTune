@@ -60,6 +60,6 @@ x64/x86 и ADB x86, а также `verify-host` для всех трёх ком�
   [Windows x64](https://storage.yandexcloud.net/voyahtune/Installers/1.4.0/builds/3.20.0/VoyahTune-Installer-1.4.0-windows-x64.exe),
   [Windows x86](https://storage.yandexcloud.net/voyahtune/Installers/1.4.0/builds/3.20.0/VoyahTune-Installer-1.4.0-windows-x86.exe).
 
-Каталог [Releases/ota/index.json](../Releases/ota/index.json) дополнен записью
+Прежний каталог `Releases/ota/index.json` был дополнен записью
 3.20.0 с URL S3, размером и SHA-256 исходного архива. Прежние записи сохранены.
 Запуск GUI на Windows и установка на автомобиль в эту проверку не входили.

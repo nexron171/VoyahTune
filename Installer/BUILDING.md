@@ -1,18 +1,22 @@
 # Сборка VoyahTune Installer
 
-GUI общий для PI и OD и выпускается независимо от автомобильного релиза.
-Команда `make_release.sh` требует ровно один `--pi` или `--od`; суффикс профиля
-становится частью версии (`3.22.0-pi`/`3.22.0-od`). Самостоятельные GUI-сборки
-`build-all-macos.sh` и `build.mjs` не требуют профиля: один установщик поддерживает
-оба payload. В общем каталоге пользователь выбирает нужную версию, backend
-определяет инфраструктуру по проверенному manifest. Новый контракт требует
-Installer 1.5.0 и capability `infrastructure-v1`.
+GUI выпускается независимо от автомобильного релиза. Новый payload единый,
+использует `Packaging/new/` и не требует выбора инфраструктуры. Версия имеет вид
+`4.5.0` или `4.5.0-beta`. Источник версий — корневой `versions.json`; Cargo/Tauri
+и APK metadata синхронизируются с ним перед сборкой.
 
-Для нового payload:
+Текущий контракт требует Installer 1.8.1 и capability `unified-runtime-v1`.
+Native/RestoreMode общие, RunYN входит в архив с условием `except-h97xy`.
+[Подробный состав](../Docs/installer-payload.md).
+
+Для нового payload (номер и минимум в примере условные):
 
 ```sh
-./make_release.sh 3.22.0 --od --payload
+./make_release.sh 4.5.0 --payload --minimum-ota-version 4.5.0
 ```
+
+Минимум OTA определяется совместимостью root-службы. Для последующих совместимых
+релизов сохраняйте ранее подтверждённый минимум; новый номер payload его не повышает.
 
 Для самостоятельного macOS Universal GUI без APK:
 
@@ -20,30 +24,30 @@ Installer 1.5.0 и capability `infrastructure-v1`.
 ./Installer/scripts/build-all-macos.sh --mac
 ```
 
-Результат: `Releases/build/installers-1.5.0/macos-universal.tar.gz` и `build-info.json`.
-Версия GUI берётся из Cargo. При необходимости offline bundle задайте `--payload DIRECTORY`;
+Результат: `Releases/build/installers-1.8.1/macos-universal.tar.gz` и `build-info.json`.
+Версия GUI задаётся в `versions.json.installer` и синхронизируется с Cargo/Tauri. При необходимости offline bundle задайте `--payload DIRECTORY`;
 обычная сборка включает только ADB и небольшой remover. Пользователь выбирает/скачивает
 версию в GUI. Пользовательского CLI нет, `installer-build` остаётся инструментом разработчика.
 
-`./make_release.sh VERSION --od --mac` сохраняется как обёртка: собирает payload ZIP и отдельно
-macOS GUI ZIP в `Releases/dist/VoyahTune-Installer-1.5.0/`. `--installers` по умолчанию
+`./make_release.sh VERSION --minimum-ota-version OTA_BASE_VERSION --mac` сохраняется как обёртка: собирает payload ZIP и отдельно
+macOS GUI ZIP в `Releases/dist/VoyahTune-Installer-1.8.1/`. `--installers` по умолчанию
 выбирает macOS Universal и Windows x64/x86/ARM64; Linux добавляется через `--linux`.
 Для одной macOS используйте `--mac`.
 Подробности и публикация: [Docs/releasing.md](../Docs/releasing.md).
 
 ## Полная сборка из macOS
 
-Обёртка `make_release.sh VERSION --od --installers` собирает общие Native/RestoreMode APK, дополнительно RunYN для PI,
+Обёртка `make_release.sh VERSION --minimum-ota-version OTA_BASE_VERSION --installers` собирает Native/RestoreMode и RunYN, единый runtime,
 проверенный ZIP payload и самостоятельные GUI. Результаты разделены:
-`Releases/dist/payload_VERSION.zip` (VERSION включает профиль) и `Releases/dist/VoyahTune-Installer-INSTALLER_VERSION/`.
+`Releases/dist/payload_VERSION.zip` и `Releases/dist/VoyahTune-Installer-INSTALLER_VERSION/`.
 
 Флаги `--mac`, `--windows`, `--linux` выбирают платформы и могут сочетаться.
 В `make_release.sh` они включают режим установщиков без отдельного `--installers`:
 
 ```sh
-./make_release.sh 3.22.0 --od --mac
-./make_release.sh 3.22.0 --od --windows --linux
-./Installer/scripts/build-all-macos.sh --mac --payload Releases/build/installer-payload-3.22.0-od
+./make_release.sh 4.5.0 --minimum-ota-version 4.5.0 --mac
+./make_release.sh 4.5.0 --minimum-ota-version 4.5.0 --windows --linux
+./Installer/scripts/build-all-macos.sh --mac --payload Releases/build/installer-payload-4.5.0
 ```
 
 `--installers` собирает macOS Universal ARM64+x86-64 и Windows x64/x86/ARM64.
@@ -64,10 +68,10 @@ macOS GUI ZIP в `Releases/dist/VoyahTune-Installer-1.5.0/`. `--installers` по
 
 ```sh
 ./Installer/scripts/build-all-macos.sh \
-  --payload Releases/build/installer-payload-3.22.0-od
+  --payload Releases/build/installer-payload-4.5.0
 ```
 
-Результат этой низкоуровневой команды — `Releases/build/installers-1.5.0/`:
+Результат этой низкоуровневой команды — `Releases/build/installers-1.8.1/`:
 macos-universal.tar.gz, windows-x64.exe, windows-x86.exe, windows-arm64.exe и build-info.json.
 При явном `--linux` добавляется linux-x64.run.
 Можно указать другой каталог внутри Releases через `--output`.
@@ -161,7 +165,7 @@ vti_docker exec vti-linux-amd64 uname -m
 ./Installer/scripts/build-all-macos.sh --check --windows --linux
 # После подготовки также Android SDK и локального Rust для macOS:
 ./Installer/scripts/build-all-macos.sh --check
-./make_release.sh 3.22.0 --od --installers
+./make_release.sh 4.5.0 --minimum-ota-version 4.5.0 --installers
 ```
 
 Скрипт сам копирует исходники Installer и опциональный payload в каталоги `hosts/`;
@@ -189,7 +193,7 @@ payload Android SDK/Java не требуются.
 rustup toolchain install 1.98.1 --profile minimal --component rustfmt,clippy
 rustup target add --toolchain 1.98.1 aarch64-apple-darwin x86_64-apple-darwin
 node Installer/scripts/build.mjs --bundles app \
-  --payload Releases/build/installer-payload-3.22.0-od
+  --payload Releases/build/installer-payload-4.5.0
 ```
 
 Результат: `Installer/target/universal-apple-darwin/release/bundle/macos/VoyahTune Installer.app`.
@@ -223,7 +227,7 @@ node Installer/scripts/build.mjs --target x86_64-pc-windows-msvc --payload 'C:\p
 При нативной сборке результат:
 `Installer/target/release/bundle/nsis/VoyahTune Installer_<версия>_x64-setup.exe`.
 При кросс-сборке — `Installer/target/x86_64-pc-windows-msvc/release/bundle/nsis/`.
-Имя версии берётся из Cargo. NSIS включает GUI, ADB и ресурсы удаления. WebView2 не включён: режим
+Имя версии берётся из Cargo, синхронизированного с `versions.json.installer`. NSIS включает GUI, ADB и ресурсы удаления. WebView2 не включён: режим
 `downloadBootstrapper` скачивает и устанавливает его через интернет, только если
 runtime отсутствует на компьютере. Отдельного копирования соседней папки после установки больше нет.
 `/S` поддерживает тихую установку самого инструмента; операции с автомобилем доступны в GUI.
@@ -342,8 +346,9 @@ shasum -a 256 Releases/cache/linuxdeploy-x86_64-new.AppImage.download
 `node Installer/scripts/generate-icons.mjs`. Во время обычной сборки используются
 уже сохранённые PNG/ICO/ICNS и Android-ресурсы.
 
-Версия движка задаётся в Installer/Cargo.toml. Версия самого устанавливаемого
-нативного пакета берётся из Cargo, автомобильного релиза — из payload.
+Версии задаются в корневом `versions.json`: `installer` для движка/GUI,
+`voyahtune` для stable payload. Cargo/Tauri синхронизируются с выбранной версией
+Installer; номер автомобильного релиза записывается в payload.
 Готовые binaries, validators, tooling.json в Packaging больше не используются.
 Публикуемые файлы — только результаты из Releases/dist.
 
