@@ -7,12 +7,20 @@ type attemptRecord struct {
 	Identity      processIdentity `json:"identity"`
 	ScriptHash    string          `json:"scriptHash"`
 	State         string          `json:"state"`
+	LastError     string          `json:"lastError,omitempty"`
 	Attempts      int             `json:"attempts"`
 	NextAttempt   int64           `json:"nextAttempt"`
 	LastAttach    int64           `json:"lastAttach"`
 	RapidRestarts int             `json:"rapidRestarts"`
 	Blocked       bool            `json:"blocked"`
 	Injector      processIdentity `json:"injector"`
+}
+
+func (record attemptRecord) failureReason() string {
+	if record.LastError != "" {
+		return record.LastError
+	}
+	return "attempt budget consumed or backoff pending"
 }
 
 func observeTarget(previous attemptRecord, boot string, identity processIdentity, hash string, now int64, crashLimit int) attemptRecord {

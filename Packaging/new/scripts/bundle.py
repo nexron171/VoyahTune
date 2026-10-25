@@ -32,12 +32,14 @@ def bundle(destination):
     (destination / 'stop-loader.sh').chmod(0o755)
     for path in (ROOT / 'config').glob('voyahtune_*.json'):
         shutil.copyfile(path, destination / path.name)
-    tool = json.loads((ROOT / 'config/frida.json').read_text())
-    source = REPOSITORY_ROOT / tool['source']
-    if digest(source) != tool['sha256']:
-        raise ValueError('Frida source hash differs from the reviewed tool')
-    shutil.copyfile(source, destination / 'frida-inject')
-    (destination / 'frida-inject').chmod(0o755)
+    tools = json.loads((ROOT / 'config/frida.json').read_text())['injectors']
+    for tool in tools:
+        source = REPOSITORY_ROOT / tool['source']
+        if digest(source) != tool['sha256']:
+            raise ValueError('Frida source hash differs from the reviewed tool: ' + tool['name'])
+        target = destination / tool['name']
+        shutil.copyfile(source, target)
+        target.chmod(0o755)
     for agent in manifest['agents']:
         if agent['script'] not in bundles:
             raise ValueError('Unknown agent bundle: ' + agent['script'])

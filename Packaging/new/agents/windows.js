@@ -115,8 +115,8 @@ Java.perform(function () {
         if (context === null || context.getPackageManager() === null) {
             throw new Error("system context/PackageManager pending");
         }
-        // Keep Frida's working loader. On the OEM ROM the
-        // main thread's context loader can point at "." and cannot resolve services.jar classes.
+        // Early system_server injection may inherit a loader without services.jar.
+        VoyahWindowAdapters.selectClassLoader();
         ourUid = context.getPackageManager().getPackageUid(OUR_PKG, 0);
         if (!(ourUid >= 0)) throw new Error("Native UID unavailable");
         var methods = [

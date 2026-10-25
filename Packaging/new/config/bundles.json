@@ -43,6 +43,7 @@
   },
   "windows.js": {
     "sources": [
+      "adapters/windows/system-services.js",
       "agents/windows.js"
     ],
     "ready": [

@@ -1,4 +1,15 @@
 {
-  "source": "Packaging/od/tools/frida-inject-16.2.1-android-arm64",
-  "sha256": "1c9d04257b9b44fe082f596bf7b20dc969571f6f7e818c80000522bf44e0d2f2"
+  "injectors": [
+    {
+      "name": "frida-inject",
+      "source": "Packaging/od/tools/frida-inject-16.2.1-android-arm64",
+      "sha256": "1c9d04257b9b44fe082f596bf7b20dc969571f6f7e818c80000522bf44e0d2f2"
+    },
+    {
+      "name": "frida-inject-arm",
+      "source": "Packaging/new/tools/frida-inject-16.2.1-android-arm",
+      "sha256": "e4803562cf76a68f1ce796fe4708821d2e139cc1c401f7036d0eac249213bfbc",
+      "downloadUrl": "https://github.com/frida/frida/releases/download/16.2.1/frida-inject-16.2.1-android-arm.xz"
+    }
+  ]
 }

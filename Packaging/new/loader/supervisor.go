@@ -278,7 +278,7 @@ func (manager *supervisor) cycle(ctx context.Context, agent agentConfig, hash st
 		}
 	}
 	if !record.canAttempt(now, agent.MaxAttempts) {
-		manager.report(agent, identity, "failed", "attempt budget consumed or backoff pending")
+		manager.report(agent, identity, "failed", record.failureReason())
 		return
 	}
 	// Frida updates a shared SELinux policy during attach, even for different targets.
@@ -295,6 +295,7 @@ func (manager *supervisor) cycle(ctx context.Context, agent agentConfig, hash st
 		return
 	}
 	record.State = "injecting"
+	record.LastError = ""
 	record.Attempts++
 	record.LastAttach = now
 	record.NextAttempt = now + retryDelay(record.Attempts)
@@ -321,8 +322,10 @@ func (manager *supervisor) cycle(ctx context.Context, agent agentConfig, hash st
 	record.Injector = processIdentity{}
 	if err != nil {
 		record.State = "failed"
+		record.LastError = err.Error()
 	} else {
 		record.State = "active"
+		record.LastError = ""
 	}
 	if completed, clockError := uptimeSeconds(manager.procRoot); clockError == nil {
 		record.NextAttempt = completed + retryDelay(record.Attempts)

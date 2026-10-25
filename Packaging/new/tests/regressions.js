@@ -9,6 +9,7 @@ const solutionRoot = path.resolve(__dirname, "..");
 const packagingRoot = path.dirname(solutionRoot);
 const fixtureDirectory = path.join(packagingRoot, "tests");
 const adapters = fs.readFileSync(path.join(solutionRoot, "runtime/adapters.js"), "utf8");
+const windowAdapters = fs.readFileSync(path.join(solutionRoot, "adapters/windows/system-services.js"), "utf8");
 const fixtures = [
     "test_power_hold_bridge.js", "test_dock_navigation_actions.js", "test_carplay_dock.js",
     "test_od_carplay_chrome.js", "test_rds_restore.js", "test_od_carplay_statusbar.js",
@@ -34,7 +35,7 @@ for (const fixture of fixtures) {
         if (!mappings[relative]) throw new Error("Unmapped production read: " + filename);
         reads.add(relative);
         const source = fs.readFileSync(path.join(solutionRoot, mappings[relative]), ...args);
-        return relative.endsWith("vd_bypass.js") ? adapters + "\n" + source : source;
+        return relative.endsWith("vd_bypass.js") ? adapters + "\n" + windowAdapters + "\n" + source : source;
     };
     function evaluate(filename) {
         let source = fs.readFileSync(filename, "utf8");

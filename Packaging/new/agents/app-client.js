@@ -1439,6 +1439,18 @@ function createNavigationSourcePolicy() {
     };
 }
 
+function createYandexGuidanceListenerAdapter(listenerMethods) {
+    var listener = Java.use("com.yandex.navikit.guidance.GuidanceListener");
+    var methods = Object.assign({}, listenerMethods);
+    ["onJamForecastUpdated", "onGuidanceResumedChanged"].forEach(function (name) {
+        if (!listener[name]) return;
+        listener[name].overload();
+        // These notifications do not establish a fresh route position.
+        methods[name] = function () { };
+    });
+    return { type: listener, methods: methods };
+}
+
 function installNavigationSource(application) {
     try {
         var packageName = String(application.getPackageName());
@@ -1534,10 +1546,11 @@ function installNavigationSource(application) {
                 finished = true;
                 queue(null);
             };
+            var listenerAdapter = createYandexGuidanceListenerAdapter(listenerMethods);
             var Listener = Java.registerClass({
                 name: "ru.big.town.navigation.YandexGuidanceListener",
-                implements: [Java.use("com.yandex.navikit.guidance.GuidanceListener")],
-                methods: listenerMethods
+                implements: [listenerAdapter.type],
+                methods: listenerAdapter.methods
             });
             var getter = Guidance.getNextManeuver.overload();
             var routeGetter = Guidance.route.overload();

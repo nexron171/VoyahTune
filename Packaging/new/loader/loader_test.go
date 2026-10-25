@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -167,6 +168,7 @@ func TestApolloFlagAndDynamicClientIsolation(t *testing.T) {
 func TestConfigRejectsUnsafeAndUnboundedRuntime(t *testing.T) {
 	directory := t.TempDir()
 	testFile(t, filepath.Join(directory, "frida-inject"), "executable", 0755)
+	testFile(t, filepath.Join(directory, "frida-inject-arm"), "executable", 0755)
 	testFile(t, filepath.Join(directory, "agent.js"), "Java.perform(function(){});", 0644)
 	agent := agentConfig{ID: "acc", Target: "com.qinggan.canbus.service", Script: "agent.js", Ready: []string{"ready"}, Lifetime: "eternalized", Priority: true, MaxAttempts: 1, TimeoutSeconds: 30}
 	config := loaderConfig{Schema: 1, PrioritySeconds: 45, Agents: []agentConfig{agent}}
@@ -235,8 +237,9 @@ func TestInjectorReadinessExitAndChangedTarget(t *testing.T) {
 			directory := t.TempDir()
 			testFile(t, filepath.Join(directory, "frida-inject"), "#!/bin/sh\n"+scenario.body+"\n", 0755)
 			identity := processIdentity{42, "100"}
+			testTargetELF(t, directory, 42, 2, 183)
 			reads := 0
-			runner := injector{Directory: directory, StateDirectory: directory, ReadIdentity: func(_ string, pid int, name string) (processIdentity, error) {
+			runner := injector{Directory: directory, StateDirectory: directory, ProcRoot: directory, ReadIdentity: func(_ string, pid int, name string) (processIdentity, error) {
 				if name == "target" {
 					reads++
 					if scenario.changed && reads > 1 {
@@ -259,7 +262,8 @@ func TestInjectorReportsReadyBeforeWrapperExit(t *testing.T) {
 	directory := t.TempDir()
 	testFile(t, filepath.Join(directory, "frida-inject"), "#!/bin/sh\necho '[test] ready'\nexec sleep 0.4\n", 0755)
 	identity := processIdentity{42, "100"}
-	runner := injector{Directory: directory, StateDirectory: directory, ReadIdentity: func(_ string, pid int, _ string) (processIdentity, error) {
+	testTargetELF(t, directory, 42, 2, 183)
+	runner := injector{Directory: directory, StateDirectory: directory, ProcRoot: directory, ReadIdentity: func(_ string, pid int, _ string) (processIdentity, error) {
 		if pid == 42 {
 			return identity, nil
 		}
@@ -289,7 +293,8 @@ func TestInjectorTimeoutStopsDescendants(t *testing.T) {
 	testFile(t, child, fmt.Sprintf("#!/bin/sh\ntrap '' TERM\nwhile :; do printf . >> %q; sleep 0.05; done\n", pulse), 0755)
 	testFile(t, filepath.Join(directory, "frida-inject"), fmt.Sprintf("#!/bin/sh\n%q &\nwait\n", child), 0755)
 	identity := processIdentity{42, "100"}
-	runner := injector{Directory: directory, StateDirectory: directory, ReadIdentity: func(_ string, pid int, _ string) (processIdentity, error) {
+	testTargetELF(t, directory, 42, 2, 183)
+	runner := injector{Directory: directory, StateDirectory: directory, ProcRoot: directory, ReadIdentity: func(_ string, pid int, _ string) (processIdentity, error) {
 		if pid == 42 {
 			return identity, nil
 		}
@@ -346,5 +351,72 @@ func TestInheritedLockHelper(t *testing.T) {
 	if os.Getenv("VOYAH_LOCK_HELPER") == "1" {
 		time.Sleep(10 * time.Second)
 		os.Exit(0)
+	}
+}
+
+func testTargetELF(t *testing.T, root string, pid int, class byte, machine uint16) {
+	t.Helper()
+	header := make([]byte, 20)
+	copy(header, "\x7fELF")
+	header[4], header[5] = class, 1
+	binary.LittleEndian.PutUint16(header[18:20], machine)
+	testFile(t, filepath.Join(root, fmt.Sprint(pid), "exe"), string(header), 0755)
+}
+
+func TestInjectorChoosesTargetArchitectureAndRejectsUnknownELF(t *testing.T) {
+	for _, scenario := range []struct {
+		name     string
+		class    byte
+		machine  uint16
+		expected string
+	}{
+		{"arm32", 1, 40, "frida-inject-arm"},
+		{"arm64", 2, 183, "frida-inject"},
+		{"x86", 1, 3, ""},
+		{"x64", 2, 62, ""},
+		{"inconsistent", 2, 40, ""},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			directory := t.TempDir()
+			testTargetELF(t, directory, 42, scenario.class, scenario.machine)
+			actual, err := injectorExecutable(directory, directory, 42)
+			if scenario.expected == "" {
+				if err == nil {
+					t.Fatal("unsupported architecture accepted")
+				}
+			} else if err != nil || actual != filepath.Join(directory, scenario.expected) {
+				t.Fatal(actual, err)
+			}
+		})
+	}
+	directory := t.TempDir()
+	if _, err := injectorExecutable(directory, directory, 42); err == nil {
+		t.Fatal("missing executable accepted")
+	}
+	testFile(t, filepath.Join(directory, "42/exe"), "short", 0755)
+	if _, err := injectorExecutable(directory, directory, 42); err == nil {
+		t.Fatal("truncated ELF accepted")
+	}
+}
+
+func TestFailedAttemptRetainsCauseAcrossSupervisorRestart(t *testing.T) {
+	record := attemptRecord{
+		Boot: "boot", Identity: processIdentity{42, "100"}, State: "failed",
+		Attempts: 1, LastError: "agent readiness timeout",
+	}
+	encoded, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored attemptRecord
+	if err := json.Unmarshal(encoded, &restored); err != nil {
+		t.Fatal(err)
+	}
+	if restored.canAttempt(100, 1) || restored.failureReason() != record.LastError {
+		t.Fatal("lost failure cause after supervisor restart", restored)
+	}
+	next := observeTarget(restored, "boot", processIdentity{43, "101"}, "hash", 200, 2)
+	if next.LastError != "" {
+		t.Fatal("new target inherited a stale error")
 	}
 }

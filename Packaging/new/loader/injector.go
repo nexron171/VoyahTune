@@ -98,9 +98,12 @@ func (runner injector) run(ctx context.Context, agent agentConfig, identity proc
 	output := &injectionOutput{file: file}
 	childContext, cancel := context.WithCancel(ctx)
 	defer cancel()
-	executable := filepath.Join(runner.Directory, "frida-inject")
+	executable, err := injectorExecutable(runner.Directory, runner.ProcRoot, identity.PID)
+	if err != nil {
+		return err
+	}
 	arguments := injectorArguments(agent, identity, runner.Directory)
-	processName := "frida-inject"
+	processName := filepath.Base(executable)
 	command := exec.CommandContext(childContext, executable, arguments...)
 	command.Stdout, command.Stderr = output, output
 	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}

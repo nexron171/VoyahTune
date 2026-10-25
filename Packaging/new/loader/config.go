@@ -94,9 +94,11 @@ func loadConfig(runtimeDirectory string) (loaderConfig, error) {
 	if priorityCount != 1 {
 		return config, errors.New("exactly one ACC priority agent is required")
 	}
-	info, err := os.Stat(filepath.Join(runtimeDirectory, "frida-inject"))
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
-		return config, errors.New("missing executable frida-inject")
+	for _, name := range []string{"frida-inject", "frida-inject-arm"} {
+		info, err := os.Stat(filepath.Join(runtimeDirectory, name))
+		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
+			return config, fmt.Errorf("missing executable %s", name)
+		}
 	}
 	return config, nil
 }
