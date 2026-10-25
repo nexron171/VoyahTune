@@ -41,7 +41,12 @@ internal class BydHudRouteState(
     private val keepAcrossNoRoute: Boolean = false,
     private val noRouteHideNs: Long = NO_ROUTE_HIDE_NS,
 ) {
-    private data class Maneuver(val type: Int, val drivingSide: Int, val afterRoad: String)
+    private data class Maneuver(
+        val type: Int,
+        val drivingSide: Int,
+        val afterRoad: String,
+        val instruction: String,
+    )
 
     private val maneuvers = mutableMapOf<Int, Maneuver>()
     private var routeActive = false
@@ -124,8 +129,9 @@ internal class BydHudRouteState(
         return maneuvers[activeIndex]
     }
 
-    // The road the driver turns onto is what the next instruction is about; fall back to the current one.
-    private fun roadFor(maneuver: Maneuver): String = maneuver.afterRoad.ifEmpty { currentRoad }
+    // Some apps provide the next road only as instruction text; prefer it to the current road.
+    private fun roadFor(maneuver: Maneuver): String =
+        maneuver.afterRoad.ifEmpty { maneuver.instruction }.ifEmpty { currentRoad }
 
     private fun parseRouteUpdate(data: ByteArray): BydHudRouteChange {
         // A teardown NoRouteSet is not fresh guidance. Do not let repeated teardown frames
@@ -192,15 +198,19 @@ internal class BydHudRouteState(
         var type: Int? = null
         var drivingSide = 0
         var afterRoad = ""
+        var instruction = ""
         forEachTlv(data) { id, value, valueLength ->
             when {
                 id == 0x01 && valueLength >= 2 -> index = u16(data, value)
+                id == 0x02 -> instruction = utf8(data, value, valueLength)
                 id == 0x03 && valueLength >= 1 -> type = data[value].toInt() and 0xff
                 id == 0x04 -> afterRoad = utf8(data, value, valueLength)
                 id == 0x08 && valueLength >= 1 -> drivingSide = data[value].toInt() and 0xff
             }
         }
-        if (index != null && type != null) maneuvers[index!!] = Maneuver(type!!, drivingSide, afterRoad)
+        if (index != null && type != null) {
+            maneuvers[index!!] = Maneuver(type!!, drivingSide, afterRoad, instruction)
+        }
         return if (current() != null) BydHudRouteChange.GUIDANCE else BydHudRouteChange.NONE
     }
 

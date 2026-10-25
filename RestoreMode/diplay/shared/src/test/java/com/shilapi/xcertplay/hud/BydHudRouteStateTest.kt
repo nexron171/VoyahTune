@@ -119,7 +119,6 @@ class BydHudRouteStateTest {
         assertEquals(before, state.current())
     }
 
-
     @Test
     fun `carries after-maneuver road and arrival time`() {
         val state = BydHudRouteState()
@@ -173,6 +172,62 @@ class BydHudRouteStateTest {
     }
 
     @Test
+    fun `navigator instruction supplies the missing next road`() {
+        val state = BydHudRouteState()
+        state.accept(
+            BydHudRouteState.ROUTE_GUIDANCE_MANEUVER_UPDATE,
+            tlvs(
+                tlv(0x00, 0, 42),
+                tlv(0x01, 0, 0),
+                tlv(0x02, *utf8z("Проектируемый пр-д № 8208")),
+                tlv(0x03, 2),
+                tlv(0x05, 0, 0, 0, 60),
+                tlv(0x06, *utf8z("60")),
+                tlv(0x07, 2),
+            ),
+        )
+        state.accept(
+            BydHudRouteState.ROUTE_GUIDANCE_UPDATE,
+            tlvs(tlv(0x01, 1), tlv(0x0a, 0, 0, 0, 60), tlv(0x0d, 0, 0)),
+        )
+
+        assertEquals("Проектируемый пр-д № 8208", state.currentApple()!!.road)
+        assertEquals("Проектируемый пр-д № 8208", state.current()!!.road)
+        assertEquals(60, state.currentApple()!!.distanceMeters)
+        assertEquals(2, state.currentApple()!!.type)
+    }
+
+    @Test
+    fun `label prefers next road then instruction then current road`() {
+        val state = BydHudRouteState()
+        state.accept(
+            BydHudRouteState.ROUTE_GUIDANCE_UPDATE,
+            tlvs(tlv(0x01, 1), tlv(0x03, *utf8z("Текущая улица")), tlv(0x0d, 0, 0)),
+        )
+
+        fun update(instruction: String, nextRoad: String) {
+            state.accept(
+                BydHudRouteState.ROUTE_GUIDANCE_MANEUVER_UPDATE,
+                tlvs(
+                    tlv(0x01, 0, 0),
+                    tlv(0x02, *utf8z(instruction)),
+                    tlv(0x03, 2),
+                    tlv(0x04, *utf8z(nextRoad)),
+                ),
+            )
+        }
+
+        update("Поверните направо", "Следующая улица")
+        assertEquals("Следующая улица", state.currentApple()!!.road)
+        update("  Поверните направо  ", "")
+        assertEquals("Поверните направо", state.currentApple()!!.road)
+        update(" \t ", "")
+        assertEquals("Текущая улица", state.currentApple()!!.road)
+        state.clear()
+        assertNull(state.currentApple())
+    }
+
+    @Test
     fun `roundabout exit has blank arrow and exit icon`() {
         val state = BydHudRouteState()
         state.accept(BydHudRouteState.ROUTE_GUIDANCE_MANEUVER_UPDATE, tlvs(tlv(0x01, 0, 0), tlv(0x03, 29)))
@@ -208,15 +263,15 @@ class BydHudRouteStateTest {
         keepAcrossNoRoute: Boolean = false,
     ): BydHudRouteState =
         BydHudRouteState(nanoTime, keepAcrossNoRoute = keepAcrossNoRoute).also { state ->
-        state.accept(
-            BydHudRouteState.ROUTE_GUIDANCE_MANEUVER_UPDATE,
-            tlvs(tlv(0x01, 0, 1), tlv(0x03, 2), tlv(0x08, 0)),
-        )
-        state.accept(
-            BydHudRouteState.ROUTE_GUIDANCE_UPDATE,
-            tlvs(tlv(0x01, 1), tlv(0x0a, 0, 0, 0, 25), tlv(0x0d, 0, 1)),
-        )
-    }
+            state.accept(
+                BydHudRouteState.ROUTE_GUIDANCE_MANEUVER_UPDATE,
+                tlvs(tlv(0x01, 0, 1), tlv(0x03, 2), tlv(0x08, 0)),
+            )
+            state.accept(
+                BydHudRouteState.ROUTE_GUIDANCE_UPDATE,
+                tlvs(tlv(0x01, 1), tlv(0x0a, 0, 0, 0, 25), tlv(0x0d, 0, 1)),
+            )
+        }
 
     private fun tlv(type: Int, vararg value: Int): ByteArray = ByteArrayOutputStream().apply {
         val length = value.size + 4
