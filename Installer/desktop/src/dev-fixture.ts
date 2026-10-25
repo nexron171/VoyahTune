@@ -232,12 +232,57 @@ export async function command(
       steps: [
         { id: "preflight", title: "Повторная проверка автомобиля и файлов" },
         { id: "root", title: "Получение системного доступа" },
+        {
+          id: "updater-lock",
+          title: "Блокировка установки и сохранение OTA-логов",
+        },
+        ...(args.action !== "remove" && scenario === "canbus-conflict"
+          ? [{ id: "permission", title: "Проверка владельца CAN-разрешения" }]
+          : []),
+        { id: "system", title: "Подготовка системного раздела" },
         ...(args.action === "remove"
-          ? []
-          : [{ id: "permission", title: "Проверка владельца CAN-разрешения" }]),
-        { id: "files", title: "Установка компонентов" },
+          ? [
+              { id: "deactivate", title: "Отключение Apollo" },
+              { id: "dns", title: "Восстановление DNS" },
+              { id: "migration", title: "Миграция старого init.logcat.sh" },
+              { id: "runtime", title: "Остановка и удаление boot-hook" },
+              { id: "files", title: "Удаление hooks и временных файлов" },
+              { id: "packages", title: "Удаление приложений" },
+            ]
+          : [
+              ...(scenario === "canbus-conflict"
+                ? []
+                : [
+                    {
+                      id: "third-party-loaders",
+                      title: "Проверка и отключение сторонних решений",
+                    },
+                  ]),
+              { id: "backup", title: "Сохранение файлов перед заменой" },
+              { id: "signing-reset", title: "Переустановка при смене подписи" },
+              { id: "runtime", title: "Остановка старых hooks" },
+              {
+                id: "apollo-migration",
+                title: "Отключение старой активации Apollo",
+              },
+              { id: "files", title: "Установка файлов релиза" },
+              { id: "migration", title: "Миграция старого init.logcat.sh" },
+              { id: "boot-hooks", title: "Установка boot-hook" },
+              { id: "native", title: "Установка Native и разрешений" },
+              { id: "dns", title: "Настройка DNS" },
+              {
+                id: "updater-bootstrap",
+                title: "Подготовка первого запуска OTA",
+              },
+              {
+                id: "packages",
+                title: "Установка RestoreMode перед перезагрузкой",
+              },
+            ]),
         { id: "reboot", title: "Перезагрузка автомобиля" },
-        { id: "verify", title: "Проверка результата" },
+        ...(args.action === "remove"
+          ? [{ id: "settings", title: "Очистка настроек после перезагрузки" }]
+          : [{ id: "verify", title: "Проверка результата" }]),
       ],
     } satisfies Plan;
   if (name === "operation_events") return journal;
