@@ -627,7 +627,7 @@ function installClusterNavigation() {
         var distanceUnit = GuidanceFormat.toDistanceUnit.overload("android.content.Context", "int");
         // The OEM formatter owns both the UTF-8 string and its packet length.
         distanceUnit.implementation = function (context, distanceMeters) {
-            return distanceMeters < 1000 ? "m" : "km";
+            return distanceMeters < 1000 ? "м" : "км";
         };
         unitsReady = true;
         console.log("[cluster-units] hook ready v1");
