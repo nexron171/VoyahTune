@@ -1438,6 +1438,18 @@ Native как системный APK объявляет `forceQueryable`, что
 Старый controller не очищает состояние нового владельца. No route/end очищает сразу,
 штатная route-state устаревает через **30 секунд** без обновлений. Snapshot заменяет
 NUL пробелом, ограничивает дорогу 120 символами, расстояние неотрицательное в метрах.
+Подпись манёвра выбирается в порядке: дорога после поворота (`0x5202/0x04`),
+текст инструкции (`0x5202/0x02`), текущая дорога (`0x5201/0x03`). Строки декодируются
+как UTF-8 до NUL и обрезаются по краям; пустые значения пропускаются. Инструкция
+относится к предстоящему манёвру, поэтому приоритетнее текущей дороги; она может
+содержать целую фразу, а не только название улицы. На живом пакете Яндекс Навигатора
+25 октября 2026 название было только в `0x02`, без `0x04` и текущей дороги.
+`BydHudRouteStateTest` проверяет этот набор полей, приоритеты и пустые строки;
+`VoyahNavigationTest` проверяет следующий слой передачи. Изменение не требует VSP.
+Проверено на ГУ 25 октября 2026 после установки RestoreMode 4.4.0
+(`db49c518eac4-dirty`): живой `VoyahNavigation.snapshot` содержит
+«Проектируемый пр-д № 8208», поворот направо и 60 м; VSP отключён самой сборкой,
+изображение CarPlay работает. Вывод строки на физической приборке отдельно не проверен.
 
 Таблица `VoyahManeuverCodes` (тип Apple → OEM icon):
 
@@ -1854,6 +1866,7 @@ Kotlin/Java/JNI-файлы baseline импортированы.
 | [shared/src/main/java/com/shilapi/xcertplay/VoyahPlatformPolicy.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/VoyahPlatformPolicy.kt) | Ограничения BYD/ADB/standaloneAppEnabled false. |
 | [shared/src/main/java/com/shilapi/xcertplay/transport/VoyahVehicleSpeedSource.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/transport/VoyahVehicleSpeedSource.kt) | Буфер/единицы/передачи/возраст данных. |
 | [shared/src/main/java/com/shilapi/xcertplay/hud/VoyahNavigation.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/hud/VoyahNavigation.kt) | Независимый route owner, таблица иконок, snapshot. |
+| [shared/src/main/java/com/shilapi/xcertplay/hud/BydHudRouteState.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/hud/BydHudRouteState.kt) | Подпись манёвра: after-road → instruction → current-road; UTF-8/NUL, без привязки к приложению (§6). |
 | [shared/src/main/java/com/shilapi/xcertplay/media/VoyahAudioRouting.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/media/VoyahAudioRouting.kt) | OEM streams и критерий accepted. |
 | [shared/src/main/java/com/shilapi/xcertplay/media/NavigationAudioFocus.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/media/NavigationAudioFocus.kt) | Lease ненулевого PCM: фокус до drain и 500ms, освобождение между подсказками (§9). |
 
