@@ -3,6 +3,7 @@
   import CatalogSettings from "./CatalogSettings.svelte";
   import ReadinessStatus from "./ReadinessStatus.svelte";
   import { compareReleaseVersionsNewestFirst } from "./release-version";
+  import { getOperationProgress } from "./installation-progress";
   import {
     command,
     beginInstallationSession,
@@ -83,10 +84,24 @@
   );
   const voyahTweaksChoice = $derived(
     action === "install" &&
-      ["VOYAHTWEAKS_DETECTED", "VOYAHTWEAKS_ROLLBACK_REQUIRED"].includes(error?.code || ""),
+      ["VOYAHTWEAKS_DETECTED", "VOYAHTWEAKS_ROLLBACK_REQUIRED"].includes(
+        error?.code || "",
+      ),
   );
   let completed = $state<string[]>([]),
     current = $state<string | undefined>();
+  const operationProgress = $derived(
+    getOperationProgress(
+      plan?.steps ?? [],
+      plan?.request.action ?? "install",
+      completed,
+      current,
+    ),
+  );
+  const currentStage = $derived(
+    operationProgress.stages.find((stage) => stage.active) ??
+      operationProgress.stages.find((stage) => !stage.completed),
+  );
   let canbusNotice = $state(""),
     canbusAnswerPending = $state(false),
     stopMessage = $state("");
@@ -108,11 +123,8 @@
     const rows: ReleaseRow[] = releases.map((release) => ({
       version: release.version,
       release,
-      cached: cached.find(
-        (entry) =>
-          entry.path
-            .replaceAll("\\", "/")
-            .endsWith("/" + release.payload.sha256),
+      cached: cached.find((entry) =>
+        entry.path.replaceAll("\\", "/").endsWith("/" + release.payload.sha256),
       ),
     }));
     for (const entry of cached)
@@ -280,7 +292,9 @@
     if (event.type === "operation-failed") {
       canbusNotice = "";
       error = event.data.report?.error || failure(event.message);
-      if (["READINESS_FAILED", "NATIVE_DATA_INVALID"].includes(error?.code || ""))
+      if (
+        ["READINESS_FAILED", "NATIVE_DATA_INVALID"].includes(error?.code || "")
+      )
         verificationPending = false;
       else verificationPending ||= error?.code === "READINESS_UNCONFIRMED";
       outcome = "failed";
@@ -432,10 +446,12 @@
     downloadProgress = null;
     error = null;
     try {
-      selectInfo(await command("download_payload", {
-        version: row.version,
-        refresh,
-      }));
+      selectInfo(
+        await command("download_payload", {
+          version: row.version,
+          refresh,
+        }),
+      );
     } catch (e) {
       error = failure(e);
       await finishBlockedPreparation(error);
@@ -445,7 +461,7 @@
     }
   }
   async function deleteRelease(row: ReleaseRow) {
-    if (busy || (!row.release && !row.cached?.deletable)) return;
+    if (busy || !row.cached?.deletable) return;
     await recordChoice("cached-release-delete", { version: row.version });
     busy = true;
     error = null;
@@ -499,7 +515,11 @@
     installationSessionId = await beginInstallationSession();
   }
   async function finishBlockedPreparation(reason: Failure) {
-    await finishSession("error", { ...reason, displayTitle: reason.message, source: "gui" });
+    await finishSession("error", {
+      ...reason,
+      displayTitle: reason.message,
+      source: "gui",
+    });
   }
   async function finishSession(
     status: "success" | "error",
@@ -637,10 +657,13 @@
     try {
       await ensureInstallationSession();
       await recordChoice("voyahtweaks-disable-approved", { confirmed: true });
-      const result = await command<{ reportPath: string }>("disable_voyahtweaks", {
-        serial: devices[0].serial,
-        confirmed: true,
-      });
+      const result = await command<{ reportPath: string }>(
+        "disable_voyahtweaks",
+        {
+          serial: devices[0].serial,
+          confirmed: true,
+        },
+      );
       reportPath = result.reportPath;
       voyahTweaksReady = true;
       screen = 1;
@@ -818,7 +841,7 @@
     try {
       logUploadProgress = await uploadInstallationLogs(
         installationSessionId,
-        progress => (logUploadProgress = progress),
+        (progress) => (logUploadProgress = progress),
       );
       logUploadComplete = true;
     } catch (caught) {
@@ -877,14 +900,15 @@
       <button
         class="button secondary"
         disabled={logsFolderOpening}
-        onclick={openLogsFolder}
-      >Открыть папку с логами</button>
+        onclick={openLogsFolder}>Открыть папку с логами</button
+      >
       <button
         class="button secondary"
         disabled={logsUploading || !installationSessionId}
         onclick={uploadLogs}
         title="Выгрузить журнал текущей установки"
-      >{logsUploading ? "Выгружаем логи…" : "Выгрузить логи"}</button>
+        >{logsUploading ? "Выгружаем логи…" : "Выгрузить логи"}</button
+      >
     </div>
     {#if logsUploading || logUploadProgress}
       <div class="log-upload-progress" role="status" aria-live="polite">
@@ -904,8 +928,12 @@
         </p>
       </div>
     {/if}
-    {#if logUploadError}<p class="info-note" role="alert">{logUploadError}</p>{/if}
-    {#if logsFolderError}<p class="info-note" role="alert">{logsFolderError}</p>{/if}
+    {#if logUploadError}<p class="info-note" role="alert">
+        {logUploadError}
+      </p>{/if}
+    {#if logsFolderError}<p class="info-note" role="alert">
+        {logsFolderError}
+      </p>{/if}
   </div>
 {/snippet}
 
@@ -1054,20 +1082,21 @@
                                 ? "Загрузка…"
                                 : "Выбрать"}</button
                             >{#if row.release}<button
-                              class="button secondary"
-                              disabled={busy}
-                              onclick={() => selectRelease(row, true)}
-                              >Скачать заново</button
-                            >{/if}<button
-                              class="button delete-cache"
-                              aria-label={`Удалить скачанный релиз ${row.version}`}
-                              title={row.release || row.cached?.deletable
-                                ? "Удалить релиз с компьютера"
-                                : "Нет скачанного релиза для удаления"}
-                              disabled={busy || (!row.release && !row.cached?.deletable)}
-                              onclick={() => deleteRelease(row)}
-                              >Удалить</button
-                            >
+                                class="button secondary"
+                                disabled={busy}
+                                onclick={() => selectRelease(row, true)}
+                                >Скачать заново</button
+                              >{/if}
+                            {#if row.cached?.deletable}
+                              <button
+                                class="button delete-cache"
+                                aria-label={`Удалить скачанный релиз ${row.version}`}
+                                title="Удалить релиз с компьютера"
+                                disabled={busy}
+                                onclick={() => deleteRelease(row)}
+                                >Удалить</button
+                              >
+                            {/if}
                           </div></td
                         >
                       </tr>
@@ -1119,29 +1148,6 @@
               >
             </details>
           </section>
-          <fieldset class="mode-picker">
-            <legend>Операция</legend>
-            <div class="mode-selectors">
-              {#each operations as v}<label
-                  class="mode-selector"
-                  class:selected={action === v.id}
-                  class:danger={v.id === "remove"}
-                  ><input
-                    type="radio"
-                    name="action"
-                    value={v.id}
-                    checked={action === v.id}
-                    disabled={busy || sessionStarting}
-                    onchange={() => choose(v.id)}
-                  /><span
-                    ><strong>{v.name}</strong><small>{v.subtitle}</small></span
-                  ></label
-                >{/each}
-            </div>
-          </fieldset>
-          {#if action}<p class="mode-description">
-              {operations.find((v) => v.id === action)?.details}
-            </p>{/if}
         {:else if screen === 1}
           <div class="screen-heading">
             <span class="eyebrow">ПОДКЛЮЧЕНИЕ ПО USB</span>
@@ -1294,29 +1300,12 @@
                 </details>
               {/if}
               <ol class="plan-list">
-                {#each plan.steps as step}<li>{step.title}</li>{/each}
+                {#each operationProgress.stages as stage}<li>
+                    {stage.title}
+                  </li>{/each}
               </ol>
             </div>
           </section>
-          {#if action !== "remove"}<fieldset class="dns-box">
-              <legend>Яндекс DNS</legend>
-              <p>
-                Эта настройка позволяет иметь доступ к сервисам, которые
-                доступны в белых списках.
-              </p>
-              <div class="dns-options">
-                {#each [{ id: "keep", label: "Оставить как есть" }, { id: "on", label: "Включить" }, { id: "off", label: "Выключить" }] as item}<label
-                    ><input
-                      type="radio"
-                      name="dns"
-                      value={item.id}
-                      bind:group={dns}
-                      onchange={() =>
-                        recordChoice("dns-selected", { dns }, undefined, dns)}
-                    />{item.label}</label
-                  >{/each}
-              </div>
-            </fieldset>{/if}
           {#each plan.warnings as warning}<p class="info-note">
               ⓘ {warning}
             </p>{/each}
@@ -1354,14 +1343,11 @@
               >{action === "remove" ? "УДАЛЕНИЕ" : "УСТАНОВКА"} VOYAHTUNE</span
             >
             <h1>
-              {(current === "cunba-restore"
-                ? "Восстановление Cunba"
-                : plan.steps.find((s) => s.id === current)?.title) ||
-                "Повторная проверка"}
+              {currentStage?.title || "Завершение операции"}
             </h1>
             <p class="subtitle">
               Не отключайте кабель и питание автомобиля. Здесь будет показан
-              результат каждого шага.
+              результат каждого этапа.
             </p>
           </div>
           {#if current === "verify" && readinessStatus}
@@ -1391,22 +1377,38 @@
                 >
               </div>
             </section>{/if}
-          <div class="progress-track indeterminate">
-            <div class="progress-bar"></div>
+          <div
+            class="progress-track"
+            role="progressbar"
+            aria-label="Прогресс выполнения"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={operationProgress.percent}
+          >
+            <div
+              class="progress-bar"
+              style:width={`${operationProgress.percent}%`}
+            ></div>
           </div>
           <p class="progress-text">
-            Завершено {completed.length} из {plan.steps.length} шагов
+            Выполнено {operationProgress.percent}%
           </p>
+          {#if current}
+            <p class="current-operation" role="status">
+              Сейчас: {plan.steps.find((step) => step.id === current)?.title ||
+                current}
+            </p>
+          {/if}
           <ol class="step-list">
-            {#each plan.steps as step, i}<li
+            {#each operationProgress.stages as stage, index}<li
                 class="step-row"
-                class:done={completed.includes(step.id)}
-                class:active={current === step.id &&
-                  !completed.includes(step.id)}
+                class:done={stage.completed}
+                class:active={stage.active}
+                aria-current={stage.active ? "step" : undefined}
               >
                 <span class="step-indicator"
-                  >{completed.includes(step.id) ? "✓" : i + 1}</span
-                ><span>{step.title}</span>
+                  >{stage.completed ? "✓" : index + 1}</span
+                ><span>{stage.title}</span>
               </li>{/each}
           </ol>
           {#if events
@@ -1585,13 +1587,13 @@
             {:else}
               <p>
                 Можно остановить установку или отключить поддерживаемые
-                компоненты VoyahTweaks. Его функции станут недоступны. Исходные файлы и
-                настройки будут сохранены.
+                компоненты VoyahTweaks. Его функции станут недоступны. Исходные
+                файлы и настройки будут сохранены.
               </p>
               <p>
-                ГУ перезагрузится. Если VoyahTweaks останется активным, изменения
-                будут восстановлены, а установка заблокирована. Неизвестные
-                компоненты автоматически не изменяются.
+                ГУ перезагрузится. Если VoyahTweaks останется активным,
+                изменения будут восстановлены, а установка заблокирована.
+                Неизвестные компоненты автоматически не изменяются.
               </p>
               <label
                 ><input
@@ -1607,7 +1609,8 @@
               <button
                 class="button secondary"
                 disabled={busy || sessionStarting}
-                onclick={stopVoyahTweaksInstallation}>Остановить установку</button
+                onclick={stopVoyahTweaksInstallation}
+                >Остановить установку</button
               >
               <button
                 class="button primary"
@@ -1637,91 +1640,163 @@
             </details>
           </section>{/if}
         {#if reportPath}<p class="report-path">Отчёт: {reportPath}</p>{/if}
-        {@render logActions()}
       </div>
       <footer class="footer">
-        {#if cunbaRunning || cunbaReady || cunbaChoice}<span class="footer-note"
-            >{cunbaRunning
-              ? "Дождитесь завершения операции"
-              : "Выберите действие в разделе Cunba"}</span
-          >
-        {:else if screen === 0}<span
-            class="footer-note next-reason"
-            id="next-reason"
-            role="status"
-            >{nextBlocked ||
-              "На следующем шаге проверим подключение автомобиля"}</span
-          ><button
-            class="button primary"
-            disabled={!!nextBlocked}
-            aria-describedby="next-reason"
-            onclick={next}>Далее</button
-          >
-        {:else if screen === 1}<button
-            class="button secondary"
-            disabled={busy || sessionStarting}
-            onclick={() => {
-              screen = 0;
-              error = null;
-            }}>Назад</button
-          ><button
-            class="button primary"
-            disabled={busy || !connected || !confirmed}
-            onclick={() => review()}
-            >{busy ? "Проверяем…" : "Проверить автомобиль"}</button
-          >
-        {:else if screen === 2}<button
-            class="button secondary"
-            onclick={() => {
-              screen = 1;
-              confirmed = false;
-            }}>Назад</button
-          ><button
-            class="button"
-            class:primary={action !== "remove"}
-            class:danger={action === "remove"}
-            disabled={busy ||
-              sessionStarting ||
-              !eventsReady ||
-              (action === "remove" && !removeConfirmed)}
-            onclick={() => start()}
-            >{action === "remove"
-              ? "Удалить VoyahTune"
-              : "Начать установку"}</button
-          >
-        {:else if screen === 3}<button
-            class="button secondary"
-            onclick={() => (logOpen = true)}>Журнал</button
-          ><button
-            class="button secondary"
-            disabled={stopRequested}
-            onclick={stop}>Остановить после текущего шага</button
-          >
-        {:else}<div class="footer-actions">
-            <button class="button secondary" onclick={() => (logOpen = true)}
-              >Журнал</button
-            ><button class="button secondary" onclick={saveReport}
-              >Сохранить отчёт</button
+        {#if screen === 0}
+          <div class="operation-controls">
+            <fieldset class="mode-picker">
+              <legend>Операция</legend>
+              <div class="mode-selectors">
+                {#each operations as operation}
+                  <label
+                    class="mode-selector"
+                    class:selected={action === operation.id}
+                    class:danger={operation.id === "remove"}
+                  >
+                    <input
+                      type="radio"
+                      name="action"
+                      value={operation.id}
+                      checked={action === operation.id}
+                      disabled={busy || sessionStarting}
+                      onchange={() => choose(operation.id)}
+                    />
+                    <span>
+                      <strong>{operation.name}</strong>
+                      <small>{operation.subtitle}</small>
+                    </span>
+                  </label>
+                {/each}
+              </div>
+            </fieldset>
+            {#if action}
+              <p class="mode-description">
+                {operations.find((operation) => operation.id === action)
+                  ?.details}
+              </p>
+            {/if}
+            <span class="footer-note next-reason" id="next-reason" role="status"
+              >{nextBlocked ||
+                "На следующем шаге проверим подключение автомобиля"}</span
             >
           </div>
-          <button
-            class="button primary"
-            disabled={sessionStarting}
-            onclick={["success", "warning"].includes(outcome)
-              ? () => {
+        {/if}
+        {#if screen === 2 && plan && action !== "remove"}
+          <fieldset class="dns-box" disabled={busy || sessionStarting}>
+            <legend>Яндекс DNS</legend>
+            <p>
+              Эта настройка позволяет иметь доступ к сервисам, которые доступны
+              в белых списках.
+            </p>
+            <div class="dns-options">
+              {#each [{ id: "keep", label: "Оставить как есть" }, { id: "on", label: "Включить" }, { id: "off", label: "Выключить" }] as option}
+                <label>
+                  <input
+                    type="radio"
+                    name="dns"
+                    value={option.id}
+                    bind:group={dns}
+                    onchange={() =>
+                      recordChoice("dns-selected", { dns }, undefined, dns)}
+                  />
+                  {option.label}
+                </label>
+              {/each}
+            </div>
+          </fieldset>
+        {/if}
+        <div class="footer-toolbar">
+          {@render logActions()}
+          <div class="navigation-actions">
+            {#if cunbaRunning || cunbaReady || cunbaChoice}
+              <span class="footer-note">
+                {cunbaRunning
+                  ? "Дождитесь завершения операции"
+                  : "Выберите действие в разделе Cunba"}
+              </span>
+            {:else if screen === 0}
+              <button
+                class="button primary"
+                disabled={!!nextBlocked}
+                aria-describedby="next-reason"
+                onclick={next}>Далее</button
+              >
+            {:else if screen === 1}
+              <button
+                class="button secondary"
+                disabled={busy || sessionStarting}
+                onclick={() => {
                   screen = 0;
-                  action = null;
                   error = null;
-                }
-              : retry}
-            >{outcome === "warning"
-              ? "Завершить"
-              : outcome === "success"
-                ? "В начало"
-                : verificationPending
-                  ? "Повторить проверку"
-                  : "Проверить заново"}</button
-          >{/if}
+                }}>Назад</button
+              >
+              <button
+                class="button primary"
+                disabled={busy || !connected || !confirmed}
+                onclick={() => review()}
+                >{busy ? "Проверяем…" : "Проверить автомобиль"}</button
+              >
+            {:else if screen === 2}
+              <button
+                class="button secondary"
+                onclick={() => {
+                  screen = 1;
+                  confirmed = false;
+                }}>Назад</button
+              >
+              <button
+                class="button"
+                class:primary={action !== "remove"}
+                class:danger={action === "remove"}
+                disabled={busy ||
+                  sessionStarting ||
+                  !eventsReady ||
+                  (action === "remove" && !removeConfirmed)}
+                onclick={() => start()}
+                >{action === "remove"
+                  ? "Удалить VoyahTune"
+                  : "Начать установку"}</button
+              >
+            {:else if screen === 3}
+              <button class="button secondary" onclick={() => (logOpen = true)}
+                >Журнал</button
+              >
+              <button
+                class="button secondary"
+                disabled={stopRequested}
+                onclick={stop}>Остановить после текущего шага</button
+              >
+            {:else}
+              <div class="footer-actions">
+                <button
+                  class="button secondary"
+                  onclick={() => (logOpen = true)}>Журнал</button
+                >
+                <button class="button secondary" onclick={saveReport}
+                  >Сохранить отчёт</button
+                >
+              </div>
+              <button
+                class="button primary"
+                disabled={sessionStarting}
+                onclick={["success", "warning"].includes(outcome)
+                  ? () => {
+                      screen = 0;
+                      action = null;
+                      error = null;
+                    }
+                  : retry}
+                >{outcome === "warning"
+                  ? "Завершить"
+                  : outcome === "success"
+                    ? "В начало"
+                    : verificationPending
+                      ? "Повторить проверку"
+                      : "Проверить заново"}</button
+              >
+            {/if}
+          </div>
+        </div>
       </footer>
     </main>
   </div>
@@ -1759,6 +1834,46 @@
   </dialog>{/if}
 
 <style>
+  .footer {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  .operation-controls .mode-picker {
+    margin: 0;
+  }
+  .operation-controls .mode-description {
+    margin-top: 10px;
+  }
+  .operation-controls .next-reason {
+    display: block;
+    margin-top: 10px;
+  }
+  .footer .dns-box {
+    margin: 0;
+    padding: 12px 16px;
+    min-width: 0;
+  }
+  .current-operation {
+    margin-top: 12px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .footer-toolbar {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px 18px;
+  }
+  .navigation-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-left: auto;
+  }
   .log-actions {
     min-width: 0;
   }

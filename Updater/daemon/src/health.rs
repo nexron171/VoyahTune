@@ -28,7 +28,8 @@ fn read_response(reader: &mut impl BufRead) -> io::Result<Value> {
         serde_json::from_str(&line).map_err(|error| invalid(&error.to_string()))?;
     if response["schema"] != 1
         || response["ok"] != true
-        || response["infrastructure"] != "od"
+        || response["infrastructure"]
+            != release_core::infrastructure::Infrastructure::compiled().as_str()
         || !response["pid"].as_u64().is_some_and(|pid| pid > 0)
     {
         return Err(invalid("OTA-служба не подтвердила готовность протокола"));
@@ -59,10 +60,10 @@ mod tests {
 
     #[test]
     fn health_requires_a_complete_live_response() {
-        assert!(read_response(&mut Cursor::new(
-            b"{\"schema\":1,\"ok\":true,\"infrastructure\":\"od\",\"pid\":5}\n"
-        ))
-        .is_ok());
+        let response = serde_json::json!({"schema":1,"ok":true,
+            "infrastructure":release_core::infrastructure::Infrastructure::compiled(),"pid":5});
+        assert!(read_response(&mut Cursor::new(format!("{response}\n"))).is_ok());
+        assert!(read_response(&mut Cursor::new(format!("{response}"))).is_err());
         for response in [
             "{}\n",
             "{\"ok\":false}\n",

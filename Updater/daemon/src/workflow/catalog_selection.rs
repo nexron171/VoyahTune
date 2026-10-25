@@ -9,12 +9,30 @@ pub(super) fn same_release_version(left: &str, right: &str) -> bool {
     matches!((parse(left), parse(right)), (Ok(left), Ok(right)) if left == right)
 }
 
+pub(super) fn is_newer_release_version(candidate: &str, installed: &str) -> bool {
+    let parse = release_core::infrastructure::release_version;
+    matches!(
+        (parse(candidate), parse(installed)),
+        (Ok(candidate), Ok(installed)) if candidate.cmp_precedence(&installed).is_gt()
+    )
+}
+
 pub(super) fn verify_selection(
     release: &Release,
     installed: &str,
     same_version: bool,
     infrastructure: Infrastructure,
 ) -> Result<ota::Claims> {
+    if infrastructure == Infrastructure::Unified {
+        if !infrastructure.matches_version(&release.version) {
+            return Err(release_core::Error::new(
+                "INFRASTRUCTURE_MISMATCH",
+                "Выберите общий релиз VoyahTune",
+            ));
+        }
+        crate::od_release::select(release, installed)?;
+        return ota::verify(release);
+    }
     if infrastructure == Infrastructure::Od {
         return crate::od_release::select(release, installed);
     }
@@ -31,12 +49,12 @@ pub(super) fn choose(
     mut on_rejected: impl FnMut(&release_core::Error),
 ) -> Result<Option<Release>> {
     for release in catalog.ota_releases().filter(|release| {
-        Infrastructure::from_version(&release.version).is_ok_and(|value| value == infrastructure)
-            && (infrastructure == Infrastructure::Od || release.channel == "stable")
+        infrastructure.matches_version(&release.version)
+            && (infrastructure.uses_restore_ui() || release.channel == "stable")
             && (!same_version || same_release_version(&release.version, installed))
     }) {
-        if infrastructure == Infrastructure::Od {
-            crate::od_release::select(release, installed)?;
+        if infrastructure.uses_restore_ui() {
+            verify_selection(release, installed, same_version, infrastructure)?;
             return Ok(Some(release.clone()));
         }
         let compatibility = ota::verify(release)
@@ -55,6 +73,74 @@ pub(super) fn choose(
 mod tests {
     use super::*;
     use release_core::catalog::UpdateCatalog;
+
+    #[test]
+    fn notification_requires_a_newer_release_number() {
+        for (candidate, installed, expected) in [
+            ("4.3.0", "4.4.0", false),
+            ("4.4.0", "4.4.0", false),
+            ("4.4.1", "4.4.0", true),
+            ("4.10.0", "4.9.0", true),
+            ("4.9.0", "4.10.0", false),
+            ("5.0.0", "4.9.9", true),
+        ] {
+            assert_eq!(
+                is_newer_release_version(candidate, installed),
+                expected,
+                "{installed} -> {candidate}"
+            );
+        }
+    }
+
+    #[test]
+    fn notification_ignores_infrastructure_suffixes_and_build_metadata() {
+        for (candidate, installed, expected) in [
+            ("4.4.0", "4.4.0-od", false),
+            ("4.4.0", "4.4.0-pi", false),
+            ("4.4.0-od", "4.4.0", false),
+            ("4.4.0+2", "4.4.0+1", false),
+            ("4.4.0+2", "4.4.0-od+1", false),
+            ("4.4.1", "4.4.0-od", true),
+            ("4.4.1-od", "4.4.0-od", true),
+        ] {
+            assert_eq!(
+                is_newer_release_version(candidate, installed),
+                expected,
+                "{installed} -> {candidate}"
+            );
+        }
+    }
+
+    #[test]
+    fn notification_respects_prerelease_precedence() {
+        for (candidate, installed, expected) in [
+            ("4.5.0-beta", "4.4.0", true),
+            ("4.4.0-beta", "4.4.0", false),
+            ("4.4.0", "4.4.0-beta", true),
+            ("4.4.0-beta.10", "4.4.0-beta.2", true),
+            ("4.4.0-beta.2", "4.4.0-beta.10", false),
+            ("4.4.0-beta", "4.4.0-beta-od", false),
+            ("4.4.0-od", "4.4.0-beta-od", true),
+        ] {
+            assert_eq!(
+                is_newer_release_version(candidate, installed),
+                expected,
+                "{installed} -> {candidate}"
+            );
+        }
+    }
+
+    #[test]
+    fn notification_requires_valid_release_versions() {
+        for (candidate, installed) in [
+            ("invalid", "4.4.0"),
+            ("4.5.0", "invalid"),
+            ("", "4.4.0"),
+            ("4.5.0", ""),
+        ] {
+            assert!(!is_newer_release_version(candidate, installed));
+        }
+    }
 
     fn catalog() -> Catalog {
         serde_json::from_value::<UpdateCatalog>(serde_json::json!({"releases": [
@@ -162,5 +248,69 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(selected.version, "4.1.0-pi");
+    }
+
+    #[test]
+    fn common_catalog_requires_usb_once_and_ignores_profiled_releases() {
+        let catalog = serde_json::from_value::<UpdateCatalog>(serde_json::json!({"releases": [
+            {"version":"4.5.0", "url":"https://example.org/common.zip", "size":1,
+                "sha256":"a".repeat(64), "minimumInstallerVersion":"1.8.1", "minimumOtaVersion":"4.4.0"},
+            {"version":"9.0.0-od", "url":"https://example.org/od.zip", "size":1,
+                "sha256":"b".repeat(64), "minimumInstallerVersion":"1.7.7", "minimumOtaVersion":"4.0.0"},
+            {"version":"9.0.0-pi", "url":"https://example.org/pi.zip", "size":1,
+                "sha256":"c".repeat(64)}
+        ]})).unwrap().resolve().unwrap();
+        for installed in ["4.3.0-od", "4.3.0-pi"] {
+            assert_eq!(
+                choose(&catalog, installed, false, Infrastructure::Unified, |_| {})
+                    .unwrap_err()
+                    .code,
+                "OTA_USB_REQUIRED"
+            );
+        }
+        for installed in ["4.4.0", "4.4.0-od", "4.4.0-pi"] {
+            let release = choose(&catalog, installed, false, Infrastructure::Unified, |_| {})
+                .unwrap()
+                .unwrap();
+            assert_eq!(release.version, "4.5.0");
+            assert_eq!(
+                verify_selection(&release, installed, false, Infrastructure::Unified)
+                    .unwrap()
+                    .archive_sha256,
+                "a".repeat(64)
+            );
+        }
+        assert_eq!(
+            verify_selection(
+                &catalog.releases[0],
+                "4.4.0",
+                false,
+                Infrastructure::Unified
+            )
+            .unwrap_err()
+            .code,
+            "INFRASTRUCTURE_MISMATCH"
+        );
+    }
+
+    #[test]
+    fn common_beta_can_be_reinstalled_and_rejects_corrupt_catalog_hash() {
+        let mut catalog = catalog();
+        catalog.releases[0].version = "4.5.0-beta".into();
+        catalog.releases[0].channel = "prerelease".into();
+        catalog.releases[0].minimum_ota_version = Some("4.4.0".into());
+        catalog.validate().unwrap();
+        let selected = choose(
+            &catalog,
+            "4.5.0-beta",
+            true,
+            Infrastructure::Unified,
+            |_| {},
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(selected.version, "4.5.0-beta");
+        catalog.releases[0].payload.sha256 = "invalid".into();
+        assert!(choose(&catalog, "4.4.0", false, Infrastructure::Unified, |_| {}).is_err());
     }
 }

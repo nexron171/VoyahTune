@@ -38,6 +38,103 @@ mod tests {
         recipe::{CopyFile, Phase},
     };
 
+    #[test]
+    fn runyn_signature_conflict_reinstalls_once_and_preserves_unrelated_errors() {
+        let conflict = Err("pm: exit status 1: Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE: signatures do not match]");
+        for (name, reset, replies, success) in [
+            ("normal", true, vec![Ok("Success")], true),
+            (
+                "signature",
+                true,
+                vec![conflict, Ok("Success"), Ok("Success")],
+                true,
+            ),
+            (
+                "signature-stdout",
+                true,
+                vec![
+                    Ok("Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE]"),
+                    Ok("Success"),
+                    Ok("Success"),
+                ],
+                true,
+            ),
+            ("other-package", false, vec![conflict], false),
+            (
+                "storage",
+                true,
+                vec![Err("INSTALL_FAILED_INSUFFICIENT_STORAGE")],
+                false,
+            ),
+            ("timeout", true, vec![Err("Таймаут /system/bin/pm")], false),
+            (
+                "invalid-apk",
+                true,
+                vec![Ok("Failure [INSTALL_FAILED_INVALID_APK]")],
+                false,
+            ),
+            (
+                "uninstall-failure",
+                true,
+                vec![conflict, Err("DELETE_FAILED_INTERNAL_ERROR")],
+                false,
+            ),
+            (
+                "uninstall-no-success",
+                true,
+                vec![conflict, Ok("Failure [DELETE_FAILED_INTERNAL_ERROR]")],
+                false,
+            ),
+            (
+                "retry-failure",
+                true,
+                vec![conflict, Ok("Success"), Err("INSTALL_FAILED_INVALID_APK")],
+                false,
+            ),
+            (
+                "repeat-signature",
+                true,
+                vec![conflict, Ok("Success"), conflict],
+                false,
+            ),
+        ] {
+            let expected_calls = replies.len();
+            let mut replies = std::collections::VecDeque::from(replies);
+            let mut commands = Vec::new();
+            let arguments = [
+                "install",
+                "-r",
+                "-d",
+                "--user",
+                "0",
+                "/data/local/tmp/RunYN bundle.apk",
+            ];
+            let result = install_apk_command(&arguments, reset, |arguments| {
+                commands.push(
+                    arguments
+                        .iter()
+                        .map(|value| value.to_string())
+                        .collect::<Vec<_>>(),
+                );
+                replies
+                    .pop_front()
+                    .expect("unexpected extra retry")
+                    .map(String::from)
+                    .map_err(invalid)
+            });
+            assert_eq!(result.is_ok(), success, "{name}: {result:?}");
+            assert_eq!(commands.len(), expected_calls, "{name}");
+            assert_eq!(commands[0], arguments);
+            if commands.len() > 1 {
+                assert_eq!(commands[1], ["uninstall", payload::RUNYN]);
+            }
+            if commands.len() > 2 {
+                assert_eq!(commands[2], arguments);
+            }
+            assert!(replies.is_empty(), "{name}");
+        }
+    }
+
     fn compatibility_fixture(root: &Path) -> Payload {
         let root = root.canonicalize().unwrap();
         let mut p = Payload {
@@ -274,6 +371,23 @@ fn package_path(package: &str) -> io::Result<String> {
     }
     Ok(paths[0].into())
 }
+fn package_model(payload: &Payload) -> io::Result<release_core::vehicle_model::VehicleModel> {
+    use release_core::vehicle_model::{VehicleModel, PROPERTIES_COMMAND};
+    if !payload
+        .manifest
+        .recipe
+        .packages
+        .iter()
+        .any(|package| package.condition.is_some())
+    {
+        return Ok(VehicleModel::Other);
+    }
+    let properties = command("/system/bin/sh", &["-c", PROPERTIES_COMMAND], 20)?;
+    if properties.trim().is_empty() {
+        return Err(invalid("Не удалось определить модель для установки RunYN"));
+    }
+    Ok(VehicleModel::detect(&properties))
+}
 fn check_active_apk(p: &Payload, artifact: &str, active: &Path) -> io::Result<()> {
     let expected = &p.artifact(artifact).map_err(error)?.sha256;
     let actual = payload::sha256(active).map_err(error)?;
@@ -414,10 +528,11 @@ fn install_apk(p: &Payload, package: &str, artifact: &str, apk: &Path) -> io::Re
         "0",
         apk.to_str().ok_or_else(|| invalid("Invalid APK path"))?,
     ]);
-    let output = command("/system/bin/pm", &arguments, 180)?;
-    if !output.lines().any(|s| s.trim() == "Success") {
-        return Err(invalid(&format!("PackageManager: {output}")));
-    }
+    let reset_runyn_on_conflict = package == payload::RUNYN
+        && p.manifest.infrastructure == release_core::infrastructure::Infrastructure::Unified;
+    install_apk_command(&arguments, reset_runyn_on_conflict, |arguments| {
+        command("/system/bin/pm", arguments, 180)
+    })?;
     if crate::restore_ui::enabled() {
         Ok(())
     } else {
@@ -425,9 +540,37 @@ fn install_apk(p: &Payload, package: &str, artifact: &str, apk: &Path) -> io::Re
     }
 }
 
+fn install_apk_command(
+    arguments: &[&str],
+    reset_runyn_on_conflict: bool,
+    mut run: impl FnMut(&[&str]) -> io::Result<String>,
+) -> io::Result<()> {
+    let require_success = |output: String| {
+        if output.lines().any(|line| line.trim() == "Success") {
+            Ok(())
+        } else {
+            Err(invalid(&format!("PackageManager: {output}")))
+        }
+    };
+    let mut result = run(arguments).and_then(require_success);
+    if reset_runyn_on_conflict
+        && result.as_ref().is_err_and(|error| {
+            error
+                .to_string()
+                .contains("INSTALL_FAILED_UPDATE_INCOMPATIBLE")
+        })
+    {
+        // Full removal clears the old signing identity and RunYN's disposable data.
+        run(&["uninstall", payload::RUNYN]).and_then(require_success)?;
+        result = run(arguments).and_then(require_success);
+    }
+    result
+}
+
 pub fn apply(shared: &Shared) -> io::Result<()> {
     let _lock = OperationLock::acquire()?;
     let (p, claims) = workflow::verified(shared)?;
+    let model = package_model(&p)?;
     workflow::phase(shared, "preparing", "Проверка условий установки")?;
     workflow::update(shared, |s| {
         s.completed_steps = 0;
@@ -480,6 +623,16 @@ pub fn apply(shared: &Shared) -> io::Result<()> {
     let loader_state = device::prop("init.svc.voyahtune_load")?;
     if loader_state != "stopped" && !(crate::restore_ui::enabled() && loader_state.is_empty()) {
         return Err(invalid("Загрузчик hooks не остановился"));
+    }
+    if p.manifest.infrastructure == release_core::infrastructure::Infrastructure::Unified {
+        command(
+            "/system/bin/sh",
+            &[
+                "-c",
+                include_str!("../../../Packaging/od/installer/common/stop-loader-device.sh"),
+            ],
+            30,
+        )?;
     }
     for package in [payload::NATIVE, payload::RESTORE] {
         if crate::restore_ui::enabled() && package == payload::RESTORE {
@@ -585,7 +738,7 @@ pub fn apply(shared: &Shared) -> io::Result<()> {
             .recipe
             .packages
             .iter()
-            .any(|package| package.package == payload::RUNYN),
+            .any(|package| package.package == payload::RUNYN && package.applies_to(model)),
         |step| {
             match step {
                 Step::Native => {
@@ -619,13 +772,9 @@ pub fn apply(shared: &Shared) -> io::Result<()> {
                     }
                 }
                 Step::Runyn => {
-                    for package in p
-                        .manifest
-                        .recipe
-                        .packages
-                        .iter()
-                        .filter(|package| package.package == payload::RUNYN)
-                    {
+                    for package in p.manifest.recipe.packages.iter().filter(|package| {
+                        package.package == payload::RUNYN && package.applies_to(model)
+                    }) {
                         workflow::phase(shared, "applying", "Установка RunYN")?;
                         let path = Path::new("/data/local/tmp/voyahtune-runyn-ota.apk");
                         device::atomic_copy(
@@ -819,8 +968,33 @@ pub fn validate(shared: &Shared) -> io::Result<()> {
     if crate::restore_ui::enabled() {
         let (payload, claims) = od_postboot_check::run(|| {
             repair_native_data()?;
-            workflow::verified(shared)
+            let (payload, claims) = workflow::verified(shared)?;
+            if payload.manifest.infrastructure
+                == release_core::infrastructure::Infrastructure::Unified
+            {
+                let model = package_model(&payload)?;
+                for package in payload.manifest.recipe.packages.iter().filter(|package| {
+                    package.package == payload::RUNYN && package.applies_to(model)
+                }) {
+                    check_active_apk(
+                        &payload,
+                        &package.artifact,
+                        Path::new(&package_path(&package.package)?),
+                    )?;
+                }
+            }
+            Ok((payload, claims))
         })?;
+        if payload.manifest.infrastructure == release_core::infrastructure::Infrastructure::Unified
+        {
+            od_postboot_check::hooks(|| {
+                command(
+                    "/data/local/bin/voyahtune-new/voyahtune-loader",
+                    &["--check-hooks"],
+                    10,
+                )
+            })?;
+        }
         return finish_installation(shared, &payload, &claims);
     }
     // apply() has already installed both APKs for user 0. Postboot only observes
@@ -855,6 +1029,7 @@ pub fn validate(shared: &Shared) -> io::Result<()> {
     // Reopen the verified payload: versionName alone cannot distinguish rebuilt releases,
     // and dumpsys also lists the inactive system package underneath a /data/app update.
     let (p, claims) = workflow::verified(shared)?;
+    let model = package_model(&p)?;
     for (package, artifact) in [
         (payload::NATIVE, "native.apk"),
         (payload::RESTORE, "restore_mode.apk"),
@@ -866,7 +1041,7 @@ pub fn validate(shared: &Shared) -> io::Result<()> {
         .recipe
         .packages
         .iter()
-        .filter(|p| p.package == payload::RUNYN)
+        .filter(|p| p.package == payload::RUNYN && p.applies_to(model))
     {
         check_active_apk(
             &p,
@@ -911,7 +1086,8 @@ pub fn validate(shared: &Shared) -> io::Result<()> {
             }
             let hooks = match p.manifest.infrastructure {
                 release_core::infrastructure::Infrastructure::Pi => pi_health()?,
-                release_core::infrastructure::Infrastructure::Od => hook_health()?,
+                release_core::infrastructure::Infrastructure::Od
+                | release_core::infrastructure::Infrastructure::Unified => hook_health()?,
             };
             if previous_hooks.as_ref() != Some(&hooks) {
                 crate::log(root(), &format!("postboot_hooks {}", hooks.trim()))?;

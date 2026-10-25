@@ -1,11 +1,11 @@
 //! Platform-neutral release models and verification. No ADB, UI, networking or executor.
 pub mod catalog;
-pub mod infrastructure;
-pub mod pi_health;
 pub mod compatibility;
 pub mod error;
+pub mod infrastructure;
 pub mod paths;
 pub mod payload;
+pub mod pi_health;
 pub mod recipe;
 mod storage;
 pub use error::{Error, Result};
@@ -13,3 +13,4 @@ pub mod apk_identity;
 pub mod ota;
 
 pub mod installation_logcat;
+pub mod vehicle_model;

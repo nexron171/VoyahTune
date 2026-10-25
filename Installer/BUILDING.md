@@ -27,7 +27,8 @@ Installer 1.5.0 и capability `infrastructure-v1`.
 
 `./make_release.sh VERSION --od --mac` сохраняется как обёртка: собирает payload ZIP и отдельно
 macOS GUI ZIP в `Releases/dist/VoyahTune-Installer-1.5.0/`. `--installers` по умолчанию
-выбирает все платформы; для одной macOS используйте `--mac`.
+выбирает macOS Universal и Windows x64/x86/ARM64; Linux добавляется через `--linux`.
+Для одной macOS используйте `--mac`.
 Подробности и публикация: [Docs/releasing.md](../Docs/releasing.md).
 
 ## Полная сборка из macOS
@@ -45,8 +46,10 @@ macOS GUI ZIP в `Releases/dist/VoyahTune-Installer-1.5.0/`. `--installers` по
 ./Installer/scripts/build-all-macos.sh --mac --payload Releases/build/installer-payload-3.22.0-od
 ```
 
-Без выбора платформ `--installers` собирает все три. `--mac` сохраняет Universal
-ARM64+x86-64, Windows по умолчанию x64, `--windows-arch x86` выбирает x86; Linux — x64. Для `--mac` Docker/Colima не нужны:
+`--installers` собирает macOS Universal ARM64+x86-64 и Windows x64/x86/ARM64.
+`--windows` также собирает все три Windows-архитектуры; `--windows-arch x64|x86|arm64`
+выбирает одну. Linux включается только явным `--linux`; текущий Linux builder — x64.
+`--installers --linux` добавляет Linux к стандартному набору. Для `--mac` Docker/Colima не нужны:
 они не проверяются и не запускаются. Повторный выпуск той же версии перезаписывает
 локальный payload и каталог выпуска; ZIP остаются только для выбранных платформ.
 
@@ -65,7 +68,8 @@ ARM64+x86-64, Windows по умолчанию x64, `--windows-arch x86` выби
 ```
 
 Результат этой низкоуровневой команды — `Releases/build/installers-1.5.0/`:
-macos-universal.tar.gz, windows-x64.exe, linux-x64.run и build-info.json.
+macos-universal.tar.gz, windows-x64.exe, windows-x86.exe, windows-arm64.exe и build-info.json.
+При явном `--linux` добавляется linux-x64.run.
 Можно указать другой каталог внутри Releases через `--output`.
 Существующий результат заменяется после успешной сборки всех выбранных платформ;
 при ошибке прежний релиз сохраняется. Логи: `Releases/cache/installer-all-XXXXXX/`.
@@ -243,7 +247,7 @@ node Installer/scripts/build.mjs --target x86_64-pc-windows-msvc --payload /work
 ```
 
 Результат: `Releases/build/installers-<версия>-windows-x86/windows-x86.exe`.
-Без `--windows-arch` Windows собирается для x64. Rust target для выбранной
+Без `--windows-arch` Windows собирается для x64, x86 и ARM64. Rust target для выбранной
 архитектуры устанавливается автоматически; `--check` только проверяет его наличие.
 
 Для прямой сборки на Windows или в Linux-контейнере:
@@ -260,6 +264,16 @@ Payload общий с x64 и macOS; отдельные APK или каталог
 WebView2 скачивается при необходимости. Windows 11 не имеет 32-битного выпуска ОС;
 для 64-битной Windows используйте установщик x64. Проверка архива и архитектуры
 при сборке не заменяет проверку запуска GUI и подключения ADB на Windows 10 x86.
+
+### Windows ARM64
+
+Для отдельной ARM64-сборки используйте `./Installer/scripts/build-all-macos.sh --windows-arch arm64`.
+Результат: `Releases/build/installers-<версия>-windows-arm64/windows-arm64.exe`.
+При кросс-сборке target `aarch64-pc-windows-msvc` использует backend `clang` в cargo-xwin:
+зависимость `ring` требует GNU-style Clang и не принимает флаги `/imsvc` от backend `clang-cl`.
+При первом запуске cargo-xwin скачивает MSVC sysroot в свой кэш; эта стадия может занять
+несколько минут без процентов в журнале `windows-arm64.log`. Следующая сборка использует кэш.
+Архитектура приложения — ARM64; запуск GUI и ADB на Windows ARM проверяется отдельно от компиляции.
 
 ## Linux: инструменты и отдельная сборка
 

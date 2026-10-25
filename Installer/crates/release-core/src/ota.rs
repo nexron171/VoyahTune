@@ -7,6 +7,7 @@ use crate::{
     Error, Result,
 };
 use serde::{Deserialize, Serialize};
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Claims {
@@ -57,25 +58,47 @@ pub fn verify_payload(payload: &Payload, claims: &Claims) -> Result<()> {
             .iter()
             .map(|package| (package.artifact.as_str(), package.package.as_str())),
     ) {
-        let (actual_id, actual_code, actual_version) =
-            crate::apk_identity::read(&payload.file(file)?)?;
-        let version =
-            semver::Version::parse(&claims.version).map_err(|error| invalid(error.to_string()))?;
-        if version.major > 999 || version.minor > 999 || version.patch > 999 {
-            return Err(invalid("Версия вне диапазона versionCode"));
-        }
-        let expected_code = version
-            .major
-            .checked_mul(1_000_000)
-            .and_then(|code| code.checked_add(version.minor * 1000))
-            .and_then(|code| code.checked_add(version.patch))
-            .ok_or_else(|| invalid("versionCode overflow"))?;
-        if actual_id != package || actual_version != claims.version || actual_code != expected_code
-        {
-            return Err(invalid(format!(
-                "Package ID или версия APK {package} не совпадает с релизом"
-            )));
-        }
+        verify_package_identity(
+            package,
+            &crate::apk_identity::read(&payload.file(file)?)?,
+            &claims.version,
+            payload.manifest.infrastructure,
+        )?;
+    }
+    Ok(())
+}
+
+fn verify_package_identity(
+    package: &str,
+    (actual_id, actual_code, actual_version): &(String, u64, String),
+    release_version: &str,
+    infrastructure: Infrastructure,
+) -> Result<()> {
+    if actual_id != package {
+        return Err(invalid(format!(
+            "Package ID APK {package} не совпадает с recipe"
+        )));
+    }
+    // RunYN has an independent version; the verified payload selects its exact bytes.
+    if infrastructure == Infrastructure::Unified && package == payload::RUNYN {
+        return Ok(());
+    }
+
+    let version =
+        semver::Version::parse(release_version).map_err(|error| invalid(error.to_string()))?;
+    if version.major > 999 || version.minor > 999 || version.patch > 999 {
+        return Err(invalid("Версия вне диапазона versionCode"));
+    }
+    let expected_code = version
+        .major
+        .checked_mul(1_000_000)
+        .and_then(|code| code.checked_add(version.minor * 1000))
+        .and_then(|code| code.checked_add(version.patch))
+        .ok_or_else(|| invalid("versionCode overflow"))?;
+    if actual_version != release_version || *actual_code != expected_code {
+        return Err(invalid(format!(
+            "Версия APK {package} не совпадает с релизом"
+        )));
     }
     Ok(())
 }
@@ -87,7 +110,7 @@ fn verify_requirements(payload: &Payload) -> Result<()> {
         .as_ref()
         .ok_or_else(|| invalid("Нет требований релиза"))?;
     let target = match payload.manifest.infrastructure {
-        Infrastructure::Od => ValidationTarget::OdOta,
+        Infrastructure::Od | Infrastructure::Unified => ValidationTarget::OdOta,
         Infrastructure::Pi => ValidationTarget::Installer,
     };
     target.validate_requirements(requirements)
@@ -96,6 +119,53 @@ fn verify_requirements(payload: &Payload) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unified_runyn_version_is_independent_but_package_id_is_required() {
+        for (code, version) in [(1, "1.0"), (9_000_000, "9.0.0"), (4_004_000, "4.4.0")] {
+            verify_package_identity(
+                payload::RUNYN,
+                &(payload::RUNYN.into(), code, version.into()),
+                "4.4.0",
+                Infrastructure::Unified,
+            )
+            .unwrap();
+        }
+        assert!(verify_package_identity(
+            payload::RUNYN,
+            &(payload::RESTORE.into(), 1, "1.0".into()),
+            "4.4.0",
+            Infrastructure::Unified,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn main_packages_and_legacy_payloads_still_require_release_versions() {
+        for (package, infrastructure, release) in [
+            (payload::NATIVE, Infrastructure::Unified, "4.4.0"),
+            (payload::RESTORE, Infrastructure::Unified, "4.4.0"),
+            (payload::RUNYN, Infrastructure::Pi, "4.4.0-pi"),
+        ] {
+            for (code, version) in [(1, release), (4_004_000, "1.0")] {
+                assert!(verify_package_identity(
+                    package,
+                    &(package.into(), code, version.into()),
+                    release,
+                    infrastructure,
+                )
+                .is_err());
+            }
+            verify_package_identity(
+                package,
+                &(package.into(), 4_004_000, release.into()),
+                release,
+                infrastructure,
+            )
+            .unwrap();
+        }
+    }
+
     #[test]
     fn ota_preserves_profile_and_accepts_legacy_od_versions() {
         let mut claims = Claims {

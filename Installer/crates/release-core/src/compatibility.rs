@@ -12,6 +12,7 @@ pub const CAPABILITIES: &[&str] = &[
     "ota-bootstrap-v1",
     "infrastructure-v1",
     "restoremode-ota-ui-v1",
+    "unified-runtime-v1",
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -27,7 +28,14 @@ impl Default for Requirements {
             min_installer_version: "1.2.0".into(),
             required_capabilities: CAPABILITIES
                 .iter()
-                .filter(|s| !["infrastructure-v1", "restoremode-ota-ui-v1"].contains(s))
+                .filter(|s| {
+                    ![
+                        "infrastructure-v1",
+                        "restoremode-ota-ui-v1",
+                        "unified-runtime-v1",
+                    ]
+                    .contains(s)
+                })
                 .map(|s| s.to_string())
                 .collect(),
         }
@@ -40,7 +48,7 @@ impl Requirements {
             min_installer_version: "1.5.0".into(),
             required_capabilities: CAPABILITIES
                 .iter()
-                .filter(|s| **s != "restoremode-ota-ui-v1")
+                .filter(|s| !["restoremode-ota-ui-v1", "unified-runtime-v1"].contains(s))
                 .map(|s| s.to_string())
                 .collect(),
         }
@@ -52,6 +60,14 @@ impl Requirements {
         result
             .required_capabilities
             .push("restoremode-ota-ui-v1".into());
+        result
+    }
+    pub fn unified() -> Self {
+        let mut result = Self::restoremode_ota();
+        result.min_installer_version = "1.8.1".into();
+        result
+            .required_capabilities
+            .push("unified-runtime-v1".into());
         result
     }
 

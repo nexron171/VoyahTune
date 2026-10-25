@@ -202,8 +202,7 @@ pub fn inspect_for_action(
     } else {
         None
     };
-    if action == crate::plans::Action::Install
-        && payload.manifest.infrastructure == crate::infrastructure::Infrastructure::Od
+    if action == crate::plans::Action::Install && payload.manifest.infrastructure.uses_restore_ui()
     {
         // Only APK signatures are needed for replacement; runtime remnants do not
         // determine whether the selected release can be installed.

@@ -5,6 +5,15 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
+const RUNTIME_DIRECTORIES: &[&str] = &[
+    "/data/local/bin/voyahtune-new",
+    "/data/local/tmp/voyahtune-new",
+    "/data/local/tmp/voyahtune-pi",
+];
+
+const RETIRED_RUNTIME_FILES: &str =
+    include_str!("../../../../Packaging/new/config/retired-files.txt");
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum Phase {
@@ -24,6 +33,20 @@ pub struct CopyFile {
 pub struct InstallPackage {
     pub artifact: String,
     pub package: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub condition: Option<PackageCondition>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum PackageCondition {
+    ExceptH97xy,
+}
+
+impl InstallPackage {
+    pub fn applies_to(&self, model: crate::vehicle_model::VehicleModel) -> bool {
+        self.condition.is_none() || model.needs_runyn()
+    }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -75,7 +98,7 @@ fn owned(path: &str) -> bool {
         ]
         .iter()
         .any(|name| payload::destination(name).is_some_and(|(p, _)| p == path))
-            || path == "/data/local/tmp/voyahtune-pi"
+            || RUNTIME_DIRECTORIES.contains(&path)
             || path == NATIVE_PATH
             || path == WHITELIST
             || payload::RUNTIME_NAMES
@@ -101,6 +124,10 @@ fn owned(path: &str) -> bool {
 }
 impl Recipe {
     pub fn validate(&self) -> Result<()> {
+        let unified = self
+            .files
+            .iter()
+            .any(|file| file.artifact == "voyahtune-new-voyahtune-loader");
         let fail = |detail: String| {
             Error::new(
                 "RECIPE_INVALID",
@@ -124,6 +151,16 @@ impl Recipe {
         {
             return Err(fail(
                 "Неподдерживаемые пакетные операции или prefix cleanup".into(),
+            ));
+        }
+        if unified
+            && !self.packages.iter().any(|package| {
+                package.package == payload::RUNYN
+                    && package.condition == Some(PackageCondition::ExceptH97xy)
+            })
+        {
+            return Err(fail(
+                "Общий payload требует условную установку RunYN".into(),
             ));
         }
         for attr in self.directories.iter().chain(&self.attributes) {
@@ -164,6 +201,8 @@ impl Recipe {
                 "frida-inject",
                 "voyahtune.load.rc",
                 "voyahtune.load.sh",
+                "voyahtune-new-voyahtune-loader",
+                "voyahtune-new-frida-inject",
             ]
             .contains(&file.artifact.as_str())
                 && payload::destination(&file.artifact)
@@ -175,7 +214,6 @@ impl Recipe {
         for name in [
             "native.apk",
             "whitelist.xml",
-            "frida-inject",
             "voyahtune.load.rc",
             "voyahtune.load.sh",
         ] {
@@ -183,10 +221,21 @@ impl Recipe {
                 return Err(fail(format!("Обязательная роль: {name}")));
             }
         }
+        let injector = if unified {
+            "voyahtune-new-frida-inject"
+        } else {
+            "frida-inject"
+        };
+        if !self.files.iter().any(|file| file.artifact == injector) {
+            return Err(fail(format!("Обязательная роль: {injector}")));
+        }
         let loaders = self
             .files
             .iter()
-            .filter(|f| ["load.bin", "loaderFrida"].contains(&f.artifact.as_str()))
+            .filter(|f| {
+                ["load.bin", "loaderFrida", "voyahtune-new-voyahtune-loader"]
+                    .contains(&f.artifact.as_str())
+            })
             .count();
         if loaders != 1 {
             return Err(fail("Требуется ровно один загрузчик инфраструктуры".into()));
@@ -201,6 +250,7 @@ impl Recipe {
             if !ids.insert(&package.package)
                 || !((package.package == RESTORE && package.artifact == "restore_mode.apk")
                     || (package.package == payload::RUNYN && package.artifact == "runyn.apk"))
+                || (package.condition.is_some() && package.package != payload::RUNYN)
                 || !package.package.split('.').all(|s| {
                     !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
                 })
@@ -232,13 +282,10 @@ impl Recipe {
         }
         for path in &self.remove_files {
             if !owned(path)
-                || [
-                    NATIVE_PATH,
-                    WHITELIST,
-                    "/data/local/bin/load.bin",
-                    "/data/local/bin/frida-inject",
-                ]
-                .contains(&path.as_str())
+                || [NATIVE_PATH, WHITELIST].contains(&path.as_str())
+                || (!unified
+                    && ["/data/local/bin/load.bin", "/data/local/bin/frida-inject"]
+                        .contains(&path.as_str()))
             {
                 return Err(fail(path.clone()));
             }
@@ -278,6 +325,20 @@ impl Recipe {
             .iter()
             .cloned()
             .chain(
+                RETIRED_RUNTIME_FILES
+                    .lines()
+                    // Generic names use the engine's ownership and backup handling.
+                    .filter(|path| {
+                        ![
+                            "/data/local/bin/load.bin",
+                            "/data/local/bin/loaderFrida",
+                            "/data/local/bin/frida-inject",
+                        ]
+                        .contains(path)
+                    })
+                    .map(String::from),
+            )
+            .chain(
                 self.files
                     .iter()
                     .filter(|f| {
@@ -290,11 +351,81 @@ impl Recipe {
             .into_iter()
             .collect()
     }
+
+    pub fn cleanup_directories(&self) -> Vec<String> {
+        // Removal must cover every runtime even when using an older saved recipe.
+        self.remove_directories
+            .iter()
+            .map(String::as_str)
+            .chain(
+                self.directories
+                    .iter()
+                    .map(|directory| directory.path.as_str()),
+            )
+            .chain(RUNTIME_DIRECTORIES.iter().copied())
+            .map(String::from)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn removal_covers_old_and_new_runtime_without_changing_installation_cleanup() {
+        let mut recipe = Recipe::default();
+        recipe.directories.push(Attributes {
+            path: "/data/local/bin/voyahtune-extra".into(),
+            mode: 0o755,
+        });
+        for directory in RUNTIME_DIRECTORIES {
+            assert!(recipe
+                .cleanup_directories()
+                .contains(&directory.to_string()));
+        }
+        assert!(recipe
+            .cleanup_directories()
+            .contains(&"/data/local/bin/voyahtune-extra".into()));
+        assert!(!recipe
+            .remove_directories
+            .contains(&"/data/local/bin/voyahtune-new".into()));
+        assert!(!recipe
+            .remove_directories
+            .contains(&"/data/local/tmp/voyahtune-new".into()));
+        for file in [
+            "/data/local/tmp/voyahtune_acc_restore.js.install",
+            "/data/local/tmp/voyahtune_drive_reset.js.install",
+            "/data/local/tmp/voyahtune_load.bin.install",
+            "/data/local/tmp/voyahtune_phone_numbers.pid",
+            "/data/local/tmp/voyahtune_vehicle_air.pid",
+        ] {
+            assert!(recipe.cleanup_files().contains(&file.to_string()));
+            assert!(!recipe.remove_files.contains(&file.to_string()));
+        }
+        for file in ["load.bin", "loaderFrida", "frida-inject"] {
+            assert!(!recipe
+                .cleanup_files()
+                .contains(&format!("/data/local/bin/{file}")));
+        }
+        recipe.validate().unwrap();
+    }
+
+    #[test]
+    fn conditional_runyn_is_skipped_only_on_h97xy() {
+        let package: InstallPackage = serde_json::from_value(serde_json::json!({
+            "artifact": "runyn.apk", "package": payload::RUNYN, "condition": "except-h97xy"
+        }))
+        .unwrap();
+        use crate::vehicle_model::VehicleModel;
+        assert!(!package.applies_to(VehicleModel::H97X));
+        assert!(!package.applies_to(VehicleModel::H97Y));
+        assert!(package.applies_to(VehicleModel::Other));
+        let restore = Recipe::default().packages.remove(0);
+        assert!(restore.applies_to(VehicleModel::H97X));
+    }
     #[test]
     fn accepts_new_owned_file_without_an_engine_change() {
         let mut recipe = Recipe::default();

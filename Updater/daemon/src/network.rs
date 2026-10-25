@@ -23,7 +23,7 @@ fn payload_body_timeout(infrastructure: Infrastructure) -> Option<Duration> {
     match infrastructure {
         // ureq's body timeout covers the entire transfer, not inactivity between reads.
         // OD payloads use the global one-hour budget; PI retains its existing policy.
-        Infrastructure::Od => None,
+        Infrastructure::Od | Infrastructure::Unified => None,
         Infrastructure::Pi => Some(Duration::from_secs(45)),
     }
 }
@@ -45,7 +45,7 @@ pub fn catalog(url: &str) -> io::Result<Catalog> {
     if bytes.len() > 4 * 1024 * 1024 {
         return Err(invalid("Слишком большой каталог"));
     }
-    if crate::restore_ui::enabled() {
+    if Infrastructure::compiled() == Infrastructure::Od {
         return crate::od_release::catalog(&bytes);
     }
     let c: release_core::catalog::UpdateCatalog =
@@ -81,7 +81,7 @@ fn receive_archive(
     infrastructure: Infrastructure,
     progress: impl Fn(u64),
 ) -> io::Result<()> {
-    let verify = infrastructure == Infrastructure::Pi;
+    let verify = infrastructure != Infrastructure::Od;
     let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
     let mut hash = Sha256::new();
     let mut bytes = 0u64;
@@ -181,8 +181,12 @@ mod tests {
     use std::{net::TcpListener, thread};
 
     #[test]
-    fn od_download_ignores_declared_size_and_hash_but_pi_still_verifies() {
-        for infrastructure in [Infrastructure::Od, Infrastructure::Pi] {
+    fn only_legacy_od_download_ignores_declared_size_and_hash() {
+        for infrastructure in [
+            Infrastructure::Od,
+            Infrastructure::Pi,
+            Infrastructure::Unified,
+        ] {
             for (size, hash) in [(0, "missing"), (7, "wrong"), (99, "wrong")] {
                 let directory = tempfile::tempdir().unwrap();
                 let path = directory.path().join("release.zip");

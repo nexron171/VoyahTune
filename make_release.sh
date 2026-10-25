@@ -1,35 +1,17 @@
 #!/bin/sh
-# ./make_release.sh VERSION --od → payload ZIP with manifest.json for the GUI installer.
-# ./make_release.sh VERSION (--pi|--od) --payload → explicit payload-only build.
-# ./make_release.sh VERSION (--pi|--od) --installers → payload and all GUI installers.
-# ./make_release.sh VERSION (--pi|--od) --mac [--windows] [--linux] → selected installers.
-#
-# ./make_release.sh --legacy VERSION (--pi|--od) → classic ZIP with install/remove scripts.
-# PI defaults to the classic ZIP; use --payload for the GUI-compatible format.
-#
-# --no-build reuses matching APKs; classic builds read APKs from their release directory.
-# --no-zip builds the release directory without creating a ZIP.
-#
-# Sources: Packaging/ and Android projects. Outputs: Releases/build/ and Releases/dist/.
-# OD payload ZIP: Releases/dist/payload_VERSION-od.zip (VERSION without a profile suffix).
-# Classic ZIP: Releases/dist/VoyahTune-VERSION-od.zip (VERSION without a profile suffix).
+# ./make_release.sh VERSION --payload builds one common USB/OTA payload.
+# ./make_release.sh VERSION --installers also builds the GUI installers.
+# --legacy builds a classic ZIP with the historical PI/OD commands.
 set -e
-
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-OD_PAYLOAD_DEFAULT=0
-for release_arg in "$@"; do
-    case "$release_arg" in
-        --payload|--installers|--mac|--windows|--windows-arch|--linux)
+if [ "${1:-}" != --legacy ]; then
+    case " $* " in
+        *" --installers "*|*" --mac "*|*" --windows "*|*" --windows-arch "*|*" --linux "*|*" --payload "*)
             exec python3 "$ROOT/Installer/scripts/release.py" "$@" ;;
-        --od)
-            OD_PAYLOAD_DEFAULT=1 ;;
+        *) exec python3 "$ROOT/Installer/scripts/release.py" "$@" --payload ;;
     esac
-done
-if [ "${1:-}" = --legacy ]; then
-    shift
-elif [ "$OD_PAYLOAD_DEFAULT" = 1 ]; then
-    exec python3 "$ROOT/Installer/scripts/release.py" "$@" --payload
 fi
+shift
 
 COMMON="$ROOT/Packaging"
 BUILD="$ROOT/Releases/build"

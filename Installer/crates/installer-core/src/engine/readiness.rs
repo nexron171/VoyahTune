@@ -170,7 +170,7 @@ impl Engine {
         if status["schema"] != 1
             || status["ok"] != true
             || status["uid"] != 0
-            || status["infrastructure"] != "od"
+            || status["infrastructure"] != self.payload.manifest.infrastructure.as_str()
             || !status["pid"].as_u64().is_some_and(|pid| pid > 0)
             || !status["capabilities"]
                 .as_array()
@@ -184,6 +184,40 @@ impl Engine {
                 Error::new("HEALTH_PENDING", "Несовместимый ответ OTA-службы").detail(response),
             );
         }
+        if self.payload.manifest.infrastructure == crate::infrastructure::Infrastructure::Unified {
+            if !status["capabilities"]
+                .as_array()
+                .is_some_and(|capabilities| {
+                    capabilities
+                        .iter()
+                        .any(|value| value == "unified-runtime-v1")
+                })
+            {
+                return Err(Error::new(
+                    "HEALTH_PENDING",
+                    "OTA-служба не поддерживает общий payload",
+                ));
+            }
+            self.readiness_progress("Проверяем загрузчик и хуки", deadline)?;
+            self.readiness_command(
+                "/data/local/bin/voyahtune-new/voyahtune-loader --check-hooks",
+                deadline,
+            )
+            .map_err(|error| {
+                Error::new("HEALTH_PENDING", "Загрузчик или хуки ещё не готовы").detail(error)
+            })?;
+            let model = self.package_model()?;
+            for package in self
+                .payload
+                .manifest
+                .recipe
+                .packages
+                .iter()
+                .filter(|package| package.package == payload::RUNYN && package.applies_to(model))
+            {
+                self.verify_active_apk(&package.package, &package.artifact, None)?;
+            }
+        }
         self.readiness_command("[ ! -e /data/local/voyahtune-install.lock ]", deadline)?;
         let after = self.readiness_identity(deadline)?;
         if before != after {
@@ -196,21 +230,67 @@ impl Engine {
     }
 
     pub(super) fn readiness_diagnostics(&self) {
+        self.runtime_diagnostics(Instant::now() + Duration::from_secs(6));
         for (name, command) in [
             ("logcat.txt", "logcat -b main -b system -b crash -d -t 400"),
-            ("native-data.txt", "ls -ldZ /data/user/0/ru.big.town.anative /data/user_de/0/ru.big.town.anative; dumpsys package ru.big.town.anative; dumpsys activity exit-info ru.big.town.anative"),
-            ("services.txt", "getprop init.svc.voyahtune_updater; pidof system_server; dumpsys activity services ru.big.town.anative"),
+            (
+                "native-data.txt",
+                "ls -ldZ /data/user/0/ru.big.town.anative /data/user_de/0/ru.big.town.anative; \
+                 dumpsys package ru.big.town.anative; \
+                 dumpsys activity exit-info ru.big.town.anative",
+            ),
+            (
+                "services.txt",
+                "getprop init.svc.voyahtune_updater; pidof system_server; \
+                 dumpsys activity services ru.big.town.anative",
+            ),
         ] {
             let output = self.readiness_command(command, Instant::now() + Duration::from_secs(6));
-            let text = match output { Ok(text) => text, Err(error) => error.to_string() };
+            let text = match output {
+                Ok(text) => text,
+                Err(error) => error.to_string(),
+            };
             let _ = fs::write(self.operation.dir.join(name), text);
+        }
+    }
+
+    fn runtime_diagnostics(&self, deadline: Instant) {
+        use std::io::Write;
+
+        if self.payload.manifest.infrastructure != crate::infrastructure::Infrastructure::Unified {
+            return;
+        }
+        let command = r#"getprop init.svc.voyahtune_load
+pidof voyahtune-loader
+pidof com.qinggan.app.launcher
+for runtime_file in /data/local/tmp/voyahtune-new/status.json \
+    /data/local/tmp/voyahtune-new/launcher.attempt.json \
+    /data/local/tmp/voyahtune-new/*.log; do
+    [ -f "$runtime_file" ] || continue
+    printf '\n--- %s ---\n' "$runtime_file"
+    tail -c 16384 "$runtime_file"
+done
+"#;
+        let text = match self.readiness_command(command, deadline) {
+            Ok(text) => text,
+            Err(error) => error.to_string(),
+        };
+        // Keep earlier snapshots when ADB disconnects before the final report.
+        if let Ok(mut file) = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(self.operation.dir.join("runtime-diagnostics.txt"))
+        {
+            let _ = writeln!(file, "{}\n{text}\n", chrono::Utc::now().to_rfc3339());
         }
     }
 
     pub(super) fn verify_od_installation(&self) -> Result<()> {
         let deadline = Instant::now() + DEADLINE;
         self.prepare_od_native_data(deadline)?;
-        self.verify_od_readiness_until(deadline)
+        self.readiness_progress("Проверяем активный APK Native", deadline)?;
+        self.verify_active_apk(NATIVE, "native.apk", Some(NATIVE_PATH))?;
+        self.verify_od_readiness()
     }
 
     fn confirmed_readiness_failure(&self) -> Option<Error> {
@@ -268,31 +348,54 @@ impl Engine {
         let mut stability = Stability::default();
         let mut start_sent = false;
         let mut verified_identity = String::new();
+        let mut next_runtime_diagnostics = Instant::now();
         let mut last = Error::new("HEALTH_PENDING", "Ожидание Android и приложений");
         while Instant::now() < deadline {
             if self.cancel.load(Ordering::Relaxed) {
                 return Err(Error::new("CANCELLED", "Проверка остановлена"));
             }
-            let sample = self.readiness_sample(deadline, &mut start_sent).and_then(|identity| {
-                if verified_identity != identity {
-                    self.readiness_progress("Проверяем установленные файлы приложений", deadline)?;
-                    for (package, artifact) in [(NATIVE, "native.apk"), (RESTORE, "restore_mode.apk")] {
-                        self.readiness_command(
-                            &active_apk_script(package, &self.payload.artifact(artifact)?.sha256, None),
+            let sample = self
+                .readiness_sample(deadline, &mut start_sent)
+                .and_then(|identity| {
+                    if verified_identity != identity {
+                        self.readiness_progress(
+                            "Проверяем установленные файлы приложений",
                             deadline,
-                        ).map_err(|error| Error::new("HEALTH_PENDING", format!("Не подтверждён установленный APK {package}")).detail(error))?;
+                        )?;
+                        for (package, artifact) in
+                            [(NATIVE, "native.apk"), (RESTORE, "restore_mode.apk")]
+                        {
+                            let expected = &self.payload.artifact(artifact)?.sha256;
+                            self.readiness_command(
+                                &active_apk_script(package, expected, None),
+                                deadline,
+                            )
+                            .map_err(|error| {
+                                Error::new(
+                                    "HEALTH_PENDING",
+                                    format!("Не подтверждён установленный APK {package}"),
+                                )
+                                .detail(error)
+                            })?;
+                        }
+                        self.readiness_command(
+                            "cmd package resolve-activity --brief --user 0 \
+                             -n ru.big.town.restoremode/.OtaActivity | grep -Fx \
+                             -e 'ru.big.town.restoremode/.OtaActivity' \
+                             -e 'ru.big.town.restoremode/ru.big.town.restoremode.OtaActivity'",
+                            deadline,
+                        )?;
+                        verified_identity = identity.clone();
                     }
-                    self.readiness_command("cmd package resolve-activity --brief --user 0 -n ru.big.town.restoremode/.OtaActivity | grep -Fx -e 'ru.big.town.restoremode/.OtaActivity' -e 'ru.big.town.restoremode/ru.big.town.restoremode.OtaActivity'", deadline)?;
-                    verified_identity = identity.clone();
-                }
-                Ok(identity)
-            });
+                    Ok(identity)
+                });
             match sample {
                 Ok(identity)
                     if Instant::now() < deadline
                         && stability.observe(&identity, Instant::now()) =>
                 {
-                    return Ok(())
+                    self.runtime_diagnostics(deadline);
+                    return Ok(());
                 }
                 Ok(_) => {
                     self.readiness_progress(
@@ -316,6 +419,10 @@ impl Engine {
                     )?;
                     last = error;
                 }
+            }
+            if Instant::now() >= next_runtime_diagnostics {
+                self.runtime_diagnostics(deadline.min(Instant::now() + Duration::from_secs(6)));
+                next_runtime_diagnostics = Instant::now() + Duration::from_secs(30);
             }
             thread::sleep(
                 Duration::from_secs(2).min(deadline.saturating_duration_since(Instant::now())),
@@ -345,11 +452,11 @@ impl Engine {
         if !request.confirmed
             || request.action != Action::Install
             || request.serial != self.adb.serial.as_deref().unwrap_or("")
-            || self.payload.manifest.infrastructure != crate::infrastructure::Infrastructure::Od
+            || !self.payload.manifest.infrastructure.uses_restore_ui()
         {
             return Err(Error::new(
                 "VERIFICATION_NOT_ALLOWED",
-                "Нет подтверждённой установки OD",
+                "Нет подтверждённой установки",
             ));
         }
         self.adb.require_single()?;
@@ -399,7 +506,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn broadcast_timeout_allows_health_recovery_and_verification_never_reinstalls() {
+    fn readiness_recovers_and_only_installation_repairs_stale_native() {
         use std::os::unix::fs::PermissionsExt;
         let directory = tempfile::tempdir().unwrap();
         let adb_path = directory.path().join("adb");
@@ -409,10 +516,28 @@ if [ "$1" = devices ]; then
     printf 'List of devices attached\nCAR-001 device\n'
     exit 0
 fi
+case "$1" in root|wait-for-device) exit 0 ;; esac
 root=$(dirname "$0")
+version=4.1.1-od
+if [ -e "$root/unified" ]; then version=4.1.1; fi
 script=$(cat)
 printf '%s\n' "$script" >> "$root/commands"
+if [ -e "$root/disconnected" ]; then echo 'device not found' >&2; exit 1; fi
 case "$script" in
+    *'launcher.attempt.json'*)
+        echo 'launcher: failed (fixture)'
+        if [ -e "$root/disconnect-after-diagnostics" ]; then touch "$root/disconnected"; fi ;;
+    *'active_matches()'*)
+        if [ -e "$root/stale-native" ]; then
+            case "$script" in
+                *'pm install -r --user 0'*)
+                    echo replaced >> "$root/native-replacements"
+                    rm "$root/stale-native" ;;
+                *) exit 1 ;;
+            esac
+        fi ;;
+    *'cmd package install-existing --user 0 --wait ru.big.town.anative'*) exit 0 ;;
+    'getprop sys.boot_completed'*) echo 1 ;;
     *'VOYAHTWEAKS_FOUND'*)
         if [ -e "$root/voyahtweaks" ]; then
             printf 'VOYAHTWEAKS_FOUND\tloader\n'
@@ -434,14 +559,22 @@ case "$script" in
     *'id -u'*) echo 0 ;;
     *'am broadcast'*) touch "$root/started"; echo sent >> "$root/broadcasts"; exit 124 ;;
     *'--method health'*)
+        if [ -e "$root/stale-native" ]; then version=4.1.0-od; fi
         if [ -e "$root/started" ]; then
-            echo 'Result: Bundle[{otaReady=true, version=4.1.1-od}]'
+            echo "Result: Bundle[{otaReady=true, version=$version}]"
         else
-            echo 'Result: Bundle[{otaReady=false, version=4.1.1-od}]'
+            echo "Result: Bundle[{otaReady=false, version=$version}]"
         fi ;;
-    *'--method otaHealth'*) echo 'Result: Bundle[{ready=true, version=4.1.1-od}]' ;;
+    *'--method otaHealth'*) echo "Result: Bundle[{ready=true, version=$version}]" ;;
     *'cat /proc/sys/kernel/random/boot_id'*) printf 'boot-1\n101\n102\n103\n' ;;
-    *'voyahtune-updater --health'*) echo '{"schema":1,"ok":true,"uid":0,"pid":104,"infrastructure":"od","capabilities":["restoremode-ota-ui-v1"]}' ;;
+    *'voyahtune-updater --health'*)
+        if [ -e "$root/unified" ]; then
+            echo '{"schema":1,"ok":true,"uid":0,"pid":104,"infrastructure":"unified","capabilities":["restoremode-ota-ui-v1","unified-runtime-v1"]}'
+        else
+            echo '{"schema":1,"ok":true,"uid":0,"pid":104,"infrastructure":"od","capabilities":["restoremode-ota-ui-v1"]}'
+        fi ;;
+    *'voyahtune-loader --check-hooks'*)
+        if [ -e "$root/hooks-failed" ]; then echo 'hook acc: failed' >&2; exit 1; fi ;;
     *'getprop'*|*'voyahtune-install.lock'*|*'sha256sum'*|*'resolve-activity'*) exit 0 ;;
     *) echo 'Unexpected command' >&2; exit 1 ;;
 esac
@@ -582,5 +715,46 @@ esac
             serde_json::from_slice(&fs::read(engine.operation.dir.join("report.json")).unwrap())
                 .unwrap();
         assert_eq!(report["success"], true);
+
+        engine.payload.manifest.infrastructure = crate::infrastructure::Infrastructure::Unified;
+        engine.payload.manifest.release_version = "4.1.1".into();
+        fs::write(directory.path().join("unified"), "").unwrap();
+        fs::write(directory.path().join("hooks-failed"), "").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(60);
+        let error = engine.readiness_sample(deadline, &mut sent).unwrap_err();
+        assert_eq!(error.code, "HEALTH_PENDING");
+        assert!(error.to_string().contains("hook acc: failed"));
+        fs::remove_file(directory.path().join("hooks-failed")).unwrap();
+        assert!(engine.readiness_sample(deadline, &mut sent).is_ok());
+
+        fs::write(directory.path().join("stale-native"), "").unwrap();
+        let error = engine.readiness_sample(deadline, &mut sent).unwrap_err();
+        assert!(error.to_string().contains("4.1.0-od"));
+        assert!(!directory.path().join("native-replacements").exists());
+        fs::write(directory.path().join("disconnect-after-diagnostics"), "").unwrap();
+        let error = engine
+            .verify_od_readiness_until(Instant::now() + Duration::from_secs(4))
+            .unwrap_err();
+        assert_eq!(error.code, "READINESS_UNCONFIRMED");
+        assert!(!directory.path().join("native-replacements").exists());
+        let diagnostics_path = engine.operation.dir.join("runtime-diagnostics.txt");
+        let diagnostics = fs::read_to_string(&diagnostics_path).unwrap();
+        assert!(diagnostics.contains("launcher: failed (fixture)"));
+        assert!(diagnostics.contains("device not found"));
+        fs::remove_file(directory.path().join("disconnect-after-diagnostics")).unwrap();
+        fs::remove_file(directory.path().join("disconnected")).unwrap();
+
+        fs::write(directory.path().join("commands"), "").unwrap();
+        engine.verify_od_installation().unwrap();
+        assert_eq!(
+            fs::read_to_string(directory.path().join("native-replacements")).unwrap(),
+            "replaced\n"
+        );
+        let commands = fs::read_to_string(directory.path().join("commands")).unwrap();
+        assert!(
+            commands.find("pm install -r --user 0").unwrap()
+                < commands.find("--method health").unwrap()
+        );
+        assert!(!directory.path().join("stale-native").exists());
     }
 }

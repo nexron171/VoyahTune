@@ -93,9 +93,7 @@ pub fn plan(inventory: Inventory, payload: &Payload, action: Action, dns: Dns) -
     warnings.extend(inventory.problems.iter().cloned());
     let operation = if action == Action::Remove {
         "remove"
-    } else if payload.manifest.infrastructure == crate::infrastructure::Infrastructure::Od
-        || inventory.state == "absent"
-    {
+    } else if payload.manifest.infrastructure.uses_restore_ui() || inventory.state == "absent" {
         "install"
     } else if inventory.state != "complete" {
         warnings.push("Обнаружена старая или неполная установка. Сначала будут сохранены найденные файлы, затем установлены файлы выбранного релиза.".into());
@@ -166,7 +164,7 @@ fn operation_steps(
         s.push(("permission", "Проверка владельца CAN-разрешения"));
     }
     s.push(("system", "Подготовка системного раздела"));
-    if action == Action::Install && infrastructure == crate::infrastructure::Infrastructure::Od {
+    if action == Action::Install && infrastructure.uses_restore_ui() {
         s.push((
             "third-party-loaders",
             "Проверка и отключение сторонних решений",
@@ -179,9 +177,9 @@ fn operation_steps(
             ("migration", "Миграция старого init.logcat.sh"),
             ("runtime", "Остановка и удаление boot-hook"),
             ("files", "Удаление hooks и временных файлов"),
-            ("settings", "Очистка настроек VoyahTune"),
             ("packages", "Удаление приложений"),
             ("reboot", "Перезагрузка автомобиля"),
+            ("settings", "Очистка настроек после перезагрузки"),
         ]);
     } else {
         s.extend([

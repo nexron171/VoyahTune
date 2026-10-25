@@ -1,0 +1,79 @@
+[
+  {
+    "source": "Packaging/od/inject/voyahtune_acc_restore.js",
+    "destination": "agents/acc-restore.js",
+    "sha256": "0a643446c2a738bede65fc3dd2ce279b0783f819e4683a0dcde88add66d07684"
+  },
+  {
+    "source": "Packaging/od/inject/voyahtune_drive_reset.js",
+    "destination": "agents/drive-reset.js",
+    "sha256": "5d386fe24eff2b613e40c10fbe780f04bef4c16abf024224e0a2d0b8c8357c63"
+  },
+  {
+    "source": "Packaging/od/inject/vd_bypass.js",
+    "destination": "agents/windows.js",
+    "sha256": "aa6cae57ffbd97249deca4b183d7e6e79d2b9cd6cf74e21ff2d0c697637e3d89"
+  },
+  {
+    "source": "Packaging/od/inject/multidisplay.js",
+    "destination": "agents/multidisplay.js",
+    "sha256": "f7385b22af32a2492107b7ff51d377d6b66db4f0fdb62bd943f9f2f47f90ae2a"
+  },
+  {
+    "source": "Packaging/od/inject/app_client.js",
+    "destination": "agents/app-client.js",
+    "sha256": "541e6dec595fad4582e1dc4d4feceb51014c019aee603ac7757133ecff751450"
+  },
+  {
+    "source": "Packaging/od/inject/steeringwheelkeys.js",
+    "destination": "agents/steering.js",
+    "sha256": "3e3cada8479e92da631e5897753a440e9094aeb17584b2a210533b3dfcec9f53"
+  },
+  {
+    "source": "Packaging/od/inject/apollo_tech.js",
+    "destination": "agents/apollo.js",
+    "sha256": "023ffe63abbe6e2653e9ea93a57b07bc0afedad3541792c0cfd82f0bc260a6ee"
+  },
+  {
+    "source": "Packaging/od/inject/voyahtune_phone_numbers.js",
+    "destination": "agents/phone-numbers.js",
+    "sha256": "6379267f7d973f0eca146624334cdaa045107f96ea0138b16941b5eac6e7b2a6"
+  },
+  {
+    "source": "Packaging/pi/inject/keyboard_ru.js",
+    "destination": "agents/keyboard-ru.js",
+    "sha256": "cfde714cde976f1a1c40c1e72e11ee7f3ad6b7ca1fd29e9ac7c52e8ea06a22b1"
+  },
+  {
+    "source": "Packaging/pi/inject/keyboard_lock_en.js",
+    "destination": "agents/keyboard-en.js",
+    "sha256": "80fefb919611612a6020445f3c9a74155e88e01fa89794f9226ecec1524a77b6"
+  },
+  {
+    "source": "Packaging/pi/inject/clusternavi.js",
+    "destination": "agents/cluster-navigation.js",
+    "sha256": "5621cbfe2463499c0bcca54a87153df148e35b4feeabf340897c9eaee6e76dda"
+  },
+  {
+    "source": "Packaging/od/inject/launcherdock.js",
+    "destination": "adapters/launcher/split-navigation.js",
+    "sha256": "7c972870dbbb271783843093f1d942009b717770fc8fff7a9e3e9ea11b400e4e"
+  },
+  {
+    "source": "Packaging/pi/inject/launcherdock.js",
+    "destination": "adapters/launcher/shared-navigation.js",
+    "sha256": "5c521fc4e38b7d5867b760aaa01aaacbb3317f67ae24b67600f4b4786c8b83c4"
+  },
+  {
+    "source": "Packaging/pi/loaderFrida/main.go",
+    "destination": "loader/",
+    "sha256": "aacf8f45566b0c7848acf3971449b6bdc1af3dfcb911cb55bc46978b7dfece61",
+    "contribution": "Go supervisor foundation; lifecycle extended for ACC, readiness and persistent process identity"
+  },
+  {
+    "source": "Packaging/pi/inject/multidisplay.js",
+    "destination": "agents/multidisplay.js",
+    "sha256": "b45a20069f36dad072393df6e518295c77162261968ba36abfa85657b2fca57d",
+    "contribution": "Single movable application: OEM swapActivity to moveActivity"
+  }
+]
