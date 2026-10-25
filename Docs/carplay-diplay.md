@@ -1025,13 +1025,21 @@ DARK/LIGHT/AUTO сохраняется, AUTO в VEHICLE следует сист�
 через существующий `CarPlayVehicleBridge`; зависимости shared на Native нет.
 Потеря IPC очищает снимок и завершает ожидающие команды ошибкой.
 
-При установленном адаптере `/info` объявляет `vehicleStateProtocolInfo` версии 1.0,
+В VoyahTune регистрация климатического адаптера отключена в конструкторе
+`CarPlayVehicleBridge`: `VehicleClimate.install(null)`. Поэтому `/info` не объявляет
+VSP, SETUP не согласует `vehicleStateProtocol`, климат не задаёт нижний док.
+Без автомобильной темы `displayPanels` также отсутствует. Это временное отключение
+до выяснения причины чёрного экрана; IPC и реализация VSP сохранены.
+При установленном адаптере библиотека `/info` объявляет `vehicleStateProtocolInfo` версии 1.0,
 один plug-in VoyahTune и аксессуары Climate/VehicleResources/Seats. SETUP принимает
 `vehicleStateProtocol` только если его предложил iPhone. `displayPanels` описывает
-видеодисплеи и служебную панель `showsInstruments` с пустым Local UI plug-in:
-без неё исследованный iPhone не показывает «Климат». У служебной панели нет
-видеопотока или Android-дисплея; это совместимость климатического UI, а не реализация
-приборной панели Ultra. Геометрия берётся из настроенного дисплея, `displays` не расширяется.
+только настроенные видеодисплеи: каждой панели соответствует существующий видеопоток.
+Геометрия берётся из соответствующего `display`; основной и опциональный приборный
+видеопотоки сохраняются. Служебная панель, Local UI `displayPlugins` и признак
+`showsInstruments` удалены, в том числе у приборного дисплея; `properties` пуст.
+Описание VSP-сервисов климата и сидений сохраняется.
+В прежних испытаниях удаление служебной панели скрывало климатический интерфейс
+на исследованном iPhone; появление UI после этого изменения требует проверки на ГУ.
 Два DataStream UUID
 `3E2F3C61-AAD0-42CB-A8AA-BF22186DA62E` и
 `FF4A6720-F2BE-4F56-A3E1-DB3B4E37D634` принадлежат одной AirPlay-сессии.
@@ -1809,14 +1817,17 @@ Kotlin/Java/JNI-файлы baseline импортированы.
 
 Климат (§6): `shared/.../airplay/OpackCodec.kt`, `VehicleClimate.kt`,
 `VehicleStateProtocol.kt`, `VehicleStateChannel.kt`, `VehicleStateConnection.kt`,
-`VehicleStateDisplayPanels.kt` (точный UID главной панели при выбранной теме).
+`VehicleStateDisplayPanels.kt` (только панели существующих видеопотоков, без Local UI
+и `showsInstruments`; точный UID главной панели при выбранной теме).
 Точки подключения: `AirPlayInfoPlist`, `AirPlaySession`, `CarPlayMediaEngine`.
 `AirPlayInfoPlist` выбирает нижний док главного экрана при доступном климате,
 если край явно не задан. `VehicleStateProtocolTest` фиксирует диапазон вентилятора
 в передаваемых единицах, VentCombinations, позиции/диапазоны сидений,
 цикл рециркуляции с отдельным read-only AutoMode и дедупликацией нажатий,
 тип и диапазон подогрева руля, маршрутизацию
-и отсутствие оптимистических обновлений; `VehicleClimateDockTest` — выбор дока, приоритет
+и отсутствие оптимистических обновлений; `VehicleStateDisplayPanelsTest` — основной
+и приборный видеопотоки без служебной панели, Local UI и `showsInstruments`;
+`VehicleClimateDockTest` — выбор дока, приоритет
 настроек и сохранение геометрии.
 При обновлении upstream переносить VSP отдельно от iAP2 VehicleStatus и video settings.
 
@@ -1922,7 +1933,7 @@ OEM-снимка и подтверждают переход чтением. IPC 
 | [CarPlayWidgetSettings.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/main/CarPlayWidgetSettings.java)<br>[settings_main_carplay_widget.xml](../RestoreMode/app/src/main/res/layout/settings_main_carplay_widget.xml) | Включение, Ярлык/Окно, размеры и общий предпросмотр сетки; сохраняет ID и параметры существующей записи (§4). |
 | [VoyahWifiScanPause.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/network/VoyahWifiScanPause.kt)<br>[WifiScanPause.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/network/WifiScanPause.kt)<br>[CarPlayWifiScanProtocol.java](../SharedAndroid/src/main/java/ru/big/town/common/CarPlayWifiScanProtocol.java)<br>[CarPlayWifiScanController.java](../Native/app/src/main/java/ru/big/town/anative/CarPlayWifiScanController.java)<br>[vd_bypass.js](../Packaging/od/inject/vd_bypass.js)<br>[carplay_wifi_scan.xml](../RestoreMode/diplay/common/src/main/res/values-ru/carplay_wifi_scan.xml) | OD lease автоматического поиска Wi-Fi: Host устанавливается Application, owner tokens передаются Bridge, Native публикует ограниченный heartbeat, system_server сохраняет/восстанавливает autojoin на Wi-Fi Handler. Default true, только Wi-Fi Direct; LocalAdb и PI не включать (§5/6). |
 | [RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/carplay/CarPlaySettingsFragment.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/carplay/CarPlaySettingsFragment.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/core/SettingsSection.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/core/SettingsSection.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/core/SettingsSectionLayouts.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/core/SettingsSectionLayouts.java)<br>[RestoreMode/app/src/main/res/layout/settings_carplay.xml](../RestoreMode/app/src/main/res/layout/settings_carplay.xml)<br>[RestoreMode/app/src/main/res/values/carplay_home.xml](../RestoreMode/app/src/main/res/values/carplay_home.xml)<br>[RestoreMode/app/src/main/res/layout/view_settings_navigation_rail.xml](../RestoreMode/app/src/main/res/layout/view_settings_navigation_rail.xml) | Раздел 9, общий выключатель, дискретный масштаб без выбора темы, navigation, живой статус, отключение, SWReason и четыре OEM-ползунка; без общего автоподключения (§5). |
-| [RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayVehicleBridge.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayVehicleBridge.java)<br>[SharedAndroid/src/main/java/ru/big/town/common/CarPlayVehicleProtocol.java](../SharedAndroid/src/main/java/ru/big/town/common/CarPlayVehicleProtocol.java)<br>[Native/app/src/main/java/ru/big/town/anative/CarPlayVehicleController.java](../Native/app/src/main/java/ru/big/town/anative/CarPlayVehicleController.java) | Двунаправленный IPC, owner/generation/подписки (§6/8). |
+| [RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayVehicleBridge.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayVehicleBridge.java)<br>[SharedAndroid/src/main/java/ru/big/town/common/CarPlayVehicleProtocol.java](../SharedAndroid/src/main/java/ru/big/town/common/CarPlayVehicleProtocol.java)<br>[Native/app/src/main/java/ru/big/town/anative/CarPlayVehicleController.java](../Native/app/src/main/java/ru/big/town/anative/CarPlayVehicleController.java) | Двунаправленный IPC, owner/generation/подписки (§6/8); регистрация климатического адаптера VSP отключена (§6). |
 | [Native/app/src/main/java/ru/big/town/anative/CarPlayLightState.java](../Native/app/src/main/java/ru/big/town/anative/CarPlayLightState.java)<br>[Native/app/src/test/java/ru/big/town/anative/CarPlayLightStateTest.java](../Native/app/src/test/java/ru/big/town/anative/CarPlayLightStateTest.java) | Начальное TX57-чтение SWReason, последующие события; защита от устаревшего snapshot после события/reconnect/close (§6). |
 | [Native/app/src/main/java/ru/big/town/anative/CanBusEvent.java](../Native/app/src/main/java/ru/big/town/anative/CanBusEvent.java)<br>[Native/app/src/main/java/ru/big/town/anative/CanBusEventRouter.java](../Native/app/src/main/java/ru/big/town/anative/CanBusEventRouter.java)<br>[Native/app/src/main/java/ru/big/town/anative/CanBusEventHub.java](../Native/app/src/main/java/ru/big/town/anative/CanBusEventHub.java) | Скорость, interests, OEM callback/getter в общем CAN hub (§6). |
 | [RestoreMode/app/src/main/java/ru/big/town/restoremode/voice/commands/VoiceSteeringPolicy.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/voice/commands/VoiceSteeringPolicy.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/voice/VoiceSettingsPage.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/voice/VoiceSettingsPage.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/integration/config/SplitConfigSync.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/integration/config/SplitConfigSync.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/steering/SteeringSettingsFragment.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/steering/SteeringSettingsFragment.java)<br>[RestoreMode/app/src/main/res/layout/settings_steering_reserved.xml](../RestoreMode/app/src/main/res/layout/settings_steering_reserved.xml)<br>[Native/app/src/main/java/ru/big/town/anative/SetModesReceiverDynamic.java](../Native/app/src/main/java/ru/big/town/anative/SetModesReceiverDynamic.java) | Выбор нажатия Siri, пояснение, экспорт действия и broadcast (§7). |
@@ -2214,6 +2225,30 @@ IPC/CAN/cluster/запуска нужен согласованный Native APK.
 автоматически из задачи обновления библиотеки.
 
 ## 13. Подтверждённое состояние и ограничения
+
+### VSP без Local UI и showsInstruments, 25 октября 2026
+
+Последующие runtime-испытания: добавление только `showsInstruments` основной панели
+сохранило изображение, но пользователь подтвердил отсутствие «Климата». Добавление
+к этой же панели пустого Local UI `displayPlugins` вернуло чёрный экран при прежнем
+PID, согласованных каналах 3001/3002 и событии первого кадра. Это воспроизведение
+для конкретной конфигурации, а не доказательство универсальной причины.
+По запросу пользователя VSP отключён в runtime и регистрация адаптера отключена
+в исходниках. При снятии перехватов процесс перезапустился; после отключения VSP
+в новом процессе изображение восстановилось. Этот переход не является чистым A/B
+сравнением. Новая сборка с отключением адаптера не устанавливалась: runtime-подмена
+действует до завершения процесса. Прошли компиляция Java приложения и пять целевых
+тестов панелей/климата (результат тестов повторно использован Gradle).
+
+RestoreMode 4.4.0 (revision `999f81e316f1-dirty`) собран и установлен поверх прежней
+версии с сохранением данных и CarPlay identity. После нового беспроводного подключения
+подтверждены `vehicleStateEnabled=true`, VSP-каналы 3001/3002 и единственная основная
+панель 1762×658 с пустыми `properties`, без `displayPlugins`. На снимке видна карта,
+декодер выводит около 21–26 кадров/с. Временные подмены завершились с заменой процесса;
+диагностический сервер остановлен. Видимость климатической шторки и управление
+климатом в этой конфигурации отдельно не проверены.
+Прошли пять целевых тестов панелей/климата, release-сборка и проверка подписи APK.
+Native, runtime и Installer для этого изменения не обновлялись.
 
 ### Удаление краевых перехватов и выбора раскладки, 23 октября 2026
 
