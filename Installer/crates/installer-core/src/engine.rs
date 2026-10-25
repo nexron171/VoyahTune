@@ -6,6 +6,9 @@ mod native_data;
 mod readiness;
 mod removal;
 
+#[cfg(all(test, unix))]
+mod recipe_files_tests;
+
 use crate::{
     adb::{quote, Adb},
     canbus::{self, RemovalConsent},
@@ -1111,7 +1114,8 @@ fi
             self.shell(&format!("chown 0:0 {p} && chmod {:o} {p}\n", attr.mode))?;
         }
 
-        if self.payload.manifest.infrastructure.uses_restore_ui() {
+        // The legacy migration requires OD's client outside the unified runtime directory.
+        if self.payload.manifest.infrastructure == crate::infrastructure::Infrastructure::Od {
             self.shell(c::APP_CLIENT_MIGRATION)?;
         }
 
