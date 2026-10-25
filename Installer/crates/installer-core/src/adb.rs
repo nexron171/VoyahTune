@@ -1,3 +1,5 @@
+mod qconn;
+
 use crate::{events::Events, Error, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::json;

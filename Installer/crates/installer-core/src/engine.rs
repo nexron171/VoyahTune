@@ -3,6 +3,7 @@
 //! OD installation disables known third-party loaders before replacing runtime files.
 //! Known OD conflicts are handled automatically; PI retains its consent flow.
 mod native_data;
+mod navigation_fonts;
 mod readiness;
 mod removal;
 
@@ -405,6 +406,11 @@ impl Engine {
             "Блокировка установки и сохранение OTA-логов",
             |e| e.ota_prepare(),
         )?;
+        self.step(
+            "navigation-fonts-check",
+            "Проверка тем приборки",
+            |e| e.navigation_fonts("inspect"),
+        )?;
         self.ignore(&format!("rm -f {DEVICE_STATE}/lock/owner 2>/dev/null; rmdir {DEVICE_STATE}/lock 2>/dev/null; rmdir {DEVICE_STATE} 2>/dev/null; true\n"));
         if r.action != Action::Remove
             && self.payload.manifest.infrastructure == crate::infrastructure::Infrastructure::Pi
@@ -503,6 +509,11 @@ impl Engine {
                 )?;
             }
             self.step(
+                "navigation-fonts",
+                "Шрифты навигации приборки",
+                |e| e.navigation_fonts("apply"),
+            )?;
+            self.step(
                 "reboot",
                 "Перезагрузка автомобиля",
                 |e| {
@@ -548,6 +559,11 @@ impl Engine {
                 },
             )?;
         } else {
+            self.step(
+                "navigation-fonts",
+                "Восстановление шрифтов приборки",
+                |e| e.navigation_fonts("restore"),
+            )?;
             self.step("deactivate", "Отключение Apollo", |e| {
                 e.apollo_safe(false)?;
                 thread::sleep(Duration::from_secs(3));

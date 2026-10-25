@@ -64,7 +64,7 @@ impl Requirements {
     }
     pub fn unified() -> Self {
         let mut result = Self::restoremode_ota();
-        result.min_installer_version = "1.8.1".into();
+        result.min_installer_version = "1.8.2".into();
         result
             .required_capabilities
             .push("unified-runtime-v1".into());

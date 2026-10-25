@@ -159,6 +159,7 @@ fn operation_steps(
             "updater-lock",
             "Блокировка установки и сохранение OTA-логов",
         ),
+        ("navigation-fonts-check", "Проверка тем приборки"),
     ];
     if action != Action::Remove && infrastructure == crate::infrastructure::Infrastructure::Pi {
         s.push(("permission", "Проверка владельца CAN-разрешения"));
@@ -172,6 +173,7 @@ fn operation_steps(
     }
     if action == Action::Remove {
         s.extend([
+            ("navigation-fonts", "Восстановление шрифтов приборки"),
             ("deactivate", "Отключение Apollo"),
             ("dns", "Восстановление DNS"),
             ("migration", "Миграция старого init.logcat.sh"),
@@ -196,6 +198,7 @@ fn operation_steps(
             ("packages", "Установка RestoreMode и настроек"),
             ("dns", "Настройка DNS"),
             ("updater-bootstrap", "Подготовка первого запуска OTA"),
+            ("navigation-fonts", "Шрифты навигации приборки"),
             ("reboot", "Перезагрузка автомобиля"),
             ("verify", "Проверка Native и готовности OTA"),
         ]);
@@ -214,11 +217,12 @@ mod tests {
         let steps = operation_steps(Action::Install, Infrastructure::Od);
         let ids: Vec<_> = steps.iter().map(|(id, _)| *id).collect();
         assert_eq!(
-            &ids[..6],
+            &ids[..7],
             &[
                 "preflight",
                 "root",
                 "updater-lock",
+                "navigation-fonts-check",
                 "system",
                 "third-party-loaders",
                 "backup"
@@ -228,6 +232,30 @@ mod tests {
         let pi = operation_steps(Action::Install, Infrastructure::Pi);
         assert!(pi.iter().any(|(id, _)| *id == "permission"));
         assert!(!pi.iter().any(|(id, _)| *id == "third-party-loaders"));
+    }
+
+    #[test]
+    fn navigation_fonts_are_applied_before_reboot_and_restored_before_removal() {
+        use crate::infrastructure::Infrastructure;
+        for infrastructure in [
+            Infrastructure::Unified,
+            Infrastructure::Od,
+            Infrastructure::Pi,
+        ] {
+            let install = operation_steps(Action::Install, infrastructure);
+            let font = install
+                .iter()
+                .position(|(id, _)| *id == "navigation-fonts")
+                .unwrap();
+            assert_eq!(install[font + 1].0, "reboot");
+            let remove = operation_steps(Action::Remove, infrastructure);
+            let font = remove
+                .iter()
+                .position(|(id, _)| *id == "navigation-fonts")
+                .unwrap();
+            let files = remove.iter().position(|(id, _)| *id == "files").unwrap();
+            assert!(font < files);
+        }
     }
 
     #[test]
