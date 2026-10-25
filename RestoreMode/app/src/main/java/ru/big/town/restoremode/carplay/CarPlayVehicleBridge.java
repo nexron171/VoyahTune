@@ -175,7 +175,8 @@ public final class CarPlayVehicleBridge
 
     public CarPlayVehicleBridge(Context context) {
         this.context = context.getApplicationContext();
-        VehicleClimate.install(this);
+        // Keep VSP unavailable while its display negotiation can produce a black screen.
+        VehicleClimate.install(null);
     }
 
     @Override
