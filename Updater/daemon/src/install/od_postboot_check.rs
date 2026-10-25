@@ -1,14 +1,23 @@
 use std::{io, thread, time::Duration};
 
 const MAX_RETRIES: usize = 3;
+const HOOK_RETRIES: usize = 18;
 const RETRY_DELAY: Duration = Duration::from_secs(10);
 
 pub(super) fn run<T>(check: impl FnMut() -> io::Result<T>) -> io::Result<T> {
-    retry_check(check, |retry, delay, error| {
+    run_with_retries(check, MAX_RETRIES)
+}
+
+pub(super) fn hooks<T>(check: impl FnMut() -> io::Result<T>) -> io::Result<T> {
+    run_with_retries(check, HOOK_RETRIES)
+}
+
+fn run_with_retries<T>(check: impl FnMut() -> io::Result<T>, retries: usize) -> io::Result<T> {
+    retry_check(check, retries, |retry, delay, error| {
         let _ = crate::log(
             super::root(),
             &format!(
-                "postboot_check_retry retry={retry}/{MAX_RETRIES} delay_seconds={} error={error}",
+                "postboot_check_retry retry={retry}/{retries} delay_seconds={} error={error}",
                 delay.as_secs()
             ),
         );
@@ -18,10 +27,11 @@ pub(super) fn run<T>(check: impl FnMut() -> io::Result<T>) -> io::Result<T> {
 
 fn retry_check<T>(
     mut check: impl FnMut() -> io::Result<T>,
+    retries: usize,
     mut before_retry: impl FnMut(usize, Duration, &io::Error),
 ) -> io::Result<T> {
     let mut result = check();
-    for retry in 1..=MAX_RETRIES {
+    for retry in 1..=retries {
         let Err(error) = &result else {
             return result;
         };
@@ -36,6 +46,34 @@ mod tests {
     use super::*;
 
     #[test]
+    fn hook_check_waits_for_serial_startup_and_propagates_persistent_failure() {
+        for recover in [true, false] {
+            let mut attempts = 0;
+            let mut delayed = Duration::ZERO;
+            let result = retry_check(
+                || {
+                    attempts += 1;
+                    if recover && attempts == 7 {
+                        Ok(())
+                    } else {
+                        Err(io::Error::other("hook acc: failed"))
+                    }
+                },
+                HOOK_RETRIES,
+                |_, delay, _| delayed += delay,
+            );
+            if recover {
+                result.unwrap();
+                assert_eq!(delayed, Duration::from_secs(60));
+            } else {
+                assert_eq!(result.unwrap_err().to_string(), "hook acc: failed");
+                assert_eq!(attempts, 19);
+                assert_eq!(delayed, Duration::from_secs(180));
+            }
+        }
+    }
+
+    #[test]
     fn successful_check_finishes_without_waiting() {
         let mut attempts = 0;
         let result = retry_check(
@@ -43,6 +81,7 @@ mod tests {
                 attempts += 1;
                 Ok("verified release")
             },
+            MAX_RETRIES,
             |_, _, _| panic!("A successful check must not schedule a retry"),
         );
 
@@ -64,6 +103,7 @@ mod tests {
                         Ok("verified release")
                     }
                 },
+                MAX_RETRIES,
                 |retry, delay, error| {
                     retries.push((retry, delay));
                     assert_eq!(error.to_string(), "cmd: Can't find service: package");
@@ -93,6 +133,7 @@ mod tests {
                     format!("Native data unavailable: attempt {attempts}"),
                 ))
             },
+            MAX_RETRIES,
             |retry, delay, error| {
                 retries.push((retry, delay));
                 assert_eq!(

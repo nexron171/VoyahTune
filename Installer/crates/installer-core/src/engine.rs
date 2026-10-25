@@ -4,6 +4,7 @@
 //! Known OD conflicts are handled automatically; PI retains its consent flow.
 mod native_data;
 mod readiness;
+mod removal;
 
 use crate::{
     adb::{quote, Adb},
@@ -189,7 +190,7 @@ impl Engine {
             Err(e) => json!({"success":false,"operationId":self.operation.id,"error":e,
                 "recovery":"Завершённые изменения могли сохраниться. Повторите установку или удаление после устранения указанной причины."}),
         };
-        if self.payload.manifest.infrastructure == crate::infrastructure::Infrastructure::Od
+        if self.payload.manifest.infrastructure.uses_restore_ui()
             && (self.adb.step.as_deref() == Some("verify") || result.is_err())
         {
             report["readinessConfirmed"] = json!(result.is_ok());
@@ -360,8 +361,7 @@ impl Engine {
     fn execute(&mut self, r: Request) -> Result<()> {
         if self.restore_cunba
             && (r.action != Action::Remove
-                || self.payload.manifest.infrastructure
-                    != crate::infrastructure::Infrastructure::Od)
+                || !self.payload.manifest.infrastructure.uses_restore_ui())
         {
             return Err(Error::new(
                 "CUNBA_RESTORE_UNAVAILABLE",
@@ -388,6 +388,9 @@ impl Engine {
             "Получение системного доступа",
             |e| {
                 e.root_sequence(false)?;
+                if r.action == Action::Install {
+                    e.package_model()?;
+                }
                 if e.restore_cunba && !crate::cunba_recovery::restoration_available(&e.adb, e.payload.manifest.infrastructure)? {
                     return Err(Error::new("CUNBA_RESTORE_UNAVAILABLE", "Резервные данные Cunba недоступны. Повторите проверку или удалите VoyahTune без восстановления Cunba."));
                 }
@@ -417,7 +420,7 @@ impl Engine {
         self.ota_lock()?; // remount may have rebooted; retain this desktop operation across boot.
         self.ignore("setprop ctl.stop voyahtune_updater 2>/dev/null || true\n");
         if r.action == Action::Install {
-            if self.payload.manifest.infrastructure == crate::infrastructure::Infrastructure::Od {
+            if self.payload.manifest.infrastructure.uses_restore_ui() {
                 self.step(
                     "third-party-loaders",
                     "Проверка и отключение сторонних решений",
@@ -511,9 +514,7 @@ impl Engine {
                 "verify",
                 "Проверка Native и готовности OTA",
                 |e| {
-                    if e.payload.manifest.infrastructure
-                        == crate::infrastructure::Infrastructure::Od
-                    {
+                    if e.payload.manifest.infrastructure.uses_restore_ui() {
                         return e.verify_od_installation();
                     }
                     e.wait_boot(true)?;
@@ -567,24 +568,21 @@ impl Engine {
                 "Удаление hooks и временных файлов",
                 |e| e.remove_files(),
             )?;
-            self.step(
-                "settings",
-                "Очистка настроек VoyahTune",
-                |e| e.shell(c::REMOVE_SETTINGS).map(|_| ()),
-            )?;
             self.step("packages", "Удаление приложений", |e| {
-                e.ignore("am force-stop ru.big.town.anative\n");
-                e.ignore("am force-stop ru.big.town.restoremode\n");
+                e.shell(
+                    "am force-stop ru.big.town.anative && am force-stop ru.big.town.restoremode\n",
+                )?;
                 e.shell(c::REMOVE_PACKAGES)?;
                 e.shell(c::REMOVE_SYSTEM)?;
-                Ok(())
+                e.remove_native_data()
             })?;
-            let removal_boot = if self.restore_cunba {
-                Some(self.shell("cat /proc/sys/kernel/random/boot_id")?)
-            } else {
-                None
-            };
-            // Cunba restoration requires a verified new boot after removal.
+            let removal_boot = self.shell("cat /proc/sys/kernel/random/boot_id")?;
+            if removal_boot.is_empty() {
+                return Err(self.fail(
+                    "Не удалось определить текущую загрузку Android",
+                    "boot_id пуст",
+                ));
+            }
             self.step(
                 "reboot",
                 "Перезагрузка автомобиля",
@@ -594,6 +592,11 @@ impl Engine {
                     Ok(())
                 },
             )?;
+            self.step(
+                "settings",
+                "Очистка настроек после перезагрузки",
+                |e| e.remove_data_after_reboot(&removal_boot),
+            )?;
             if self.restore_cunba {
                 self.step(
                     "cunba-restore",
@@ -602,7 +605,7 @@ impl Engine {
                         crate::cunba_recovery::restore_after_removal(
                             &e.adb,
                             e.payload.manifest.infrastructure,
-                            removal_boot.as_deref().unwrap_or_default(),
+                            &removal_boot,
                         )
                     },
                 )?;
@@ -739,7 +742,7 @@ fi
     }
     fn validate_permission_owner(&self, dump: &str) -> Result<()> {
         if let Some(owner) = canbus::owner(dump) {
-            if self.payload.manifest.infrastructure == crate::infrastructure::Infrastructure::Od
+            if self.payload.manifest.infrastructure.uses_restore_ui()
                 && owner.is_some_and(|package| {
                     let package = package.to_ascii_lowercase();
                     package.contains("cunba") || package.contains("voyahtweaks")
@@ -757,8 +760,7 @@ fi
         Ok(())
     }
     fn resolve_canbus_conflict(&self) -> Result<()> {
-        let automatic =
-            self.payload.manifest.infrastructure == crate::infrastructure::Infrastructure::Od;
+        let automatic = self.payload.manifest.infrastructure.uses_restore_ui();
         if !automatic {
             if let Some(consent) = &self.canbus_consent {
                 consent.begin();
@@ -1021,6 +1023,11 @@ fi
         self.restart_loader = true;
         // An absent init service is already stopped, not a failure.
         if let Err(error) = self.stop_runtime_for_update() {
+            if self.payload.manifest.infrastructure
+                == crate::infrastructure::Infrastructure::Unified
+            {
+                return Err(error);
+            }
             self.warning(&error);
         }
         self.apollo_safe(true)?;
@@ -1104,7 +1111,7 @@ fi
             self.shell(&format!("chown 0:0 {p} && chmod {:o} {p}\n", attr.mode))?;
         }
 
-        if self.payload.manifest.infrastructure == crate::infrastructure::Infrastructure::Od {
+        if self.payload.manifest.infrastructure.uses_restore_ui() {
             self.shell(c::APP_CLIENT_MIGRATION)?;
         }
 
@@ -1113,6 +1120,9 @@ fi
             if !recipe.files.iter().any(|f| f.destination == *path) {
                 self.shell(&format!("rm -f {}\n", quote(path)))?;
             }
+        }
+        for path in &recipe.remove_directories {
+            self.shell(&format!("rm -rf {}\n", quote(path)))?;
         }
         Ok(())
     }
@@ -1138,6 +1148,7 @@ fi
         )
     }
     fn packages(&self) -> Result<()> {
+        let model = self.package_model()?;
         if self
             .shell("getprop persist.app.feature.leavecar\n")
             .unwrap_or_default()
@@ -1161,23 +1172,73 @@ fi
             .recipe
             .packages
             .iter()
-            .filter(|p| p.package == payload::RUNYN)
+            .filter(|p| p.package == payload::RUNYN && p.applies_to(model))
         {
             let path = self.payload.file(&package.artifact)?;
             payload::verified_signers(&path)?;
             if release_core::apk_identity::read(&path)?.0 != payload::RUNYN {
                 return Err(self.fail("Неверный package ID RunYN", &package.artifact));
             }
-            self.raw(&[
-                "install",
-                "-r",
-                "-g",
-                path.to_str()
-                    .ok_or_else(|| self.fail("Некорректный путь RunYN", path.display()))?,
-            ])?
-            .checked("RunYN не установлен; существующие данные сохранены")?;
+            self.install_runyn(&path)?;
         }
         Ok(())
+    }
+
+    fn install_runyn(&self, path: &Path) -> Result<()> {
+        let unified =
+            self.payload.manifest.infrastructure == crate::infrastructure::Infrastructure::Unified;
+        let mut arguments = vec!["install", "-r", "-g"];
+        if unified {
+            arguments.push("-d");
+        }
+        arguments.push(
+            path.to_str()
+                .ok_or_else(|| self.fail("Некорректный путь RunYN", path.display()))?,
+        );
+        let install = || require_package_success(self.raw(&arguments)?, "RunYN не установлен");
+        let mut result = install();
+        if unified
+            && result.as_ref().is_err_and(|error| {
+                error
+                    .to_string()
+                    .contains("INSTALL_FAILED_UPDATE_INCOMPATIBLE")
+            })
+        {
+            self.adb.events.emit(
+                "package-reset",
+                self.adb.step.as_deref(),
+                "Другой ключ RunYN: переустанавливаем приложение с удалением данных",
+                json!({"package":payload::RUNYN}),
+            )?;
+            require_package_success(
+                self.raw(&["uninstall", payload::RUNYN])?,
+                "Не удалось удалить RunYN для смены подписи",
+            )?;
+            result = install();
+        }
+        result
+    }
+
+    fn package_model(&self) -> Result<release_core::vehicle_model::VehicleModel> {
+        use release_core::vehicle_model::{VehicleModel, PROPERTIES_COMMAND};
+        if !self
+            .payload
+            .manifest
+            .recipe
+            .packages
+            .iter()
+            .any(|package| package.condition.is_some())
+        {
+            return Ok(VehicleModel::Other);
+        }
+        let properties = self.shell(PROPERTIES_COMMAND)?;
+        if properties.trim().is_empty() {
+            return Err(self.fail(
+                "Не удалось определить модель для установки RunYN",
+                "Empty model properties",
+            ));
+        }
+        Ok(VehicleModel::detect(&properties))
     }
     fn verify_active_apk(&self, package: &str, artifact: &str, repair: Option<&str>) -> Result<()> {
         let expected = &self.payload.artifact(artifact)?.sha256;
@@ -1199,7 +1260,7 @@ fi
             }
             return Ok(());
         }
-        if self.payload.manifest.infrastructure == crate::infrastructure::Infrastructure::Od {
+        if self.payload.manifest.infrastructure.uses_restore_ui() {
             return self.updater_ready_od();
         }
         // ROM 650 can register a new system APK without its DE directory.
@@ -1345,6 +1406,7 @@ fi
         Err(last)
     }
     fn native_ready(&self) -> Result<()> {
+        let model = self.package_model()?;
         if self.shell(c::NATIVE_READY).unwrap_or_default() != "READY" {
             self.postflight_shell(
                 "pm uninstall -k --user 0 ru.big.town.anative >/dev/null 2>&1 || true\n",
@@ -1362,7 +1424,7 @@ fi
             .recipe
             .packages
             .iter()
-            .any(|p| p.package == payload::RUNYN)
+            .any(|p| p.package == payload::RUNYN && p.applies_to(model))
         {
             self.verify_active_apk(payload::RUNYN, "runyn.apk", None)?;
         }
@@ -1687,22 +1749,8 @@ fi
             }
             self.shell(&format!("rm -f {}\n", quote(&path)))?;
         }
-        for path in self
-            .payload
-            .manifest
-            .recipe
-            .remove_directories
-            .iter()
-            .chain(
-                self.payload
-                    .manifest
-                    .recipe
-                    .directories
-                    .iter()
-                    .map(|d| &d.path),
-            )
-        {
-            self.shell(&format!("rm -rf {}\n", quote(path)))?;
+        for path in self.payload.manifest.recipe.cleanup_directories() {
+            self.shell(&format!("rm -rf {}\n", quote(&path)))?;
         }
 
         Ok(())
@@ -1820,6 +1868,21 @@ fn signature_update_rejected(output: &str) -> bool {
     output.contains("INSTALL_FAILED_UPDATE_INCOMPATIBLE")
         && output.to_ascii_lowercase().contains("signature")
 }
+
+fn require_package_success(output: crate::adb::Output, message: &str) -> Result<()> {
+    let output = output.checked(message)?;
+    if !output
+        .stdout
+        .lines()
+        .chain(output.stderr.lines())
+        .any(|line| line.trim() == "Success")
+    {
+        return Err(Error::new("PACKAGE_COMMAND_FAILED", message)
+            .detail(format!("{}\n{}", output.stdout, output.stderr)));
+    }
+    Ok(())
+}
+
 pub fn default_adb(bundle: &Path) -> PathBuf {
     bundle
         .join("adb")
@@ -1830,6 +1893,108 @@ pub fn default_adb(bundle: &Path) -> PathBuf {
 mod runtime_stop_tests {
     use super::*;
     use std::{os::unix::fs::PermissionsExt, process::Command};
+
+    #[test]
+    fn runyn_signature_conflict_reinstalls_once_and_other_failures_do_not_reset_data() {
+        for (mode, success, installs, removals) in [
+            ("success", true, 1, 0),
+            ("signature", true, 2, 1),
+            ("signature-stdout", true, 2, 1),
+            ("space", false, 1, 0),
+            ("offline", false, 1, 0),
+            ("no-success", false, 1, 0),
+            ("uninstall-failure", false, 1, 1),
+            ("uninstall-no-success", false, 1, 1),
+            ("retry-failure", false, 2, 1),
+            ("repeat-signature", false, 2, 1),
+            ("legacy", false, 1, 0),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let adb_path = directory.path().join("adb");
+            fs::write(directory.path().join("mode"), mode).unwrap();
+            fs::write(&adb_path, r#"#!/bin/sh
+if [ "$1" = -s ]; then shift 2; fi
+root=$(dirname "$0")
+mode=$(cat "$root/mode")
+printf '%s\n' "$*" >> "$root/commands"
+case "$1" in
+    install)
+        expected="install -r -g -d $root/RunYN bundle.apk"
+        if [ "$mode" = legacy ]; then expected="install -r -g $root/RunYN bundle.apk"; fi
+        [ "$*" = "$expected" ] || exit 91
+        for argument do last=$argument; done
+        [ "$last" = "$root/RunYN bundle.apk" ] || exit 92
+        count=$(cat "$root/installs" 2>/dev/null || echo 0)
+        count=$((count + 1))
+        echo "$count" > "$root/installs"
+        case "$mode" in
+            success) echo Success; exit 0 ;;
+            space) echo 'Failure [INSTALL_FAILED_INSUFFICIENT_STORAGE]' >&2; exit 1 ;;
+            offline) echo 'error: device offline' >&2; exit 1 ;;
+            no-success) echo 'Failure [INSTALL_FAILED_INVALID_APK]'; exit 0 ;;
+        esac
+        if [ "$count" = 1 ] || [ "$mode" = repeat-signature ]; then
+            if [ "$mode" = signature-stdout ]; then
+                echo 'Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE]'; exit 0
+            fi
+            echo 'Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE: signatures do not match]' >&2
+            exit 1
+        fi
+        if [ "$mode" = retry-failure ]; then echo 'Failure [INSTALL_FAILED_INVALID_APK]' >&2; exit 1; fi
+        echo Success ;;
+    uninstall)
+        [ "$*" = 'uninstall big.town.runyn' ] || exit 93
+        if [ "$mode" = uninstall-failure ]; then echo 'Failure [DELETE_FAILED_INTERNAL_ERROR]' >&2; exit 1; fi
+        if [ "$mode" = uninstall-no-success ]; then echo 'Failure [DELETE_FAILED_INTERNAL_ERROR]'; exit 0; fi
+        echo Success ;;
+    *) exit 94 ;;
+esac
+"#).unwrap();
+            fs::set_permissions(&adb_path, fs::Permissions::from_mode(0o755)).unwrap();
+            let payload = Payload {
+                root: directory.path().into(),
+                manifest: serde_json::from_value(json!({
+                    "schema": 4, "infrastructure": if mode == "legacy" { "pi" } else { "unified" },
+                    "product":"VoyahTune", "releaseVersion":"4.4.0",
+                    "buildRevision":"test", "artifacts":[]
+                }))
+                .unwrap(),
+            };
+            let engine = Engine::new(
+                &adb_path,
+                payload,
+                "CAR-001",
+                &directory.path().join("logs"),
+                Arc::new(|_| {}),
+                Arc::new(AtomicBool::new(false)),
+            )
+            .unwrap();
+            let apk = directory
+                .path()
+                .canonicalize()
+                .unwrap()
+                .join("RunYN bundle.apk");
+            let result = engine.install_runyn(&apk);
+            assert_eq!(result.is_ok(), success, "{mode}: {result:?}");
+            let commands = fs::read_to_string(directory.path().join("commands")).unwrap();
+            assert_eq!(
+                commands
+                    .lines()
+                    .filter(|line| line.starts_with("install "))
+                    .count(),
+                installs,
+                "{mode}"
+            );
+            assert_eq!(
+                commands
+                    .lines()
+                    .filter(|line| *line == "uninstall big.town.runyn")
+                    .count(),
+                removals,
+                "{mode}"
+            );
+        }
+    }
 
     #[test]
     fn od_resolves_known_canbus_conflict_without_requesting_consent() {

@@ -87,7 +87,7 @@ def zip_payload(folder, output):
             raise ValueError("Corrupted payload ZIP")
 
 
-def payload_entry(folder, archive, minimum_ota_version="4.0.0"):
+def payload_entry(folder, archive, minimum_ota_version):
     manifest = json.loads((folder / "manifest.json").read_text())
     version = manifest["releaseVersion"]
     entry = {
@@ -96,7 +96,7 @@ def payload_entry(folder, archive, minimum_ota_version="4.0.0"):
         "size": archive.stat().st_size,
         "sha256": sha(archive),
     }
-    if manifest.get("infrastructure") == "od" and int(version.split(".")[0]) >= 4:
+    if manifest.get("infrastructure") in ("od", "unified") and int(version.split(".")[0]) >= 4:
         entry["minimumInstallerVersion"] = manifest["requirements"][
             "minInstallerVersion"
         ]
@@ -113,6 +113,10 @@ def normalize_version(value, infrastructure):
         raise ValueError("Нужна SemVer-версия, например 3.22.0")
     base, plus, metadata = version.partition("+")
     profile = next((p for p in ("pi", "od") if base.endswith("-" + p)), None)
+    if infrastructure == "unified":
+        if profile:
+            raise ValueError("Общий релиз не использует суффиксы -pi/-od")
+        return version
     if profile and profile != infrastructure:
         raise ValueError(
             f"Суффикс версии {profile} не соответствует --{infrastructure}"
@@ -129,12 +133,13 @@ def main():
         description="Build a single VoyahTune payload; optionally build GUI installers separately."
     )
     parser.add_argument("version")
-    profiles = parser.add_mutually_exclusive_group(required=True)
+    parser.set_defaults(infrastructure="unified")
+    profiles = parser.add_mutually_exclusive_group()
     profiles.add_argument(
-        "--pi", dest="infrastructure", action="store_const", const="pi"
+        "--pi", dest="infrastructure", action="store_const", const="pi", help=argparse.SUPPRESS
     )
     profiles.add_argument(
-        "--od", dest="infrastructure", action="store_const", const="od"
+        "--od", dest="infrastructure", action="store_const", const="od", help=argparse.SUPPRESS
     )
     parser.add_argument(
         "--catalog-url",
@@ -142,10 +147,13 @@ def main():
     )
     parser.add_argument(
         "--minimum-ota-version",
-        default="4.0.0",
-        help="Minimum installed VoyahTune version for OD 4+ OTA; raise when the root service requires USB replacement",
+        help="Required for common/OD payloads: minimum VoyahTune version with a compatible root service",
     )
-    parser.add_argument("--windows-arch", choices=["x64", "x86"], default="x64")
+    parser.add_argument(
+        "--windows-arch",
+        choices=["x64", "x86", "arm64"],
+        help="Build one Windows architecture; defaults to x64, x86 and ARM64",
+    )
     parser.add_argument(
         "--offline-bundle",
         action="store_true",
@@ -159,7 +167,7 @@ def main():
     parser.add_argument(
         "--installers",
         action="store_true",
-        help="Build standalone installers; all platforms unless selected below",
+        help="Build macOS and Windows installers; Linux requires explicit --linux",
     )
     for flag in ["mac", "windows", "linux"]:
         parser.add_argument(
@@ -181,12 +189,19 @@ def main():
         "--revision", help="Defaults to Git HEAD plus -dirty if modified"
     )
     args = parser.parse_args()
-    if not re.fullmatch(
+    if args.infrastructure != "pi" and args.minimum_ota_version is None:
+        parser.error("Specify --minimum-ota-version from root-service compatibility; the first common release requires its own base version")
+    if args.minimum_ota_version is not None and not re.fullmatch(
         r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", args.minimum_ota_version
     ):
         parser.error("--minimum-ota-version must have the format major.minor.patch")
+    if args.windows_arch:
+        args.windows = True
     if args.payload and (args.installers or args.mac or args.windows or args.linux):
         parser.error("--payload cannot be combined with desktop platform flags")
+    if args.installers:
+        args.mac = True
+        args.windows = True
     desktop_build = not args.payload and not args.no_zip
     selected = [
         name
@@ -196,7 +211,19 @@ def main():
             ("linux", args.linux),
         ]
         if enabled
-    ] or ["macos", "windows", "linux"]
+    ] or ["macos", "windows"]
+    windows_architectures = (
+        [args.windows_arch] if args.windows_arch else ["x64", "x86", "arm64"]
+    )
+    expected_artifacts = {
+        artifact
+        for name in selected
+        for artifact in (
+            [f"windows-{architecture}" for architecture in windows_architectures]
+            if name == "windows"
+            else [name]
+        )
+    }
     infrastructure = args.infrastructure
     try:
         version = normalize_version(args.version, infrastructure)
@@ -231,8 +258,10 @@ def main():
         "workspace"
     ]["package"]["version"]
     destination = ROOT / "Releases/dist" / f"VoyahTune-Installer-{installer_version}"
-    if "windows" in selected and args.windows_arch == "x86":
-        destination = destination.with_name(destination.name + "-windows-x86")
+    if "windows" in selected and args.windows_arch:
+        destination = destination.with_name(
+            destination.name + f"-windows-{args.windows_arch}"
+        )
     payload_output = build / f"installer-payload-{version}"
     revision = args.revision or subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
@@ -259,18 +288,20 @@ def main():
         / "release"
         / ("installer-build.exe" if os.name == "nt" else "installer-build")
     )
-    # Both profiles share Android and Rust output directories: serialize the entire build.
+    # Android and Rust output directories are shared across builds.
     lock = build / ".release.lock"
     lock.mkdir()
     try:
         with tempfile.TemporaryDirectory(prefix=".release-", dir=build) as temporary:
             work = Path(temporary)
+            if infrastructure == "unified":
+                run(["sh", ROOT / "Packaging/new/check.sh"])
             run(
                 [
                     "python3",
                     ROOT / "Packaging/tests/test_infrastructure_profiles.py",
                     "--profile",
-                    infrastructure,
+                    "od" if infrastructure == "unified" else infrastructure,
                 ]
             )
             run(
@@ -323,7 +354,7 @@ def main():
                         *(["--payload", payload] if args.offline_bundle else []),
                         *(
                             ["--windows-arch", args.windows_arch]
-                            if "windows" in selected
+                            if "windows" in selected and args.windows_arch
                             else []
                         ),
                         *[
@@ -341,31 +372,26 @@ def main():
                     raise ValueError(
                         "Неверная версия или обязательный встроенный payload установщика"
                     )
-                if set(record["platforms"]) != set(selected):
+                if set(record["platforms"]) != expected_artifacts:
                     raise ValueError(
-                        "Список собранных платформ не совпадает с выбранным"
+                        "Список собранных платформ и архитектур не совпадает с выбранным"
                     )
-                for os_name, entry in record["platforms"].items():
+                for platform_name, entry in record["platforms"].items():
                     tool = compiled / entry["file"]
                     if sha(tool) != entry["sha256"]:
-                        raise ValueError(f"Повреждён установщик {os_name}")
-                    platform_name = (
-                        f"windows-{args.windows_arch}"
-                        if os_name == "windows"
-                        else os_name
-                    )
+                        raise ValueError(f"Повреждён установщик {platform_name}")
                     folder = (
                         work
                         / f"VoyahTune-Installer-{installer_version}-{platform_name}"
                     )
                     folder.mkdir()
-                    if os_name == "macos":
+                    if platform_name == "macos":
                         with tarfile.open(tool) as archive:
                             archive.extractall(folder, filter="data")
                     else:
                         filename = (
                             "VoyahTune-Installer.exe"
-                            if os_name == "windows"
+                            if platform_name.startswith("windows-")
                             else "VoyahTune-Installer.run"
                         )
                         shutil.copy2(tool, folder / filename)

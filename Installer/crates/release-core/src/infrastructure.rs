@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Infrastructure {
+    Unified,
     Pi,
     #[default]
     Od,
@@ -24,6 +25,7 @@ impl Infrastructure {
     }
     pub fn require_version(self, version: &str) -> Result<()> {
         match Self::explicit_version(version)? {
+            None if self == Self::Unified => Ok(()),
             Some(actual) if actual == self => Ok(()),
             _ => Err(Error::new(
                 "INFRASTRUCTURE_VERSION",
@@ -33,6 +35,7 @@ impl Infrastructure {
     }
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Unified => "unified",
             Self::Pi => "pi",
             Self::Od => "od",
         }
@@ -41,6 +44,16 @@ impl Infrastructure {
         env!("VOYAH_INFRASTRUCTURE")
             .parse()
             .expect("validated build infrastructure")
+    }
+    pub fn uses_restore_ui(self) -> bool {
+        self != Self::Pi
+    }
+    pub fn matches_version(self, version: &str) -> bool {
+        if self == Self::Unified {
+            Self::explicit_version(version).is_ok_and(|profile| profile.is_none())
+        } else {
+            Self::from_version(version).is_ok_and(|profile| profile == self)
+        }
     }
     pub fn require(self, expected: Self) -> Result<()> {
         if self == expected {
@@ -76,15 +89,27 @@ impl std::str::FromStr for Infrastructure {
     type Err = String;
     fn from_str(value: &str) -> std::result::Result<Self, String> {
         match value {
+            "unified" => Ok(Self::Unified),
             "pi" => Ok(Self::Pi),
             "od" => Ok(Self::Od),
-            _ => Err("Infrastructure must be pi or od".into()),
+            _ => Err("Infrastructure must be unified, pi or od".into()),
         }
     }
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn unified_release_has_no_pi_od_suffix() {
+        for version in ["4.4.1", "4.4.1-beta"] {
+            Infrastructure::Unified.require_version(version).unwrap();
+            assert!(Infrastructure::Unified.matches_version(version));
+        }
+        for version in ["4.4.1-od", "4.4.1-pi", "4.4.1-beta-od"] {
+            assert!(Infrastructure::Unified.require_version(version).is_err());
+            assert!(!Infrastructure::Unified.matches_version(version));
+        }
+    }
     #[test]
     fn version_suffix_is_not_a_release_channel() {
         for (version, profile, prerelease) in [

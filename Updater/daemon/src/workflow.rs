@@ -155,7 +155,7 @@ pub fn queue(shared: &Shared, sender: &mpsc::Sender<Job>, job: Job) -> io::Resul
         };
         crate::telemetry::begin(
             root(),
-            serde_json::json!({"version":release.version,"infrastructure":"od"}),
+            serde_json::json!({"version":release.version,"infrastructure":release_core::infrastructure::Infrastructure::compiled()}),
             dns,
         )?;
         crate::telemetry::record(
@@ -275,8 +275,13 @@ fn selected(shared: &Shared) -> io::Result<(Release, ota::Claims)> {
         .selected
         .ok_or_else(|| invalid("Нет выбранного релиза"))?;
     if crate::restore_ui::enabled() {
-        let claims = crate::od_release::select(&release, &state.installed_version)
-            .map_err(|error| invalid(&error.to_string()))?;
+        let claims = catalog_selection::verify_selection(
+            &release,
+            &state.installed_version,
+            state.same_version,
+            release_core::infrastructure::Infrastructure::compiled(),
+        )
+        .map_err(|error| invalid(&error.to_string()))?;
         return Ok((release, claims));
     }
     for version in [&release.version, &state.installed_version] {
@@ -351,7 +356,7 @@ fn check(shared: &Shared, same: bool, automatic: bool) -> io::Result<()> {
             &catalog,
             &current.installed_version,
             true,
-            release_core::infrastructure::Infrastructure::Od,
+            release_core::infrastructure::Infrastructure::compiled(),
             |error| rejected = Some(error.to_string()),
         );
     }
@@ -372,10 +377,8 @@ fn check(shared: &Shared, same: bool, automatic: bool) -> io::Result<()> {
                 .releases
                 .iter()
                 .filter(|release| {
-                    release_core::infrastructure::Infrastructure::from_version(&release.version)
-                        .is_ok_and(|profile| {
-                            profile == release_core::infrastructure::Infrastructure::Od
-                        })
+                    release_core::infrastructure::Infrastructure::compiled()
+                        .matches_version(&release.version)
                 })
                 .map(|release| release.version.clone())
                 .collect(),
@@ -406,7 +409,10 @@ fn check(shared: &Shared, same: bool, automatic: bool) -> io::Result<()> {
     .into();
     if automatic {
         if let Some(release) = &runtime.state.selected {
-            if release.version != runtime.state.installed_version {
+            if catalog_selection::is_newer_release_version(
+                &release.version,
+                &runtime.state.installed_version,
+            ) {
                 runtime.state.notice = Some(release.version.clone());
                 runtime.state.notice_opened = false;
             }
@@ -498,6 +504,10 @@ fn open_ota_payload(directory: &Path) -> io::Result<Payload> {
     use release_core::infrastructure::Infrastructure;
 
     let infrastructure = Infrastructure::compiled();
+    if infrastructure == Infrastructure::Unified {
+        return Payload::open_for_ota(directory, infrastructure)
+            .map_err(|error| invalid(&error.to_string()));
+    }
     if infrastructure == Infrastructure::Od {
         return crate::od_release::payload(directory);
     }
@@ -509,7 +519,9 @@ fn open_ota_payload(directory: &Path) -> io::Result<Payload> {
 }
 
 fn verify_payload(payload: &Payload, claims: &ota::Claims) -> io::Result<()> {
-    if crate::restore_ui::enabled() {
+    if release_core::infrastructure::Infrastructure::compiled()
+        == release_core::infrastructure::Infrastructure::Od
+    {
         return Ok(());
     }
     ota::verify_payload(payload, claims).map_err(|error| invalid(&error.to_string()))
@@ -539,14 +551,14 @@ pub fn select_release(shared: &Shared, version: &str) -> io::Result<()> {
         .into_iter()
         .find(|release| release.version == version)
         .ok_or_else(|| invalid("Релиз отсутствует в текущем каталоге"))?;
-    release_core::infrastructure::Infrastructure::from_version(&release.version)
-        .and_then(|profile| profile.require(release_core::infrastructure::Infrastructure::Od))
-        .map_err(|error| invalid(&error.to_string()))?;
+    if !release_core::infrastructure::Infrastructure::compiled().matches_version(&release.version) {
+        return Err(invalid("Релиз не соответствует установленной службе"));
+    }
     catalog_selection::verify_selection(
         &release,
         &runtime.state.installed_version,
         true,
-        release_core::infrastructure::Infrastructure::Od,
+        release_core::infrastructure::Infrastructure::compiled(),
     )
     .map_err(|error| invalid(&error.to_string()))?;
     crate::telemetry::finish(Some("Пользователь изменил выбранный релиз"));

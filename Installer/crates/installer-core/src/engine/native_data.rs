@@ -6,7 +6,7 @@ const REPAIR: &str =
 
 impl Engine {
     pub(super) fn prepare_od_native_data(&self, deadline: Instant) -> Result<()> {
-        if self.payload.manifest.infrastructure != crate::infrastructure::Infrastructure::Od {
+        if !self.payload.manifest.infrastructure.uses_restore_ui() {
             return Err(Error::new(
                 "NATIVE_DATA_REPAIR_NOT_ALLOWED",
                 "Восстановление доступно только для OD",

@@ -111,7 +111,7 @@ pub struct Payload {
 
 impl Payload {
     pub fn restoremode_ota(&self) -> bool {
-        self.manifest.infrastructure == crate::infrastructure::Infrastructure::Od
+        self.manifest.infrastructure.uses_restore_ui()
             && self
                 .manifest
                 .requirements
@@ -138,8 +138,15 @@ impl Payload {
     }
 
     pub fn open_for_od_ota(root: &Path) -> Result<Self> {
+        Self::open_for_ota(root, crate::infrastructure::Infrastructure::Od)
+    }
+
+    pub fn open_for_ota(
+        root: &Path,
+        infrastructure: crate::infrastructure::Infrastructure,
+    ) -> Result<Self> {
         let payload = Self::load_for_target(root, ValidationTarget::OdOta)?;
-        payload.require_infrastructure(crate::infrastructure::Infrastructure::Od)?;
+        payload.require_infrastructure(infrastructure)?;
         payload.verify()?;
         Ok(payload)
     }
@@ -268,7 +275,25 @@ impl Payload {
 
     pub fn verify(&self) -> Result<()> {
         self.manifest.recipe.validate()?;
+        if self.manifest.infrastructure == crate::infrastructure::Infrastructure::Unified
+            && !self
+                .manifest
+                .requirements
+                .as_ref()
+                .is_some_and(|requirements| {
+                    requirements
+                        .required_capabilities
+                        .iter()
+                        .any(|capability| capability == "unified-runtime-v1")
+                })
+        {
+            return Err(Error::new(
+                "REQUIREMENTS_INVALID",
+                "Общий payload требует unified-runtime-v1",
+            ));
+        }
         let loader = match self.manifest.infrastructure {
+            crate::infrastructure::Infrastructure::Unified => "voyahtune-new-voyahtune-loader",
             crate::infrastructure::Infrastructure::Pi => "loaderFrida",
             crate::infrastructure::Infrastructure::Od => "load.bin",
         };
@@ -354,7 +379,15 @@ impl Payload {
                 }
             }
             if metadata.schema != 3
-                || metadata.infrastructure != self.manifest.infrastructure
+                || metadata.infrastructure
+                    != if self.manifest.infrastructure
+                        == crate::infrastructure::Infrastructure::Unified
+                    {
+                        // Shared APKs retain the existing acc-hooks contract; runtime identity is signed below.
+                        crate::infrastructure::Infrastructure::Od
+                    } else {
+                        self.manifest.infrastructure
+                    }
                 || metadata.product != "VoyahTune"
                 || metadata.component != component
                 || metadata.release_version != self.manifest.release_version
@@ -379,11 +412,11 @@ impl Payload {
                 );
             }
             if package.package == RUNYN
-                && self.manifest.infrastructure != crate::infrastructure::Infrastructure::Pi
+                && self.manifest.infrastructure == crate::infrastructure::Infrastructure::Od
             {
                 return Err(Error::new(
                     "INFRASTRUCTURE_RECIPE",
-                    "RunYN разрешён только в PI payload",
+                    "RunYN не поддерживается прежним OD payload",
                 ));
             }
         }
@@ -396,6 +429,13 @@ impl Payload {
 
 pub fn destination(name: &str) -> Option<(String, u32)> {
     match name {
+        "voyahtune-new-voyahtune-loader" => Some((
+            "/data/local/bin/voyahtune-new/voyahtune-loader".into(),
+            0o755,
+        )),
+        "voyahtune-new-frida-inject" => {
+            Some(("/data/local/bin/voyahtune-new/frida-inject".into(), 0o755))
+        }
         "native.apk" => Some((NATIVE_PATH.into(), 0o644)),
         "voyahtune-updater" => Some(("/data/local/bin/voyahtune-updater".into(), 0o755)),
         "voyahtune-updater.apk" => Some((

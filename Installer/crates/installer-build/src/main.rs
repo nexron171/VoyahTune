@@ -19,6 +19,12 @@ struct Cli {
 #[derive(Subcommand)]
 enum CommandKind {
     Build(Args),
+    PrepareUnifiedRuntime {
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+    },
     VerifyPayload {
         path: PathBuf,
     },
@@ -41,7 +47,7 @@ enum CommandKind {
 }
 #[derive(clap::Args)]
 struct Args {
-    #[arg(long)]
+    #[arg(long, default_value = "unified")]
     infrastructure: Infrastructure,
     #[arg(long)]
     root: PathBuf,
@@ -56,6 +62,14 @@ struct Args {
 }
 fn main() {
     let result = match Cli::parse().command {
+        CommandKind::PrepareUnifiedRuntime { root, output } => (|| -> Result<()> {
+            let (recipe, sources) = discover_unified(&root.canonicalize()?)?;
+            fs::create_dir_all(&output)?;
+            write_json(&output.join("recipe.json"), &recipe)?;
+            write_json(&output.join("sources.json"), &sources)?;
+            println!("{}", output.display());
+            Ok(())
+        })(),
         CommandKind::VerifyOta {
             entry,
             payload: directory,
@@ -108,7 +122,20 @@ fn run(args: Args) -> Result<()> {
         return Err(Error::new("BUILD_ARGUMENTS", "Укажите версию и revision"));
     }
     args.infrastructure.require_version(&args.version)?;
-    let (recipe, source_spec) = discover(&root, args.infrastructure)?;
+    let (recipe, source_spec) = if args.infrastructure == Infrastructure::Unified {
+        let status = Command::new("sh")
+            .arg(root.join("Packaging/new/build.sh"))
+            .status()?;
+        if !status.success() {
+            return Err(Error::new(
+                "UNIFIED_BUILD",
+                "Не удалось собрать новый runtime",
+            ));
+        }
+        discover_unified(&root)?
+    } else {
+        discover(&root, args.infrastructure)?
+    };
     recipe.validate()?;
     fs::create_dir_all(root.join("Updater/build"))?;
     write_json(
@@ -174,7 +201,7 @@ fn run(args: Args) -> Result<()> {
                 root.join("Updater/build/ui-next.apk"),
             )?;
         }
-        let projects = if args.infrastructure == Infrastructure::Pi {
+        let projects = if args.infrastructure != Infrastructure::Od {
             vec!["RunYN", "Native", "RestoreMode"]
         } else {
             vec!["Native", "RestoreMode"]
@@ -194,7 +221,14 @@ fn run(args: Args) -> Result<()> {
                     "--no-daemon",
                     "assembleRelease",
                     &format!("-PvoyahReleaseVersion={}", args.version),
-                    &format!("-PvoyahInfrastructure={}", args.infrastructure.as_str()),
+                    &format!(
+                        "-PvoyahInfrastructure={}",
+                        if args.infrastructure == Infrastructure::Unified {
+                            "od"
+                        } else {
+                            args.infrastructure.as_str()
+                        }
+                    ),
                     &format!("-PvoyahBuildRevision={}", args.revision),
                     &format!(
                         "-PvoyahInstallRecipe={}",
@@ -225,9 +259,13 @@ fn run(args: Args) -> Result<()> {
             infrastructure: args.infrastructure,
             schema: 4,
             removal_only: false,
-            requirements: Some(if args.infrastructure == Infrastructure::Od {
+            requirements: Some(if args.infrastructure == Infrastructure::Unified {
+                installer_core::compatibility::Requirements::unified()
+            } else if args.infrastructure == Infrastructure::Od {
                 installer_core::compatibility::Requirements::restoremode_ota()
-            } else { installer_core::compatibility::Requirements::infrastructure() }),
+            } else {
+                installer_core::compatibility::Requirements::infrastructure()
+            }),
             recipe,
             product: "VoyahTune".into(),
             release_version: args.version,
@@ -280,7 +318,8 @@ fn run(args: Args) -> Result<()> {
 }
 fn build_recovery(root: &Path, output: &Path) -> Result<()> {
     let infrastructure = Infrastructure::Od;
-    let (recipe, sources) = discover(root, infrastructure)?;
+    let (mut recipe, sources) = discover(root, infrastructure)?;
+    recipe.remove_directories = recipe.cleanup_directories();
     fs::create_dir_all(output)?;
     let mut manifest = Manifest {
         infrastructure,
@@ -319,8 +358,12 @@ fn discover(
     // OD embeds the OTA Activity in RestoreMode; PI keeps its existing UI delivery.
     if infrastructure == Infrastructure::Od {
         recipe.files.retain(|file| {
-            !["voyahtune-updater.apk", "voyahtune-ui-maintenance", "voyahtune-ui-next.apk"]
-                .contains(&file.artifact.as_str())
+            ![
+                "voyahtune-updater.apk",
+                "voyahtune-ui-maintenance",
+                "voyahtune-ui-next.apk",
+            ]
+            .contains(&file.artifact.as_str())
         });
     }
     if infrastructure == Infrastructure::Pi {
@@ -341,6 +384,7 @@ fn discover(
             .push(installer_core::recipe::InstallPackage {
                 artifact: "runyn.apk".into(),
                 package: payload::RUNYN.into(),
+                condition: None,
             });
     }
     for path in include_str!("../../release-core/src/pi-cleanup-paths.txt")
@@ -412,7 +456,9 @@ fn discover(
                 "Updater/app/build/outputs/apk/release/app-release.apk".into()
             }
             "voyahtune-ota-bootstrap.json" => "Updater/build/bootstrap.json".into(),
-            "voyahtune.updater.rc" if infrastructure == Infrastructure::Od => format!("Packaging/od/system/{name}"),
+            "voyahtune.updater.rc" if infrastructure == Infrastructure::Od => {
+                format!("Packaging/od/system/{name}")
+            }
             "voyahtune.updater.rc" => format!("Packaging/system/{name}"),
             "whitelist.xml" => {
                 "Packaging/system/privapp-permissions-ru.big.town.anative.xml".into()
@@ -450,6 +496,71 @@ fn discover(
         serde_json::json!({"schema":1,"infrastructure":infrastructure,"artifacts":artifacts}),
     ))
 }
+fn discover_unified(root: &Path) -> Result<(installer_core::recipe::Recipe, serde_json::Value)> {
+    let (mut recipe, mut sources) = discover(root, Infrastructure::Od)?;
+    let overlay: serde_json::Value = serde_json::from_slice(&fs::read(
+        root.join("Packaging/new/build/release-inputs.json"),
+    )?)?;
+    if overlay["schema"] != 1 || overlay["infrastructure"] != "unified" {
+        return Err(Error::new(
+            "UNIFIED_CONTRACT",
+            "Неподдерживаемый runtime overlay",
+        ));
+    }
+    let retained_roles = [
+        "native.apk",
+        "whitelist.xml",
+        "voyahtune-updater",
+        "voyahtune.updater.rc",
+        "voyahtune-ota-bootstrap.json",
+    ];
+    recipe
+        .files
+        .retain(|file| retained_roles.contains(&file.artifact.as_str()));
+    recipe.files.extend(serde_json::from_value::<
+        Vec<installer_core::recipe::CopyFile>,
+    >(overlay["files"].clone())?);
+    recipe.directories.extend(serde_json::from_value::<
+        Vec<installer_core::recipe::Attributes>,
+    >(overlay["directories"].clone())?);
+    recipe
+        .remove_files
+        .extend(serde_json::from_value::<Vec<String>>(
+            overlay["removeFiles"].clone(),
+        )?);
+    recipe.remove_files.sort();
+    recipe.remove_files.dedup();
+    recipe
+        .packages
+        .retain(|package| package.package == payload::RESTORE);
+    recipe
+        .packages
+        .push(installer_core::recipe::InstallPackage {
+            artifact: "runyn.apk".into(),
+            package: payload::RUNYN.into(),
+            condition: Some(installer_core::recipe::PackageCondition::ExceptH97xy),
+        });
+    let artifacts = sources["artifacts"].as_array_mut().unwrap();
+    artifacts.retain(|artifact| {
+        let name = artifact["name"].as_str().unwrap_or_default();
+        retained_roles.contains(&name)
+            || [
+                "restore_mode.apk",
+                "dns.apk",
+                "dns-helper.sh",
+                "init.logcat.original.sh",
+            ]
+            .contains(&name)
+    });
+    artifacts.extend(serde_json::from_value::<Vec<serde_json::Value>>(
+        overlay["artifacts"].clone(),
+    )?);
+    artifacts.push(serde_json::json!({"name":"runyn.apk", "source":"RunYN/app/build/outputs/apk/release/app-release.apk"}));
+    sources["infrastructure"] = serde_json::json!("unified");
+    recipe.validate()?;
+    Ok((recipe, sources))
+}
+
 fn copy(stage: &Path, source: &Path, name: &str, manifest: &mut Manifest) -> Result<()> {
     if name.is_empty()
         || !name
@@ -476,8 +587,55 @@ fn copy(stage: &Path, source: &Path, name: &str, manifest: &mut Manifest) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
-    fn build_requires_profile_and_recovery_is_universal() {
+    fn builtin_remover_covers_old_and_new_runtime_without_built_unified_resources() {
+        let checkout = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let root = std::env::temp_dir().join(format!("voyahtune-recovery-{}", std::process::id()));
+        fs::create_dir_all(root.join("Packaging/od/inject")).unwrap();
+        for relative in [
+            "Packaging/installer/payload-spec.json",
+            "Packaging/od/system/init.logcat.original.sh",
+            "Packaging/od/installer/common/dns-overlay-device.sh",
+        ] {
+            let destination = root.join(relative);
+            fs::create_dir_all(destination.parent().unwrap()).unwrap();
+            fs::copy(checkout.join(relative), destination).unwrap();
+        }
+        let output = root.join("recovery");
+        build_recovery(&root, &output).unwrap();
+        let payload = Payload::open(&output).unwrap();
+        assert!(payload.manifest.removal_only);
+        assert_eq!(payload.manifest.artifacts.len(), 2);
+        let recipe = &payload.manifest.recipe;
+        for directory in [
+            "/data/local/bin/voyahtune-new",
+            "/data/local/tmp/voyahtune-new",
+            "/data/local/tmp/voyahtune-pi",
+        ] {
+            assert!(
+                recipe.remove_directories.contains(&directory.into()),
+                "{directory}"
+            );
+        }
+        for file in [
+            "/data/local/bin/loaderFrida",
+            "/data/local/bin/injects.json",
+            "/data/local/bin/clusternavi.js",
+        ] {
+            assert!(recipe.cleanup_files().contains(&file.into()), "{file}");
+        }
+        assert!(recipe.files.iter().any(|file| file.artifact == "load.bin"));
+        assert!(recipe
+            .files
+            .iter()
+            .any(|file| file.artifact == "frida-inject"));
+        assert!(!root.join("Packaging/new").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn build_defaults_to_common_payload_and_recovery_is_universal() {
         let argv = [
             "installer-build",
             "build",
@@ -486,11 +644,17 @@ mod tests {
             "--output",
             "out",
             "--version",
-            "3.21.0-od",
+            "4.5.0",
             "--revision",
             "test",
         ];
-        assert!(Cli::try_parse_from(argv).is_err());
+        let Cli {
+            command: CommandKind::Build(args),
+        } = Cli::try_parse_from(argv).unwrap()
+        else {
+            panic!("Expected build")
+        };
+        assert_eq!(args.infrastructure, Infrastructure::Unified);
         for infrastructure in ["pi", "od"] {
             let mut valid = argv.to_vec();
             valid.extend(["--infrastructure", infrastructure]);
@@ -513,9 +677,17 @@ mod tests {
     fn checkout_payload_contains_every_required_runtime_file() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
         let (recipe, sources) = discover(&root, Infrastructure::Od).unwrap();
-        for name in ["voyahtune-updater.apk", "voyahtune-ui-maintenance", "voyahtune-ui-next.apk"] {
+        for name in [
+            "voyahtune-updater.apk",
+            "voyahtune-ui-maintenance",
+            "voyahtune-ui-next.apk",
+        ] {
             assert!(!recipe.files.iter().any(|f| f.artifact == name));
-            assert!(!sources["artifacts"].as_array().unwrap().iter().any(|a| a["name"] == name));
+            assert!(!sources["artifacts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|a| a["name"] == name));
         }
         recipe.validate().unwrap();
         for name in payload::RUNTIME_NAMES.iter().filter(|name| {
@@ -543,6 +715,95 @@ mod tests {
             .files
             .iter()
             .any(|f| f.artifact == "fullscreen_client.js"));
+    }
+    #[test]
+    fn common_recipe_replaces_both_runtimes_and_conditionally_installs_runyn() {
+        use installer_core::recipe::PackageCondition;
+        let checkout = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let root =
+            std::env::temp_dir().join(format!("voyahtune-unified-recipe-{}", std::process::id()));
+        fs::create_dir_all(root.join("Packaging/od/inject")).unwrap();
+        fs::create_dir_all(root.join("Packaging/installer")).unwrap();
+        fs::create_dir_all(root.join("Packaging/new/build")).unwrap();
+        fs::copy(
+            checkout.join("Packaging/installer/payload-spec.json"),
+            root.join("Packaging/installer/payload-spec.json"),
+        )
+        .unwrap();
+        let mut files = Vec::new();
+        let mut artifacts = Vec::new();
+        for (artifact, destination, mode, phase) in [
+            (
+                "voyahtune-new-voyahtune-loader",
+                "/data/local/bin/voyahtune-new/voyahtune-loader",
+                0o755,
+                "files",
+            ),
+            (
+                "voyahtune-new-frida-inject",
+                "/data/local/bin/voyahtune-new/frida-inject",
+                0o755,
+                "files",
+            ),
+            (
+                "voyahtune.load.sh",
+                "/system/etc/init.voyahtune.load.sh",
+                0o755,
+                "boot-hooks",
+            ),
+            (
+                "voyahtune.load.rc",
+                "/system/etc/init/voyahtune.load.rc",
+                0o644,
+                "boot-hooks",
+            ),
+        ] {
+            files.push(serde_json::json!({"artifact":artifact,"destination":destination,"mode":mode,"phase":phase}));
+            artifacts.push(serde_json::json!({"name":artifact,"source":format!("Packaging/new/build/{artifact}")}));
+        }
+        let retired =
+            fs::read_to_string(checkout.join("Packaging/new/config/retired-files.txt")).unwrap();
+        let overlay = serde_json::json!({"schema":1,"infrastructure":"unified","files":files,
+            "directories":[{"path":"/data/local/bin/voyahtune-new","mode":0o755}],
+            "artifacts":artifacts,"removeFiles":retired.lines().collect::<Vec<_>>()});
+        fs::write(
+            root.join("Packaging/new/build/release-inputs.json"),
+            serde_json::to_vec(&overlay).unwrap(),
+        )
+        .unwrap();
+        let (mut recipe, sources) = discover_unified(&root).unwrap();
+        assert_eq!(sources["infrastructure"], "unified");
+        for obsolete in [
+            "load.bin",
+            "loaderFrida",
+            "frida-inject",
+            "injects.json",
+            "voyahtune_drive_reset.js",
+        ] {
+            assert!(!recipe.files.iter().any(|file| file.artifact == obsolete));
+            assert!(recipe
+                .remove_files
+                .contains(&format!("/data/local/bin/{obsolete}")));
+            assert!(!sources["artifacts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|source| source["name"] == obsolete));
+        }
+        assert!(!recipe
+            .remove_files
+            .iter()
+            .any(|path| path.contains("updater")));
+        assert_eq!(recipe.packages.len(), 2);
+        let runyn = recipe
+            .packages
+            .iter_mut()
+            .find(|package| package.package == payload::RUNYN)
+            .unwrap();
+        assert_eq!(runyn.condition, Some(PackageCondition::ExceptH97xy));
+        runyn.condition = None;
+        assert!(recipe.validate().is_err());
+        fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn pi_payload_selects_go_loader_and_only_pi_hook_sources() {

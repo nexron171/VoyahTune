@@ -940,6 +940,8 @@ fn save_report(events: Vec<Value>, runtime: State<Runtime>) -> Result<String> {
             "after.json",
             "receipt.json",
             "logcat.txt",
+            "native-data.txt",
+            "runtime-diagnostics.txt",
             "services.txt",
         ] {
             let file = source.join(name);

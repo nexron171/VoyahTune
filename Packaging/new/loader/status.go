@@ -106,32 +106,90 @@ func (publisher *statusPublisher) publish(ctx context.Context, snapshot loaderSt
 }
 
 func checkHealth(statusPath, procRoot string) error {
+	_, err := healthyStatus(statusPath, procRoot)
+	return err
+}
+
+func healthyStatus(statusPath, procRoot string) (loaderStatus, error) {
 	var snapshot loaderStatus
 	if err := readJSON(statusPath, &snapshot); err != nil {
-		return err
+		return snapshot, err
 	}
 	boot, err := bootID(procRoot)
 	if err != nil {
-		return err
+		return snapshot, err
 	}
 	now, err := uptimeSeconds(procRoot)
 	if err != nil {
-		return err
+		return snapshot, err
 	}
 	if snapshot.Schema != 1 || snapshot.State != "running" || snapshot.Boot != boot || snapshot.UpdatedUptime > now || now-snapshot.UpdatedUptime > 15 {
-		return fmt.Errorf("stale or invalid supervisor heartbeat")
+		return snapshot, fmt.Errorf("stale or invalid supervisor heartbeat")
 	}
 	command, err := os.ReadFile(filepath.Join(procRoot, fmt.Sprint(snapshot.Loader.PID), "cmdline"))
 	if err != nil {
-		return err
+		return snapshot, err
 	}
 	argument, _, _ := strings.Cut(string(command), "\x00")
 	if filepath.Base(argument) != "voyahtune-loader" {
-		return fmt.Errorf("heartbeat belongs to another executable")
+		return snapshot, fmt.Errorf("heartbeat belongs to another executable")
 	}
 	identity, err := readIdentity(procRoot, snapshot.Loader.PID, argument)
 	if err != nil || identity != snapshot.Loader {
-		return fmt.Errorf("supervisor PID was reused")
+		return snapshot, fmt.Errorf("supervisor PID was reused")
+	}
+	return snapshot, nil
+}
+
+func checkHooks(statusPath, procRoot string, config loaderConfig) error {
+	snapshot, err := healthyStatus(statusPath, procRoot)
+	if err != nil {
+		return err
+	}
+	configured := make(map[string]bool, len(config.Agents))
+	for _, agent := range config.Agents {
+		configured[agent.ID] = true
+		status, present := snapshot.Agents[agent.ID]
+		if !present || status.Target != agent.Target {
+			return fmt.Errorf("hook %s: missing or mismatched target status", agent.ID)
+		}
+		if err := checkAgentStatus(procRoot, agent, status); err != nil {
+			return err
+		}
+	}
+	for id, status := range snapshot.Agents {
+		if configured[id] {
+			continue
+		}
+		if id != "client."+status.Target || !safeName(status.Target) {
+			return fmt.Errorf("hook %s: unrecognized agent", id)
+		}
+		agent := agentConfig{ID: id, Target: status.Target, Dynamic: true}
+		if err := checkAgentStatus(procRoot, agent, status); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+func checkAgentStatus(procRoot string, agent agentConfig, status agentStatus) error {
+	identity, err := findProcess(procRoot, agent.Target)
+	if err != nil {
+		return fmt.Errorf("hook %s: %w", agent.ID, err)
+	}
+	switch status.State {
+	case "active":
+		if identity.PID > 0 && status.Identity == identity {
+			return nil
+		}
+	case "disabled":
+		if (agent.Condition != "" || agent.Dynamic) && identity.PID > 0 && status.Identity == identity {
+			return nil
+		}
+	case "waiting":
+		if identity.PID == 0 && status.Identity == (processIdentity{}) {
+			return nil
+		}
+	}
+	return fmt.Errorf("hook %s: %s (PID %d, start %s; %s)", agent.ID, status.State, status.Identity.PID, status.Identity.StartTicks, status.Reason)
 }

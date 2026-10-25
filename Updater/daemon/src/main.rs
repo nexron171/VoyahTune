@@ -204,7 +204,7 @@ fn run() -> io::Result<()> {
                         "capabilities":restore_ui::capabilities(),"pid":std::process::id(),"uid":0,"state":rt.state,"settings":rt.config.as_ref().ok().map(config::Config::response),
                         "settingsError":rt.config.as_ref().err()});
                     if restore_ui::enabled() {
-                        response["infrastructure"] = json!("od");
+                        response["infrastructure"] = json!(release_core::infrastructure::Infrastructure::compiled());
                     }
                     Ok(response)
                 }

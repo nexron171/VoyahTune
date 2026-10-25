@@ -19,6 +19,7 @@ case "$(uname -s)" in
 esac
 CC_BIN="$NDK/toolchains/llvm/prebuilt/$NDK_HOST/bin/aarch64-linux-android30-clang"
 [ -x "$CC_BIN" ] || { echo "Missing Android API 30 compiler: $CC_BIN" >&2; exit 1; }
+rm -rf "$SOURCE/build/runtime" "$SOURCE/build/system"
 mkdir -p "$SOURCE/build/runtime" "$SOURCE/build/system" "$SOURCE/cache/go-build" "$SOURCE/cache/go-mod"
 cd "$SOURCE/loader"
 GOTOOLCHAIN=local GOPROXY=off GOCACHE="$SOURCE/cache/go-build" GOMODCACHE="$SOURCE/cache/go-mod" \
@@ -29,4 +30,5 @@ mv -f "$SOURCE/build/runtime/voyahtune-loader.new" "$SOURCE/build/runtime/voyaht
 python3 "$SOURCE/scripts/bundle.py"
 cp "$SOURCE/system/"* "$SOURCE/build/system/"
 cp "$SOURCE/config/install-layout.json" "$SOURCE/build/install-layout.json"
+python3 "$SOURCE/scripts/prepare-release.py"
 printf '%s\n' "$SOURCE/build/runtime"

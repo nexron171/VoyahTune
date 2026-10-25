@@ -100,6 +100,17 @@ pub fn load(root: &Path) -> io::Result<Config> {
         return Err(invalid("Неизвестный формат настроек"));
     }
     config.catalog_url = normalize_url(&config.catalog_url)?;
+    let compiled = release_core::infrastructure::Infrastructure::compiled();
+    if compiled == release_core::infrastructure::Infrastructure::Unified
+        && config.infrastructure != compiled
+    {
+        config.infrastructure = compiled;
+        config.source_generation = config
+            .source_generation
+            .checked_add(1)
+            .ok_or_else(|| invalid("Счётчик источника исчерпан"))?;
+        save(root, &config)?;
+    }
     if crate::restore_ui::enabled()
         && matches!(
             config.catalog_url.as_str(),
@@ -153,6 +164,30 @@ pub fn change_url(root: &Path, current: &mut Config, input: &str) -> io::Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn unified_service_preserves_settings_and_invalidates_legacy_selection_once() {
+        use release_core::infrastructure::Infrastructure;
+        if Infrastructure::compiled() != Infrastructure::Unified {
+            return;
+        }
+        for infrastructure in [Infrastructure::Od, Infrastructure::Pi] {
+            let root = tempfile::tempdir().unwrap();
+            let config = Config {
+                infrastructure,
+                catalog_url: "https://example.org/custom.json".into(),
+                source_generation: 7,
+                dns_enabled: Some(true),
+                ..Config::default()
+            };
+            save(root.path(), &config).unwrap();
+            let migrated = load(root.path()).unwrap();
+            assert_eq!(migrated.infrastructure, Infrastructure::Unified);
+            assert_eq!(migrated.source_generation, 8);
+            assert_eq!(migrated.catalog_url, config.catalog_url);
+            assert_eq!(migrated.dns_enabled, config.dns_enabled);
+            assert_eq!(load(root.path()).unwrap(), migrated);
+        }
+    }
     #[test]
     fn legacy_default_migrates_only_for_od_and_keeps_custom_catalogs() {
         let root = tempfile::tempdir().unwrap();

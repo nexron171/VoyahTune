@@ -8,7 +8,7 @@ use std::{
 };
 
 pub fn enabled() -> bool {
-    Infrastructure::compiled() == Infrastructure::Od
+    Infrastructure::compiled().uses_restore_ui()
 }
 pub fn component() -> &'static str {
     if enabled() {
@@ -19,6 +19,9 @@ pub fn component() -> &'static str {
 }
 pub fn capabilities() -> Vec<&'static str> {
     let mut result = vec!["install-step-progress", "dns-settings"];
+    if Infrastructure::compiled() == Infrastructure::Unified {
+        result.push("unified-runtime-v1");
+    }
     if enabled() {
         result.push("restoremode-ota-ui-v1");
         result.push("catalog-releases");
