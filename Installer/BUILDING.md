@@ -5,7 +5,7 @@ GUI выпускается независимо от автомобильног�
 `4.5.0` или `4.5.0-beta`. Источник версий — корневой `versions.json`; Cargo/Tauri
 и APK metadata синхронизируются с ним перед сборкой.
 
-Текущий контракт требует Installer 1.8.1 и capability `unified-runtime-v1`.
+Текущий контракт требует Installer 1.8.2 и capability `unified-runtime-v1`.
 Native/RestoreMode общие, RunYN входит в архив с условием `except-h97xy`.
 [Подробный состав](../Docs/installer-payload.md).
 
@@ -24,13 +24,13 @@ Native/RestoreMode общие, RunYN входит в архив с услови�
 ./Installer/scripts/build-all-macos.sh --mac
 ```
 
-Результат: `Releases/build/installers-1.8.1/macos-universal.tar.gz` и `build-info.json`.
+Результат: `Releases/build/installers-1.8.2/macos-universal.tar.gz` и `build-info.json`.
 Версия GUI задаётся в `versions.json.installer` и синхронизируется с Cargo/Tauri. При необходимости offline bundle задайте `--payload DIRECTORY`;
 обычная сборка включает только ADB и небольшой remover. Пользователь выбирает/скачивает
 версию в GUI. Пользовательского CLI нет, `installer-build` остаётся инструментом разработчика.
 
 `./make_release.sh VERSION --minimum-ota-version OTA_BASE_VERSION --mac` сохраняется как обёртка: собирает payload ZIP и отдельно
-macOS GUI ZIP в `Releases/dist/VoyahTune-Installer-1.8.1/`. `--installers` по умолчанию
+macOS GUI ZIP в `Releases/dist/VoyahTune-Installer-1.8.2/`. `--installers` по умолчанию
 выбирает macOS Universal и Windows x64/x86/ARM64; Linux добавляется через `--linux`.
 Для одной macOS используйте `--mac`.
 Подробности и публикация: [Docs/releasing.md](../Docs/releasing.md).
@@ -71,7 +71,7 @@ macOS GUI ZIP в `Releases/dist/VoyahTune-Installer-1.8.1/`. `--installers` по
   --payload Releases/build/installer-payload-4.5.0
 ```
 
-Результат этой низкоуровневой команды — `Releases/build/installers-1.8.1/`:
+Результат этой низкоуровневой команды — `Releases/build/installers-1.8.2/`:
 macos-universal.tar.gz, windows-x64.exe, windows-x86.exe, windows-arm64.exe и build-info.json.
 При явном `--linux` добавляется linux-x64.run.
 Можно указать другой каталог внутри Releases через `--output`.

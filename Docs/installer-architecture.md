@@ -28,7 +28,7 @@ Desktop по умолчанию получает каталог через `GET 
 
 Новый релиз единый: `make_release.sh` собирает runtime из `Packaging/new/`, общие
 Native/RestoreMode и RunYN без выбора инфраструктуры и без суффикса версии.
-Manifest использует `infrastructure: unified`; нужен Installer 1.8.1 с capability
+Manifest использует `infrastructure: unified`; нужен Installer 1.8.2 с capability
 `unified-runtime-v1`. Внутренние подписанные metadata APK сохраняют совместимое
 значение, которое задаёт общий сборщик. [Контракт](installer-payload.md).
 
@@ -167,7 +167,7 @@ PackageManager и перезапуск Android не вызывают удале�
 
 Эта проверка активных APK требует пересборки установщиков macOS и Windows x64/x86,
 но сама по себе не меняет контракт payload. В текущем едином payload отдельного
-APK Updater нет: экран входит в RestoreMode. Актуальный минимум Installer — 1.8.1.
+APK Updater нет: экран входит в RestoreMode. Актуальный минимум Installer — 1.8.2.
 
 
 ## Подготовка без дополнительных диалогов
