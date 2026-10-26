@@ -12,10 +12,17 @@ final class ClimateAirDistribution {
     private ClimateAirDistribution() {}
 
     static boolean handles(String field) {
-        return direction(field) != 0;
+        return CarPlayClimateProtocol.VENT_MODE.equals(field) || direction(field) != 0;
+    }
+
+    static boolean validMode(int mode) {
+        return mode >= 0 && mode < MODES.length;
     }
 
     static Double observed(int mode, String field) {
+        if (CarPlayClimateProtocol.VENT_MODE.equals(field)) {
+            return validMode(mode) ? (double) mode : null;
+        }
         int direction = direction(field);
         if (mode < 0 || mode >= MODES.length || direction == 0) {
             return null;

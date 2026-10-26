@@ -154,9 +154,8 @@ final class CarPlayUltraController implements AutoCloseable {
         for (int side = 0; side < 2; side++) {
             String prefix = side == 0 ? "DRIVER" : "PASSENGER";
             Integer enabled = values[side], level = values[side + 2], program = values[side + 4];
-            if (enabled != null && enabled == 1) result.putInt(prefix + "_MASSAGE", 0);
-            else if (enabled != null && enabled == 2 && level != null && level >= 1 && level <= 3)
-                result.putInt(prefix + "_MASSAGE", level);
+            Integer activeLevel = OemSeatMassageState.activeLevel(enabled, level);
+            if (activeLevel != null) result.putInt(prefix + "_MASSAGE", activeLevel);
             if (program != null && program >= 1 && program <= 2)
                 result.putInt(prefix + "_MASSAGE_PROGRAM", program);
         }
@@ -229,6 +228,8 @@ final class CarPlayUltraController implements AutoCloseable {
         boolean program =
                 field.equals("DRIVER_MASSAGE_PROGRAM") || field.equals("PASSENGER_MASSAGE_PROGRAM");
         boolean level = field.equals("DRIVER_MASSAGE") || field.equals("PASSENGER_MASSAGE");
+        boolean cycle =
+                field.equals("DRIVER_MASSAGE_CYCLE") || field.equals("PASSENGER_MASSAGE_CYCLE");
         boolean light = field.equals("LIGHT_MODE");
         long deadline =
                 Math.min(
@@ -236,8 +237,9 @@ final class CarPlayUltraController implements AutoCloseable {
                         SystemClock.elapsedRealtime() + 3000);
         long epoch = generation;
         Messenger recipient = owner;
-        if ((!program && !level && !light)
+        if ((!program && !level && !light && !cycle)
                 || raw != value
+                || cycle && value != 1
                 || value < (program ? 1 : 0)
                 || value > (program ? 2 : 3)) {
             respond(recipient, request, CarPlayClimateProtocol.INVALID, epoch);
@@ -253,7 +255,8 @@ final class CarPlayUltraController implements AutoCloseable {
                                         light
                                                 ? setLight(value, epoch, deadline)
                                                 : setMassage(
-                                                        field, value, program, epoch, deadline);
+                                                        field, value, program, cycle, epoch,
+                                                        deadline);
                                 error =
                                         confirmed
                                                 ? CarPlayClimateProtocol.SUCCESS
@@ -277,29 +280,49 @@ final class CarPlayUltraController implements AutoCloseable {
     }
 
     private boolean setMassage(
-            String field, int value, boolean program, long epoch, long deadline) {
+            String field, int value, boolean program, boolean cycle, long epoch, long deadline) {
         Boolean confirmed =
                 OemVehicleStateTransport.withSession(
                         context,
                         Arrays.asList(KEYS),
                         session -> {
                             int side = field.startsWith("PASSENGER") ? 1 : 0;
+                            Integer initialPower =
+                                    cycle ? session.readVehicleState(KEYS[side]) : null;
+                            Integer target =
+                                    cycle
+                                            ? OemSeatMassageState.nextLevel(
+                                                    initialPower,
+                                                    session.readVehicleState(KEYS[side + 2]))
+                                            : Integer.valueOf(value);
+                            if (target == null) return false;
+                            String observedField =
+                                    cycle
+                                            ? field.substring(0, field.length() - "_CYCLE".length())
+                                            : field;
                             Map<OemVehicleStateTransport.StateKey, Integer> commands =
                                     new LinkedHashMap<>();
-                            if (program) commands.put(KEYS[side + 4], value);
+                            if (program) commands.put(KEYS[side + 4], target);
                             else {
-                                if (value > 0) commands.put(KEYS[side + 2], value);
-                                commands.put(KEYS[side], value == 0 ? 1 : 2);
+                                if (target > 0) commands.put(KEYS[side + 2], target);
+                                commands.put(KEYS[side], target == 0 ? 1 : 2);
                             }
                             for (Map.Entry<OemVehicleStateTransport.StateKey, Integer> command :
                                     commands.entrySet()) {
                                 if (!live(epoch, deadline)) return false;
                                 Integer observed = session.readVehicleState(command.getKey());
-                                if (observed == null
-                                        || observed < 1
-                                        || observed > (command.getKey() == KEYS[side + 2] ? 3 : 2))
-                                    return false;
-                                if (observed.equals(command.getValue())) continue;
+                                boolean settingInactiveIntensity =
+                                        cycle
+                                                && Integer.valueOf(1).equals(initialPower)
+                                                && command.getKey() == KEYS[side + 2];
+                                if (!settingInactiveIntensity
+                                        && (observed == null
+                                                || observed < 1
+                                                || observed
+                                                        > (command.getKey() == KEYS[side + 2]
+                                                                ? 3
+                                                                : 2))) return false;
+                                if (command.getValue().equals(observed)) continue;
                                 if (!live(epoch, deadline)) return false;
                                 session.sendVehicleState(
                                         new OemVehicleStateTransport.StateValue(
@@ -314,7 +337,7 @@ final class CarPlayUltraController implements AutoCloseable {
                                 } while (true);
                             }
                             return live(epoch, deadline)
-                                    && read(session).getInt(field, -1) == value;
+                                    && read(session).getInt(observedField, -1) == target;
                         });
         return Boolean.TRUE.equals(confirmed);
     }

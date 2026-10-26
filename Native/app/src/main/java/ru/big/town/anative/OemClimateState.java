@@ -60,7 +60,9 @@ final class OemClimateState {
         flag(values, CarPlayClimateProtocol.POWER, power);
         flag(values, CarPlayClimateProtocol.COMPRESSOR, compressor);
         flag(values, CarPlayClimateProtocol.AUTO, automatic);
-        if (fan >= 0 && fan <= MAX_FAN_LEVEL) {
+        if (power == 0) {
+            values.put(CarPlayClimateProtocol.FAN, 0.0);
+        } else if (power == 1 && fan >= 0 && fan <= MAX_FAN_LEVEL) {
             values.put(CarPlayClimateProtocol.FAN, (double) fan);
         }
         if (dual == 0 || dual == 1) {
@@ -77,6 +79,7 @@ final class OemClimateState {
         }
         for (String field :
                 new String[] {
+                    CarPlayClimateProtocol.VENT_MODE,
                     CarPlayClimateProtocol.VENT_UPPER,
                     CarPlayClimateProtocol.VENT_MIDDLE,
                     CarPlayClimateProtocol.VENT_LOWER

@@ -338,6 +338,7 @@ class VoyahUltraProtocol(
 
     /** What the phone wrote for route sharing in this session, seen by both data streams. */
     private val phoneValues = UltraPhoneValues()
+    private val writeTransactions = UltraWriteTransactions()
     private val climateProtocolDelegate = lazy {
         VehicleStateProtocol { highPriority, body ->
             val client = if (highPriority) RcsClientTypes.CAR_PLAY_PROTOCOL_DATA_2
@@ -388,7 +389,7 @@ class VoyahUltraProtocol(
                     log("VEHICLE CONTROL result confirmed=${it.confirmed} ${it.message}")
                 }
             }
-        }, vehicleControlsText = vehicleControlsText)
+        }, vehicleControlsText = vehicleControlsText, writeTransactions = writeTransactions)
 
     private fun log(text: String) { runCatching { trace(text.take(3000)) } }
 

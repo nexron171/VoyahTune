@@ -230,7 +230,7 @@ internal class VehicleStateProtocol(private val send: (Boolean, ByteArray) -> Un
                     else -> null
                 }
 
-                1, 7 -> raw.toLong().takeIf { normalize(raw) != null }
+                1, 3, 7 -> raw.toLong().takeIf { normalize(raw) != null }
                 else -> raw.takeIf { normalize(raw) != null }
             }
         }
@@ -299,25 +299,9 @@ internal class VehicleStateProtocol(private val send: (Boolean, ByteArray) -> Un
                     maximum = 3.0,
                     step = 1.0,
                 ),
-                flag(id + 2L, 0x30000002, "${fieldPrefix}On"),
                 layout(id + 3L, position),
             )
         }
-
-        private data class VentControl(val id: Int, val field: String, val direction: Long) {
-            fun characteristics(): List<Characteristic> = listOf(
-                flag(id + 1L, 0x30000002, field),
-                flag(id + 2L, 0x3000005f, "auto"),
-                Characteristic(id + 3L, 0x31000025, 13, fixed = listOf(direction)),
-                layout(id + 4L, "seat_front"),
-            )
-        }
-
-        private val vents = listOf(
-            VentControl(548, "ventUpper", 2),
-            VentControl(553, "ventLower", 4),
-            VentControl(558, "ventMiddle", 16),
-        )
 
         private val seats = listOf(
             SeatControl(1025, "driverSeatHeating", "seat_front_left"),
@@ -346,6 +330,10 @@ internal class VehicleStateProtocol(private val send: (Boolean, ByteArray) -> Un
             flag(530, 0x30000002, "auto"),
             flag(538, 0x30000002, "sync"),
             layout(539, "seat_front"),
+            Characteristic(549, 0x30000038, 3, "ventMode", minimum = 0.0, maximum = 4.0, step = 1.0),
+            Characteristic(550, 0x3000005f, 0, "auto", writable = false),
+            Characteristic(551, 0x31000025, 13, fixed = listOf(16L, 20L, 4L, 6L, 2L)),
+            layout(552, "seat_front"),
             Characteristic(
                 564,
                 0x31000021,
@@ -356,7 +344,7 @@ internal class VehicleStateProtocol(private val send: (Boolean, ByteArray) -> Un
                 step = 1.0,
             ),
             Characteristic(770, 0x48000004, 10, fixed = "5Seater"),
-        ) + vents.flatMap { it.characteristics() } + seats.flatMap { it.characteristics() }
+        ) + seats.flatMap { it.characteristics() }
 
         private fun observed(snapshot: Map<String, Double> = VehicleClimate.snapshot()): Map<Long, Any?> =
             characteristics.associate { it.id to it.value(snapshot) }
@@ -385,9 +373,8 @@ internal class VehicleStateProtocol(private val send: (Boolean, ByteArray) -> Un
                         service(529, 0x11000008, 530),
                         service(537, 0x11000012, 538, 539),
                         service(563, 0x11000003, 564),
-                    ) + vents.map {
-                        service(it.id, 0x11000006, it.id + 1L, it.id + 2L, it.id + 3L, it.id + 4L)
-                    },
+                        service(548, 0x11000006, 549, 550, 551, 552),
+                    ),
                 ),
                 mapOf(
                     "iid" to 768,
@@ -399,7 +386,7 @@ internal class VehicleStateProtocol(private val send: (Boolean, ByteArray) -> Un
                     "iid" to 1024,
                     "type" to 0x01500001,
                     "version" to "1.0",
-                    "services" to seats.map { service(it.id, it.type, it.id + 1L, it.id + 2L, it.id + 3L) },
+                    "services" to seats.map { service(it.id, it.type, it.id + 1L, it.id + 3L) },
                 ),
             )
         }

@@ -117,13 +117,14 @@ public class ClimateCommandTest {
     }
 
     @Test
-    public void circulationCyclesOnOffAutoFromTheFreshOemMode() {
-        int[] observedModes = {0, 1, 2, 0};
+    public void circulationCyclesOnAutoOffFromTheFreshOemMode() {
+        int[] observedModes = {0, 2, 1, 0};
         for (int index = 0; index < observedModes.length - 1; index++) {
             OemClimateState observed = state(1, 0, 3, observedModes[index]);
             assertEquals(observedModes[index + 1], ClimateCommand.nextCirculationMode(observed));
             assertFalse(
-                    ClimateCommand.reached(observed, CarPlayClimateProtocol.CYCLE_RECIRCULATION, 1));
+                    ClimateCommand.reached(
+                            observed, CarPlayClimateProtocol.CYCLE_RECIRCULATION, 1));
             ClimateCommand command =
                     ClimateCommand.from(observed, CarPlayClimateProtocol.CYCLE_RECIRCULATION, 1);
             assertEquals("AC_RECIRC_AIR", command.field);
@@ -137,6 +138,21 @@ public class ClimateCommandTest {
         assertEquals(-1, ClimateCommand.nextCirculationMode(unknown));
         assertNull(ClimateCommand.from(unknown, CarPlayClimateProtocol.CYCLE_RECIRCULATION, 1));
         assertFalse(ClimateCommand.valid(CarPlayClimateProtocol.RECIRCULATION_AUTO, 1));
+    }
+
+    @Test
+    public void fanShowsZeroWhenHvacIsOffAndDoesNotGuessUnknownPower() {
+        for (int remembered : new int[] {-1, 0, 1, 3, 7, 8, 255}) {
+            OemClimateState off = state(0, 0, remembered, 1);
+            assertEquals(0.0, off.values().get(CarPlayClimateProtocol.FAN), 0);
+            assertTrue(ClimateCommand.reached(off, CarPlayClimateProtocol.FAN, 0));
+            ClimateCommand start = ClimateCommand.from(off, CarPlayClimateProtocol.FAN, 3);
+            assertEquals("AC_BLOWER", start.field);
+            assertEquals(4, start.value);
+            OemClimateState unknown = state(-1, 0, remembered, 1);
+            assertFalse(unknown.values().containsKey(CarPlayClimateProtocol.FAN));
+            assertNull(ClimateCommand.from(unknown, CarPlayClimateProtocol.FAN, 3));
+        }
     }
 
     @Test

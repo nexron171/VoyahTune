@@ -102,6 +102,7 @@ internal class VoyahClimateAccessory(
     private val vehicleControlWriter: ((UltraVehicleControl, Int) -> UltraClimateWriteResult)? = null,
     private val vehicleControlsText: UltraVehicleControlsText = UltraVehicleControlsText(),
     private val volumeRange: IntRange = 0..100,
+    private val writeTransactions: UltraWriteTransactions = UltraWriteTransactions(),
 ) {
     init { require(volumeRange.first in 0..255 && volumeRange.last in volumeRange.first..255) }
     /** Values the phone wrote successfully on this stream: confirmed by one update even if unchanged. */
@@ -110,7 +111,7 @@ internal class VoyahClimateAccessory(
     /** Per stream: how many writes of each phone value this stream has already confirmed. */
     private val confirmedWrites = linkedMapOf<Long, Long>()
     /** Echo an accepted action once; the following update returns the button to ready. */
-    private val appActions = mutableMapOf<UltraVehicleControl, Int>()
+    private val buttonActions = mutableMapOf<UltraVehicleControl, Int>()
     private val vehicleControlIds = VoyahVehicleControls.ids(supportedVehicleControls)
     private var lastSent: Map<Long, Any?> = emptyMap()
     /** Mirrors the shared ownership used by working CarPlay climate descriptions; unmapped writes still get -50. */
@@ -140,7 +141,7 @@ internal class VoyahClimateAccessory(
             fixed(274, 0x4500010A, CafCharacteristicFormat.STRING), fixed(275, 0x45000111, CafCharacteristicFormat.STRING)))))
     /** The vehicle app's information rows: version and live vehicle data. */
     private fun automakerSettings() = accessory(1280, 0x05000001,
-        VoyahVehicleControls.services(supportedVehicleControls, vehicleControls(), vehicleControlsText) +
+        VoyahVehicleControls.services(supportedVehicleControls, vehicleControls(), vehicleControlsText, buttonActions) +
         VoyahVehicleDataSettings.services(vehicle(), vehicleDataText) + listOf(
         service(1281, 0x16000015, listOf(fixed(1282, 0x30000019, CafCharacteristicFormat.STRING), fixed(1283, 0x30000001, CafCharacteristicFormat.STRING),
             fixed(1284, 0x30000017, CafCharacteristicFormat.STRING), fixed(1285, 0x36000006, CafCharacteristicFormat.UINT8, 15), fixed(1286, 0x3000005E, CafCharacteristicFormat.STRING),
@@ -277,17 +278,30 @@ internal class VoyahClimateAccessory(
     private fun write(message: CafMessageReader): CafRcsFrame {
         val transaction = message.requireTransactionId() // Before any vehicle side effect.
         val requested = message.valuesMap()
-        if (requested.size > 32) return CarAccessoryMessages.generalError(PLUGIN_ID, PARAMETER_ERROR, transaction)
+        if (requested.size > 32) {
+            return CarAccessoryMessages.generalError(PLUGIN_ID, PARAMETER_ERROR, transaction)
+        }
+        val results = writeTransactions.execute(transaction, requested) { applyWrite(requested) }
+            ?: return CarAccessoryMessages.generalError(PLUGIN_ID, PARAMETER_ERROR, transaction)
+        confirmWritten.addAll(results.filterValues { it == 0L }.keys)
+        for (control in supportedVehicleControls) {
+            if (control.isButton && results[control.valueIid] == 0L) {
+                control.normalizeRequest(requested[control.valueIid])?.let { buttonActions[control] = it }
+            }
+        }
+        return CarAccessoryMessages.writeResponse(PLUGIN_ID, transaction, results)
+    }
+
+    private fun applyWrite(requested: Map<Long, Any?>): Map<Long, Long> {
         val results = requested.keys.associateWith { PARAMETER_ERROR }.toMutableMap()
         // Phone-owned route data is accepted as a value store only; it never becomes a vehicle command.
         for (iid in requested.keys.filter { it in PHONE_IDS }) { phoneValues.write(iid, requested[iid]); results[iid] = 0L }
         val sendVehicleControl = vehicleControlWriter
         for (control in supportedVehicleControls) {
             if (control.valueIid !in requested || sendVehicleControl == null) continue
-            val wanted = control.normalize(requested[control.valueIid]) ?: continue
+            val wanted = control.normalizeRequest(requested[control.valueIid]) ?: continue
             val result = runCatching { sendVehicleControl.invoke(control, wanted) }.getOrNull()
             results[control.valueIid] = if (result?.confirmed == true) 0L else UNAVAILABLE
-            if (control.isAppAction && result?.confirmed == true) appActions[control] = wanted
         }
         val volumeIds = requested.keys.filter { it in VoyahVehicleDescription.writableIds }
         val sendVolume = volumeWriter
@@ -330,8 +344,7 @@ internal class VoyahClimateAccessory(
                 if (!control.isVent) confirmWritten.add(control.onIid)
             }
         }
-        confirmWritten.addAll(results.filter { (iid, result) -> result == 0L && iid !in PHONE_IDS }.keys)
-        return CarAccessoryMessages.writeResponse(PLUGIN_ID, transaction, results)
+        return results
     }
     private fun integerLevel(value: Any?, max: Int) = (value as? Number)?.toDouble()?.takeIf {
         it.isFinite() && it in 0.0..max.toDouble() && it == kotlin.math.floor(it) }?.toInt()
@@ -345,14 +358,17 @@ internal class VoyahClimateAccessory(
             val writes = phoneValues.writeCount(iid)
             if (writes != (confirmedWrites[iid] ?: 0L)) { confirmedWrites[iid] = writes; changed[iid] = current[iid] }
         }
-        // A setting the car applied (climate, comfort, volume) is confirmed with its read-back too,
-        // also when the phone wrote the value the car already had.
-        for (iid in confirmWritten) if (iid in subscriptions && current[iid] != null) changed[iid] = current[iid]
+        // Retransmitted writes still need an echo, including phone-owned null route values.
+        for (iid in confirmWritten) {
+            if (iid in subscriptions && (current[iid] != null || iid in PHONE_IDS)) {
+                changed[iid] = current[iid]
+            }
+        }
         confirmWritten.clear()
         // First confirm the phone's written action. Then publish ready (0) on the
         // next update: keeping the action disables the button, skipping its echo
         // leaves the phone's write unconfirmed and prevents another invocation.
-        appActions.clear()
+        buttonActions.clear()
         if (changed.isEmpty()) return null
         lastSent = lastSent + changed
         return CarAccessoryMessages.updateNotify(PLUGIN_ID, changed)
@@ -360,10 +376,15 @@ internal class VoyahClimateAccessory(
     private fun fresh(time: Long) = now() - time in 0..MAX_AGE_MILLIS
     private fun vehicle(): UltraVehicleReadings? = sample()?.takeIf { fresh(it.vehicleSampledAtMillis) }?.vehicle
     private fun vehicleControls(): Map<UltraVehicleControl, Int> {
-        val s = sample()
-        val current = s?.vehicleControlValues?.filter { (c, _) -> fresh(
-            if (c == UltraVehicleControl.LIGHT_MODE) s.lightingSampledAtMillis else s.vehicleControlsSampledAtMillis) }.orEmpty()
-        return current + UltraVehicleControl.entries.filter { it.isAppAction }.associateWith { appActions[it] ?: 0 }
+        val observed = sample() ?: return emptyMap()
+        return observed.vehicleControlValues.filter { (control, _) ->
+            val sampledAt = if (control == UltraVehicleControl.LIGHT_MODE) {
+                observed.lightingSampledAtMillis
+            } else {
+                observed.vehicleControlsSampledAtMillis
+            }
+            fresh(sampledAt)
+        }
     }
     private fun radio(): UltraRadioSnapshot? = sample()?.takeIf { fresh(it.radioSampledAtMillis) }?.radio
     private fun current(control: UltraHvacControl): Any? {
@@ -396,7 +417,7 @@ internal class VoyahClimateAccessory(
             iid in CONSTANTS -> CONSTANTS[iid]
             iid in VoyahVehicleDataSettings.ids -> VoyahVehicleDataSettings.value(iid, vehicle(), vehicleDataText)
             iid in vehicleControlIds ->
-                VoyahVehicleControls.value(iid, supportedVehicleControls, vehicleControls(), vehicleControlsText)
+                VoyahVehicleControls.value(iid, supportedVehicleControls, vehicleControls(), vehicleControlsText, buttonActions)
             iid in VoyahVehicleDescription.ids -> VoyahVehicleDescription.value(iid, vehicle())
             radioSupported && iid in VoyahRadioDescription.ids -> VoyahRadioDescription.value(iid, radio())
             hvac != null -> current(hvac)
