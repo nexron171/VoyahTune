@@ -1,9 +1,9 @@
 # Ранний перехват гостевого ACC ON на H97X/H97Y
 
-Описание относится к инфраструктуре **OD** (`Packaging/od/`); перенос этих hooks
-в PI не подразумевается. [Разделение релизов](installer-payload.md).
+Описание относится к указанным ниже OEM-прошивкам. В едином runtime
+перехваты выбираются адаптерами. [Контракт payload](installer-payload.md).
 
-Агент `Packaging/od/inject/voyahtune_acc_restore.js` устанавливается в
+Агент `Packaging/new/agents/acc-restore.js` устанавливается в
 `com.qinggan.canbus.service`. Для H97X и H97Y он перехватывает
 `DongfengH97CCanBusComponentImpl.onBCM_PEPSChangeData(int[], boolean)`,
 когда младшие три бита первого байта равны 2 (ON), а текущий ACC ещё не равен 2.

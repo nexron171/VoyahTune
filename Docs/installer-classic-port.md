@@ -1,6 +1,6 @@
 # Процесс установки GUI: порт классических скриптов
 
-Актуально для Installer 1.8.1 и единого payload. GUI не запускает host install/remove:
+Актуально для Installer 1.8.3 и единого payload. GUI не запускает host install/remove:
 порядок и команды исполняет Rust. [Контракт recipe](installer-protocol.md).
 
 ## Где менять процесс
@@ -9,16 +9,15 @@
   методы ниже реализуют действия и обработку ошибок. Это исполняемая логика процесса.
 - `Installer/crates/installer-core/src/plans.rs`: `classic_steps()` задаёт названия
   и порядок отображаемых шагов установки и удаления.
-- `Installer/crates/installer-core/src/classic_commands.rs`: тела **удалённых**
+- `Installer/crates/installer-core/src/device_commands.rs`: тела **удалённых**
   команд `adb shell`, перенесённые из скриптов. Здесь нет запуска host-сценариев.
-  Над каждым фрагментом указан исходный файл и строка.
 - `Installer/desktop/src/App.svelte`: отображение событий, текущего шага,
   завершённых шагов, ошибок и журнала. Здесь нет логики установки на автомобиль.
 
-Источники перенесённых команд: `Packaging/pi/installer/device/install.sh`, `remove.sh`,
-соответствующие `.bat` и `Packaging/od/installer/device/`. Это исторические эталоны;
-новый релиз собирается из `Packaging/new/`. GUI применяет проверенный общий recipe. Единое удаление использует полный remover независимо
-от установленного набора, как было согласовано для GUI.
+Команды автомобиля сопровождаются непосредственно в `device_commands.rs`,
+общие helpers — в `Packaging/installer/common/`. Старые host-скрипты и генератор
+команд удалены. GUI применяет общий recipe из `Packaging/new/`; единый remover
+очищает как текущий runtime, так и известные файлы прежних установок.
 
 ## Порядок действий
 
@@ -78,20 +77,18 @@ cargo build --release --manifest-path Installer/Cargo.toml -p installer-core --e
 VOYAH_TEST_PAYLOAD="$PWD/Releases/build/installer-payload-VERSION" python3 Installer/tests/test_canbus.py
 python3 Installer/tests/test_release.py
 VOYAH_TEST_PAYLOAD="$PWD/Releases/build/installer-payload-VERSION" \
-  python3 Installer/tests/test_classic_port.py
+  python3 Installer/tests/test_installation.py
 VOYAH_TEST_PAYLOAD="$PWD/Releases/build/installer-payload-VERSION" \
   python3 Installer/tests/integration.py
 ```
 
-`test_classic_port.py` запускает настоящий старый host-скрипт **только в тестах**
-на изолированном fake ADB, затем Rust-порт на такой же фикстуре. Сравниваются
-результат завершения, файлы, настройки и пакеты; отдельные сценарии подставляют
-ошибки в checked и best-effort команды. Это проверка соответствия исходному процессу,
-а не тест, повторяющий только новую реализацию.
+`test_installation.py` проверяет реальные эффекты Rust-движка на fake ADB:
+права каталогов, очистку старых клиентов, отказ при ошибках записи/backup,
+восстановление boot-файлов и сохранение данных при совместимых подписях.
+`test_unified_installation.py` проверяет установку, повторную установку и удаление
+единого runtime, восстановление чужого загрузчика и отказ при конфликте подписи RunYN.
+Этим сценариям нужен заранее собранный подписанный unified payload.
 
-При изменении классического сценария обновите соответствующий Rust-метод и тест
-соответствия. Для изменившихся удалённых команд обновите привязку в
-`sync-classic-commands.py` и запустите его, затем форматирование Rust.
-Новый install/remove-шаг должен появиться и в `classic_steps()`.
-Новые файлы schema 4 исполняются по recipe без изменения движка. Если выпускается
-также классический ZIP, его фиксированные списки обновляются отдельно.
+При изменении установки обновляйте соответствующий метод движка и поведенческий
+сценарий. Новый install/remove-шаг должен появиться и в `classic_steps()`.
+Новые файлы schema 4 исполняются по recipe без изменения движка.

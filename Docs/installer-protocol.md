@@ -9,16 +9,15 @@
 
 До обращения к автомобилю проверяются `requirements.minInstallerVersion` (SemVer)
 и `requirements.requiredCapabilities`. Текущий единый контракт требует Installer
-**1.8.2** и capabilities `qinggan-v3`, `single-package-v1`, `files-v1`,
+**1.8.3** и capabilities `qinggan-v3`, `single-package-v1`, `files-v1`,
 `ota-bootstrap-v1`, `infrastructure-v1`, `restoremode-ota-ui-v1`, `unified-runtime-v1`.
 Имена capability являются стабильными идентификаторами протокола.
 
-Manifest и root-служба используют `infrastructure: unified`. Версия нового релиза
+APK metadata, manifest и root-служба используют `infrastructure: unified`. Версия нового релиза
 имеет вид `4.5.0` или `4.5.0-beta`, без инфраструктурного суффикса. Общие
 Native/RestoreMode собираются с политикой `acc-hooks` и контрактом `driveHookV2`.
-Внутреннее значение APK metadata `od` пока сохраняется ради совместимости Java-кода;
-сборщик и валидатор явно сопоставляют его с общим manifest. Это не отдельная сборка
-и не параметр выбора пользователя. Подробности — [состав payload](installer-payload.md).
+Профиля PI/OD в Java-коде и параметрах сборки нет. Различия OEM определяются
+моделью и доступными API. Подробности — [состав payload](installer-payload.md).
 
 Старые идентификаторы и поддерживаемые форматы читаются для совместимости и удаления
 прежних установок. Неизвестные schema, поля операций и capabilities отклоняются.

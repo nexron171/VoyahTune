@@ -119,8 +119,8 @@ Provider хранит `settingsStartup`: `pending` → `claimed` → `submitted`
 - `Packaging/tests/test_acc_preferences.py`: 8 сценариев реального
   `DriveSelectionPreferences` с адаптерами Bundle/SharedPreferences: restart,
   новый boot, однократный claim, отказ commit, запоздалое завершение, opt-out и
-  Forced EV. Запускается напрямую или через `test_infrastructure_profiles.py`; нужен JDK.
-- Пройдены поведенческие `test_acc_restore_hook.sh` и `test_drive_reset_hook.sh`.
+  Forced EV. Запускается напрямую или через `Packaging/new/check.sh`; нужен JDK.
+- Пройдены поведенческие `Packaging/new/tests/acc-restore.test.js` и `Packaging/new/tests/drive-reset.test.js`.
   Прежние проверки текста исходников удалены; они не подтверждали выполнение
   восстановления настроек.
 

@@ -1,7 +1,7 @@
 # Выбор и сохранение станции RdsApp
 
-Описание относится к инфраструктуре **OD** (`Packaging/od/`); перенос этих hooks
-в PI не подразумевается. [Разделение релизов](installer-payload.md).
+Описание относится к указанным ниже OEM-прошивкам. В едином runtime
+перехваты выбираются адаптерами. [Контракт payload](installer-payload.md).
 
 В VoyahTune реализовано сохранение и восстановление через клиентский перехват
 в процессе RdsApp. Описание реализации находится в конце документа;
@@ -149,14 +149,14 @@ RdsApp, чтобы сохранить его обработку аудиофок
 
 ## Реализация в VoyahTune
 
-[app_client.js](../Packaging/od/inject/app_client.js) содержит отдельный обработчик
+[app_client.js](../Packaging/new/agents/app-client.js) содержит отдельный обработчик
 точного пакета `com.pateo.rdsapp`. Он устанавливается на основном потоке после
 `Application.onCreate`, чтобы не инициализировать `RdsManager` до готовности
 `BaseApplication.mContext`. Поиск объектов через `Java.choose` не используется.
 Штатный обработчик геометрии остаётся доступен, если пользователь отдельно
 выбрал для радио полноэкранный режим.
 
-[Загрузчик](../Packaging/od/system/load.bin) обнаруживает уже запущенный основной
+[Загрузчик](../Packaging/new/loader/main.go) обнаруживает уже запущенный основной
 процесс RdsApp в обычном app-client worker, независимо от настроек DPI и
 полноэкранного режима. Он не запускает приложение сам. Сохраняются проверки
 identity процесса, Android-пользователя 0, ABI `app_process32`/`app_process64`, одна попытка
@@ -314,16 +314,13 @@ OEM-службы. После проверки готовности и запис
 не считаются явным выбором в RdsApp и не должны молча перезаписывать его снимок.
 
 Тесты политики и настоящих Frida-адаптеров с моделью OEM:
-`node Packaging/tests/test_rds_restore.js` (48 сценариев). Они включены также
-в `python3 Packaging/tests/test_infrastructure_profiles.py --profile od`
-вместе с `test_rds_widget.js`. Shell-loader проверяется
-`python3 Packaging/tests/test_parallel_hook_loader.py`; он проверяет оба ABI радио,
-отказ другим 32-битным приложениям, обязательную готовность RDS и защиту от
-быстрых перезапусков.
-На macOS этому тесту нужен доступ к `ps` и сигналам собственным дочерним процессам.
-Проверены также MapKit, pipe-records и ограничение повторов loader.
+`node Packaging/new/tests/rds-restore.test.js` (48 сценариев). Они включены также
+в `sh Packaging/new/check.sh`
+вместе с `Packaging/new/tests/rds-widget.test.js`. Go-тесты из
+`Packaging/new/loader/` проверяют ABI, готовность агентов и повторные подключения.
+Проверки прежнего shell-loader удалены вместе с его реализацией.
 
-Изменены существующие `app_client.js` и `load.bin`; оба уже входят в payload.
+Клиентский агент `Packaging/new/agents/app-client.js` и Go-загрузчик входят в единый payload.
 Новых операций recipe, встроенных ресурсов recovery/remover и изменений
 исполняемого установщика нет. Пересборка GUI и повышение его версии не нужны;
 для выпуска требуется новый payload по обычному [релизному процессу](releasing.md).

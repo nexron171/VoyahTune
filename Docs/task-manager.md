@@ -97,7 +97,7 @@ Messenger-контракт определён в общем `SharedAndroid/.../c
 JVM-тест `TaskManagerCardsTest` проверяет необходимость карточки «Закрыть все» и расчёт ширины
 карточки; `TaskListPolicyTest` — отбор задач (одна запись на пакет, приоритет копии вне виджета, признак
 «в виджете»). `PinnedAppsPolicyTest` проверяет закрепление и изменение порядка пакетов.
-Поведение кнопок дока проверяет `Packaging/tests/test_dock_navigation_actions.js`.
+Поведение кнопок дока проверяет `Packaging/new/tests/dock-navigation-actions.test.js`.
 
 ## Ограничения
 

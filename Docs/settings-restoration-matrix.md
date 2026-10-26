@@ -34,8 +34,8 @@
 Для раннего ACC-пути требуется установленный агент и `isH97X()`; наличие одинаковых
 полей SDK не подтверждает этот путь на другой комплектации/прошивке.
 
-Источники: [ACC-агент](../Packaging/od/inject/voyahtune_acc_restore.js),
-[drive-reset-агент](../Packaging/od/inject/voyahtune_drive_reset.js),
+Источники: [ACC-агент](../Packaging/new/agents/acc-restore.js),
+[drive-reset-агент](../Packaging/new/agents/drive-reset.js),
 [состояние цикла](../RestoreMode/app/src/main/java/ru/big/town/restoremode/vehicle/DriveSelectionPreferences.java),
 [ApplyEngine](../Native/app/src/main/java/ru/big/town/anative/ApplyEngine.java),
 [SetModesService](../Native/app/src/main/java/ru/big/town/anative/SetModesService.java).
@@ -120,7 +120,7 @@ startup/CarPower/ACC; это не делает дверь отдельным т�
 ### Источник цвета атмосферной подсветки
 
 ACC-хук использует фиксированную таблицу `colors` в
-[voyahtune_acc_restore.js](../Packaging/od/inject/voyahtune_acc_restore.js).
+[voyahtune_acc_restore.js](../Packaging/new/agents/acc-restore.js).
 Она соответствует штатной `Constants.driveModeAtm` из исследованного
 VehicleSettings набора Sport+ 13.1 (APK `versionName=1.0`, `versionCode=1`).
 Такое же соответствие есть в ACC-обработчике исследованного CanBusService
@@ -220,7 +220,7 @@ Native и выключении опции. PI использует другую 
 [LightSensorService](../Native/app/src/main/java/ru/big/town/anative/LightSensorService.java),
 [BatteryHeatService](../Native/app/src/main/java/ru/big/town/anative/BatteryHeatService.java),
 [WiperColdService](../Native/app/src/main/java/ru/big/town/anative/WiperColdService.java),
-[RDS-контроллер](../Packaging/od/inject/app_client.js), [проверки радио на ГУ](rds-radio-station.md),
+[RDS-контроллер](../Packaging/new/agents/app-client.js), [проверки радио на ГУ](rds-radio-station.md),
 [SavedSettingsSyncReceiver](../RestoreMode/app/src/main/java/ru/big/town/restoremode/integration/config/SavedSettingsSyncReceiver.java),
 [SplitConfigSync](../RestoreMode/app/src/main/java/ru/big/town/restoremode/integration/config/SplitConfigSync.java),
 [геометрия](system-server-geometry.md),
@@ -276,7 +276,7 @@ Native и выключении опции. PI использует другую 
 - `test_acc_restore_hook.sh`, `test_drive_reset_hook.sh` и
   `test_acc_preferences.py` (8 сценариев Java) — прошли.
   JS/Java-сценарии моделируют поведение, без автомобиля.
-- `node Packaging/tests/test_rds_restore.js` — **43** сценария прошли.
+- `node Packaging/new/tests/rds-restore.test.js` — **43** сценария прошли.
 - Прежняя проверка текста Power Hold **не прошла**: искала `powerHoldBadge` в прежнем
   `layout-land/activity_main.xml`. Сейчас элемент находится в
   [tile_power_hold.xml](../RestoreMode/app/src/main/res/layout/tile_power_hold.xml)

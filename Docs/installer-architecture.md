@@ -9,8 +9,8 @@ Svelte → Tauri commands → `installer-core` → встроенный ADB. О�
 
 `session::plan` — общий API диагностики/планирования для GUI и тестов.
 `engine::execute` — порядок специальных процедур и файлового recipe.
-`plans::classic_steps` описывает те же фазы для UI. `classic_commands.rs` содержит
-device-side shell из классических скриптов; GUI не запускает host `.sh/.bat`.
+`plans::classic_steps` описывает те же фазы для UI. `device_commands.rs` содержит встроенные shell-команды автомобиля; общие
+helpers находятся в `Packaging/installer/common/`. GUI не запускает host `.sh/.bat`.
 На Windows применяется встроенный adb.exe, локальный POSIX shell не требуется.
 
 Desktop по умолчанию получает каталог через `GET https://voyahtune.ru/api/v1/releases`
