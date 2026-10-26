@@ -4,7 +4,9 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
 const path = require("node:path");
-const source = fs.readFileSync(path.join(__dirname, "../runtime/adapters.js"), "utf8") + "\n" +
+const source =
+    fs.readFileSync(path.join(__dirname, "../runtime/adapters.js"), "utf8") +
+    "\n" +
     fs.readFileSync(path.join(__dirname, "../agents/acc-restore.js"), "utf8");
 
 function fixture(options = {}) {
@@ -30,9 +32,9 @@ function fixture(options = {}) {
             sends: [],
             logs: [],
             individual: {},
-            dispatches: 0
+            dispatches: 0,
         },
-        options
+        options,
     );
     const properties = new Map();
     const methods = [];
@@ -47,7 +49,7 @@ function fixture(options = {}) {
             },
             invoke(receiver, ...args) {
                 return (m.implementation || original).apply(receiver, args);
-            }
+            },
         };
         methods.push(m);
         return m;
@@ -99,7 +101,10 @@ function fixture(options = {}) {
         if (scenario.sendError) throw new Error("Binder failure");
         const task = {};
         taskInit.invoke(task, receiver, receiver);
-        scenario.tasks.push({ task, values: new Map(Object.entries(vehicle.values)) });
+        scenario.tasks.push({
+            task,
+            values: new Map(Object.entries(vehicle.values)),
+        });
         return scenario.rejected ? -1 : 0;
     });
     const feedback = method(function (vehicle, value) {
@@ -120,7 +125,9 @@ function fixture(options = {}) {
         isH97Y() {
             return scenario.platform === "H97Y";
         },
-        isH97C() { return scenario.platform === "H97C"; }
+        isH97C() {
+            return scenario.platform === "H97C";
+        },
     };
     const parser = method(function (data, notify) {
         scenario.originals++;
@@ -133,12 +140,20 @@ function fixture(options = {}) {
                 DRIVING_MODE_SET: scenario.guest === 1 ? 1 : 2,
                 EPS_MODE_SET: 2,
                 PROP_MODE_SET: scenario.guest === 1 ? 1 : 2,
-                HUM_ENERGY_PTREGEN_LEVL: 4
+                HUM_ENERGY_PTREGEN_LEVL: 4,
             };
             scenario.originalBundle = b;
             setter.invoke(this, null, b);
-            feedback.invoke(this, "DRIVING_MODE_SET", b.getInt("DRIVING_MODE_SET"));
-            single.invoke(this, "VEHICLE_AMBIENT_LIGHT_COLOR", scenario.guest === 1 ? 19 : 5);
+            feedback.invoke(
+                this,
+                "DRIVING_MODE_SET",
+                b.getInt("DRIVING_MODE_SET"),
+            );
+            single.invoke(
+                this,
+                "VEHICLE_AMBIENT_LIGHT_COLOR",
+                scenario.guest === 1 ? 19 : 5,
+            );
             scenario.acc = 2;
         }
         if ((data[0] & 7) === 0 || (data[0] & 7) === 1) scenario.acc = 0;
@@ -179,17 +194,20 @@ function fixture(options = {}) {
                         : scenario.mode;
             },
             isNull() {
-                return individual ? value === null : scenario.maintenance === null;
+                return individual
+                    ? value === null
+                    : scenario.maintenance === null;
             },
             close() {
                 scenario.closes++;
-            }
+            },
         };
     }
     const query = method(function (uri, projection, selection, args) {
         scenario.queries++;
         if (uri.includes("qinggan.settings")) {
-            if (scenario.individualError) throw new Error("OEM provider failure");
+            if (scenario.individualError)
+                throw new Error("OEM provider failure");
             return cursor(scenario.individual[args[0]], true);
         }
         if (scenario.queryError) throw new Error("VoyahTune provider failure");
@@ -220,8 +238,10 @@ function fixture(options = {}) {
         }
         if (action === "dispatchSettings") scenario.dispatches++;
         if (action === "user") {
-            if (args.containsKey("mode")) scenario.mode = args.getString("mode");
-            if (args.containsKey("energy")) scenario.energy = args.getString("energy");
+            if (args.containsKey("mode"))
+                scenario.mode = args.getString("mode");
+            if (args.containsKey("energy"))
+                scenario.energy = args.getString("energy");
             scenario.revision++;
             scenario.startup = "selected";
         }
@@ -248,24 +268,27 @@ function fixture(options = {}) {
         }
         if (action === "claim") {
             const claimed =
-                scenario.startup === "pending" && String(args.getLong("revision")) === String(scenario.revision);
+                scenario.startup === "pending" &&
+                String(args.getLong("revision")) === String(scenario.revision);
             result.putBoolean("claimed", claimed);
             if (claimed) scenario.startup = "claimed";
         }
         if (action === "complete")
-            scenario.startup = args.getBoolean("accepted") ? "submitted" : "uncertain";
+            scenario.startup = args.getBoolean("accepted")
+                ? "submitted"
+                : "uncertain";
         return result;
     });
     const classes = {
         "android.os.SystemClock": {
             elapsedRealtime() {
                 return 100000;
-            }
+            },
         },
         "android.os.Process": {
             myPid() {
                 return 1;
-            }
+            },
         },
         "java.io.FileWriter": {
             $new() {
@@ -275,13 +298,13 @@ function fixture(options = {}) {
                             return {
                                 call(out, line) {
                                     scenario.health = line;
-                                }
+                                },
                             };
-                        }
+                        },
                     },
-                    close() {}
+                    close() {},
                 };
-            }
+            },
         },
         "android.os.Binder": {
             getCallingUid() {
@@ -290,7 +313,7 @@ function fixture(options = {}) {
             clearCallingIdentity() {
                 return 0;
             },
-            restoreCallingIdentity() {}
+            restoreCallingIdentity() {},
         },
         "com.qinggan.canbus.service.CanBusService": {},
         "android.app.ActivityThread": {
@@ -313,18 +336,20 @@ function fixture(options = {}) {
                                                         return {
                                                             getName() {
                                                                 return "com.qinggan.canbus.service.CanBusService";
-                                                            }
+                                                            },
                                                         };
                                                     },
-                                                    mCanBusComponent: { value: receiver }
+                                                    mCanBusComponent: {
+                                                        value: receiver,
+                                                    },
                                                 };
-                                            }
+                                            },
                                         };
-                                    }
+                                    },
                                 };
-                            }
-                        }
-                    }
+                            },
+                        },
+                    },
                 };
             },
             currentApplication() {
@@ -335,17 +360,24 @@ function fixture(options = {}) {
                     getPackageManager() {
                         return {
                             getApplicationInfo(name) {
-                                return { uid: { value: name === "ru.big.town.anative" ? 10 : 20 } };
-                            }
+                                return {
+                                    uid: {
+                                        value:
+                                            name === "ru.big.town.anative"
+                                                ? 10
+                                                : 20,
+                                    },
+                                };
+                            },
                         };
-                    }
+                    },
                 };
-            }
+            },
         },
         "com.qinggan.canbus.VehicleState": {
             valueOf(s) {
                 return s;
-            }
+            },
         },
         "com.qinggan.canbus.service.protocol.dongfeng_h97c.DongfengH97CCanBusComponentImpl$ModeSettingTask":
             { $init: taskInit, setVehicleMode: taskSend },
@@ -360,9 +392,9 @@ function fixture(options = {}) {
                         const v = m.get(k) ?? null;
                         m.delete(k);
                         return v;
-                    }
+                    },
                 };
-            }
+            },
         },
         "java.util.HashMap": {
             $new(v) {
@@ -374,12 +406,12 @@ function fixture(options = {}) {
                 };
                 m.isEmpty = () => m.size === 0;
                 return m;
-            }
+            },
         },
         "java.util.concurrent.locks.ReentrantLock": {
             $new() {
                 return { lock() {}, unlock() {} };
-            }
+            },
         },
         "android.util.Log": { i() {} },
         "java.lang.System": {
@@ -391,12 +423,12 @@ function fixture(options = {}) {
             },
             identityHashCode(o) {
                 return o.id;
-            }
+            },
         },
         "java.lang.String": {
             $new(v) {
                 return v;
-            }
+            },
         },
         "java.lang.ThreadLocal": {
             $new() {
@@ -410,17 +442,24 @@ function fixture(options = {}) {
                     },
                     remove() {
                         values.delete(scenario.thread);
-                    }
+                    },
                 };
-            }
+            },
         },
-        "com.qinggan.canbus.service.protocol.dongfeng_h97c.DongfengH97CCanBusComponentImpl": {
-            onBCM_PEPSChangeData: scenario.missingMethod ? undefined : parser,
-            setVehicleAndAirConditionBundleState: setter,
-            setVehicleState: single
+        "com.qinggan.canbus.service.protocol.dongfeng_h97c.DongfengH97CCanBusComponentImpl":
+            {
+                onBCM_PEPSChangeData: scenario.missingMethod
+                    ? undefined
+                    : parser,
+                setVehicleAndAirConditionBundleState: setter,
+                setVehicleState: single,
+            },
+        "com.qinggan.canbus.service.BaseCanBusComponent": {
+            onVehicleStateChanged: feedback,
         },
-        "com.qinggan.canbus.service.BaseCanBusComponent": { onVehicleStateChanged: feedback },
-        "com.qinggan.provider.QGSettings$System": { getInt: method(() => scenario.guest) },
+        "com.qinggan.provider.QGSettings$System": {
+            getInt: method(() => scenario.guest),
+        },
         "com.qinggan.account.AccountUserManager": {
             getInstance() {
                 return {
@@ -429,23 +468,23 @@ function fixture(options = {}) {
                             isGuest: { value: true },
                             getName() {
                                 return "guest";
-                            }
+                            },
                         };
-                    }
+                    },
                 };
-            }
+            },
         },
         "android.net.Uri": {
             parse(s) {
                 return s;
-            }
+            },
         },
         "android.os.Bundle": {
             $new(b) {
                 return new Bundle(b);
-            }
+            },
         },
-        "android.content.ContentResolver": { query, call: provider }
+        "android.content.ContentResolver": { query, call: provider },
     };
     const context = vm.createContext({
         setInterval(fn) {
@@ -475,13 +514,13 @@ function fixture(options = {}) {
             choose(name, callbacks) {
                 callbacks.onMatch(receiver);
                 callbacks.onComplete();
-            }
+            },
         },
         console: {
             log(s) {
                 scenario.logs.push(s);
-            }
-        }
+            },
+        },
     });
     scenario.install = () => vm.runInContext(source, context);
     scenario.frame = (data = [2, 0, 0, 0, 0, 0, 0, 0], notify = true) =>
@@ -492,10 +531,14 @@ function fixture(options = {}) {
         return setter.invoke(owner, null, b);
     };
     scenario.feedback = () => feedback.invoke(receiver, "DRIVING_MODE_SET", 1);
-    receiver.setVehicleAndAirConditionBundleState = (a, b) => setter.invoke(receiver, a, b);
+    receiver.setVehicleAndAirConditionBundleState = (a, b) =>
+        setter.invoke(receiver, a, b);
     scenario.bootstrap = () => timers.shift()();
     scenario.execute = (index) =>
-        taskSend.invoke(scenario.tasks[index].task, scenario.tasks[index].values);
+        taskSend.invoke(
+            scenario.tasks[index].task,
+            scenario.tasks[index].values,
+        );
     scenario.request = (values, caller = -1) => {
         scenario.caller = caller;
         const b = new Bundle();
@@ -508,8 +551,13 @@ function fixture(options = {}) {
     };
     scenario.install();
     if (!scenario.missingMethod) assert.equal(scenario.health, "1|100|v2\n");
-    assert.equal(scenario.queries, 0, "Installation must not wait for a settings provider");
-    if (!scenario.missingMethod) assert.ok(scenario.logs.includes("[acc-restore] hook ready v2"));
+    assert.equal(
+        scenario.queries,
+        0,
+        "Installation must not wait for a settings provider",
+    );
+    if (!scenario.missingMethod)
+        assert.ok(scenario.logs.includes("[acc-restore] hook ready v2"));
     scenario.methods = methods;
     return scenario;
 }
@@ -520,27 +568,42 @@ for (const [mode, values] of Object.entries({
     SPORT: [3, 3, 3],
     OUTING: [4, 2, 3],
     INDIVIDUAL: [5, 2, 1],
-    SNOW: [6, 2, 2]
+    SNOW: [6, 2, 2],
 })) {
-    const scenario = fixture({ mode, energyEnabled: 1, energy: "REV", maintenance: 1 });
+    const scenario = fixture({
+        mode,
+        energyEnabled: 1,
+        energy: "REV",
+        maintenance: 1,
+    });
     assert.equal(scenario.frame(), 123);
     assert.equal(scenario.originals, 1);
     assert.equal(scenario.sends.length, 1);
     const v = scenario.sends[0].vehicle.values;
-    assert.deepEqual([v.DRIVING_MODE_SET, v.EPS_MODE_SET, v.PROP_MODE_SET], values);
+    assert.deepEqual(
+        [v.DRIVING_MODE_SET, v.EPS_MODE_SET, v.PROP_MODE_SET],
+        values,
+    );
     assert.equal(v.IVI_SOC_MODESET, 3);
     assert.equal(v.ASC_MAINTAIN_SWITCH, 2);
     assert.equal(v.HUM_ENERGY_PTREGEN_LEVL, mode === "SNOW" ? undefined : 4);
     assert.equal(scenario.originalBundle.values.DRIVING_MODE_SET, 1);
     assert.deepEqual(scenario.events, [
         ["DRIVING_MODE_SET", values[0]],
-        ["CHILD_LOCK_CONTROL", 2]
+        ["CHILD_LOCK_CONTROL", 2],
     ]);
     assert.equal(scenario.singles[0][0], "IVI_PRIVACY_SETTING");
-    assert.equal(scenario.singles[1][1], { 1: 19, 2: 5, 3: 64, 4: 54, 5: 10, 6: 9 }[values[0]]);
+    assert.equal(
+        scenario.singles[1][1],
+        { 1: 19, 2: 5, 3: 64, 4: 54, 5: 10, 6: 9 }[values[0]],
+    );
     assert.equal(scenario.acc, 2);
     assert.equal(scenario.otherBcMWork, true);
-    assert.equal(scenario.dispatches, 1, "remaining settings are dispatched after the ACC parser");
+    assert.equal(
+        scenario.dispatches,
+        1,
+        "remaining settings are dispatched after the ACC parser",
+    );
     scenario.frame(); // Repeated ON frame is not another ACC edge.
     assert.equal(scenario.sends.length, 1);
     assert.equal(scenario.originals, 2);
@@ -552,7 +615,7 @@ for (const [mode, values] of Object.entries({
     assert.equal(
         scenario.sends[0].vehicle.values.DRIVING_MODE_SET,
         3,
-        "diagnostic visibility must not suppress ACC restoration"
+        "diagnostic visibility must not suppress ACC restoration",
     );
 }
 for (const options of [
@@ -568,7 +631,10 @@ for (const options of [
     { maintenance: 8 },
     { mode: "INDIVIDUAL", individualError: true },
     { mode: "INDIVIDUAL", individual: { drive_mode_runStateguest: "8" } },
-    { mode: "INDIVIDUAL", individual: { drive_mode_steeringWheelAssistguest: "bad" } }
+    {
+        mode: "INDIVIDUAL",
+        individual: { drive_mode_steeringWheelAssistguest: "bad" },
+    },
 ]) {
     const scenario = fixture(options);
     scenario.frame();
@@ -576,7 +642,7 @@ for (const options of [
     assert.deepEqual(
         scenario.sends[0].vehicle.values,
         scenario.originalBundle.values,
-        JSON.stringify(options)
+        JSON.stringify(options),
     );
     assert.equal(scenario.events[0][1], options.guest === 2 ? 2 : 1);
 }
@@ -607,24 +673,40 @@ for (const options of [
     scenario.frame();
     assert.deepEqual(
         scenario.sends.map((s) => s.vehicle.values.DRIVING_MODE_SET),
-        [1, 1, 3]
+        [1, 1, 3],
     );
     scenario.install();
     scenario.beforeSend = null;
     scenario.acc = 0;
     scenario.frame();
     assert.equal(scenario.originals, 2);
-    assert.ok(scenario.logs.includes("[acc-restore] hook ready v2 already_installed"));
+    assert.ok(
+        scenario.logs.includes("[acc-restore] hook ready v2 already_installed"),
+    );
 }
 {
     const scenario = fixture({ missingMethod: true });
     assert.ok(scenario.methods.every((m) => m.implementation === null));
-    assert.ok(scenario.logs.some((l) => l.startsWith("[acc-restore] hook failed stage=install")));
+    assert.ok(
+        scenario.logs.some((l) =>
+            l.startsWith("[acc-restore] hook failed stage=install"),
+        ),
+    );
     scenario.frame();
     assert.equal(scenario.sends[0].vehicle.values.DRIVING_MODE_SET, 1);
 }
-for (const [energy, expected] of Object.entries({ SMART: 1, EV: 2, REV: 3, SREV: 4 })) {
-    const scenario = fixture({ energyEnabled: 1, energy, enabled: 0, maintenance: 0 });
+for (const [energy, expected] of Object.entries({
+    SMART: 1,
+    EV: 2,
+    REV: 3,
+    SREV: 4,
+})) {
+    const scenario = fixture({
+        energyEnabled: 1,
+        energy,
+        enabled: 0,
+        maintenance: 0,
+    });
     scenario.frame();
     assert.equal(scenario.sends[0].vehicle.values.IVI_SOC_MODESET, expected);
     assert.equal(scenario.sends[0].vehicle.values.ASC_MAINTAIN_SWITCH, 1);
@@ -658,29 +740,45 @@ for (const [energy, expected] of Object.entries({ SMART: 1, EV: 2, REV: 3, SREV:
     assert.equal(scenario.sends[1].vehicle.values.IVI_SOC_MODESET, 4);
 }
 console.log(
-    "PASS: guest ACC edge, modes, feedback/color, stock parser, isolation, fallback and no replay"
+    "PASS: guest ACC edge, modes, feedback/color, stock parser, isolation, fallback and no replay",
 );
 
 {
     const scenario = fixture({ acc: 2, energyEnabled: 1, energy: "SREV" });
     scenario.bootstrap();
-    assert.equal(scenario.dispatches, 1, "late attach also dispatches the ACC settings pass");
+    assert.equal(
+        scenario.dispatches,
+        1,
+        "late attach also dispatches the ACC settings pass",
+    );
     assert.equal(scenario.sends.length, 1);
     assert.equal(scenario.startup, "submitted");
     assert.equal(scenario.sends[0].vehicle.values.DRIVING_MODE_SET, 3);
     assert.equal(scenario.sends[0].vehicle.values.IVI_SOC_MODESET, 4);
     scenario.bootstrap();
-    assert.equal(scenario.sends.length, 1, "readiness timer cannot resend a submitted startup");
+    assert.equal(
+        scenario.sends.length,
+        1,
+        "readiness timer cannot resend a submitted startup",
+    );
 }
 {
     const scenario = fixture({ acc: 2, dispatchRejected: true });
     scenario.bootstrap();
-    assert.equal(scenario.dispatches, 2, "failed settings start is retried by readiness check");
+    assert.equal(
+        scenario.dispatches,
+        2,
+        "failed settings start is retried by readiness check",
+    );
     scenario.dispatchRejected = false;
     scenario.bootstrap();
     assert.equal(scenario.dispatches, 3);
     scenario.bootstrap();
-    assert.equal(scenario.dispatches, 3, "successful settings dispatch is not repeated");
+    assert.equal(
+        scenario.dispatches,
+        3,
+        "successful settings dispatch is not repeated",
+    );
 }
 {
     const scenario = fixture();
@@ -690,7 +788,7 @@ console.log(
     assert.equal(
         scenario.executed.get("DRIVING_MODE_SET"),
         3,
-        "already queued packets are not revalidated or rewritten"
+        "already queued packets are not revalidated or rewritten",
     );
     scenario.execute(1);
     assert.equal(scenario.executed.get("DRIVING_MODE_SET"), 1);
@@ -701,33 +799,49 @@ console.log(
     scenario.request({ IVI_SOC_MODESET: 4 }, 10);
     assert.equal(scenario.energy, "SREV");
     scenario.request(
-        { DRIVING_MODE_SET: 1, EPS_MODE_SET: 2, PROP_MODE_SET: 1, __vt_auto: true },
-        20
+        {
+            DRIVING_MODE_SET: 1,
+            EPS_MODE_SET: 2,
+            PROP_MODE_SET: 1,
+            __vt_auto: true,
+        },
+        20,
     );
     assert.equal(scenario.sends[1].vehicle.values.DRIVING_MODE_SET, 3);
     assert.equal(scenario.sends[1].vehicle.values.IVI_SOC_MODESET, 4);
     assert.equal(scenario.sends[1].vehicle.values.__vt_auto, undefined);
 }
 
-
 function temporaryEnergy(scenario, mode) {
     return {
         IVI_SOC_MODESET: mode,
         __vt_temporary_energy: true,
         __vt_energy_revision: scenario.revision,
-        __vt_energy_cycle: scenario.cycle
+        __vt_energy_cycle: scenario.cycle,
     };
 }
 
 {
-    const scenario = fixture({ acc: 2, energy: "SREV", smartSaveEnabled: true });
+    const scenario = fixture({
+        acc: 2,
+        energy: "SREV",
+        smartSaveEnabled: true,
+    });
     for (const mode of [2, 4, 2]) {
         assert.equal(scenario.request(temporaryEnergy(scenario, mode), 10), 0);
         scenario.execute(scenario.tasks.length - 1);
         assert.equal(scenario.executed.get("IVI_SOC_MODESET"), mode);
-        assert.equal(scenario.energy, "SREV", "temporary modes cannot replace user intent");
+        assert.equal(
+            scenario.energy,
+            "SREV",
+            "temporary modes cannot replace user intent",
+        );
         assert.equal(scenario.revision, 0);
-        for (const key of ["__vt_temporary_energy", "__vt_energy_revision", "__vt_energy_cycle"]) {
+        for (const key of [
+            "__vt_temporary_energy",
+            "__vt_energy_revision",
+            "__vt_energy_cycle",
+        ]) {
             assert.equal(scenario.sends.at(-1).vehicle.values[key], undefined);
         }
     }
@@ -739,35 +853,71 @@ function temporaryEnergy(scenario, mode) {
 }
 
 for (const cancel of [
-    scenario => scenario.request({ IVI_SOC_MODESET: 3, __vt_user: true }, 20),
-    scenario => { scenario.smartSaveEnabled = false; },
-    scenario => { scenario.forcedEv = true; },
-    scenario => { scenario.providerAcc = 0; },
-    scenario => { scenario.cycle++; },
-    scenario => { scenario.queryError = true; }
+    (scenario) => scenario.request({ IVI_SOC_MODESET: 3, __vt_user: true }, 20),
+    (scenario) => {
+        scenario.smartSaveEnabled = false;
+    },
+    (scenario) => {
+        scenario.forcedEv = true;
+    },
+    (scenario) => {
+        scenario.providerAcc = 0;
+    },
+    (scenario) => {
+        scenario.cycle++;
+    },
+    (scenario) => {
+        scenario.queryError = true;
+    },
 ]) {
-    const scenario = fixture({ acc: 2, energy: "SREV", smartSaveEnabled: true });
+    const scenario = fixture({
+        acc: 2,
+        energy: "SREV",
+        smartSaveEnabled: true,
+    });
     assert.equal(scenario.request(temporaryEnergy(scenario, 2), 10), 0);
     cancel(scenario);
-    assert.equal(scenario.execute(0), false, "stale queued EV must be cancelled");
+    assert.equal(
+        scenario.execute(0),
+        false,
+        "stale queued EV must be cancelled",
+    );
     assert.equal(scenario.executed, undefined);
 }
 
 {
-    const scenario = fixture({ acc: 2, energy: "SREV", smartSaveEnabled: true });
+    const scenario = fixture({
+        acc: 2,
+        energy: "SREV",
+        smartSaveEnabled: true,
+    });
     scenario.request(temporaryEnergy(scenario, 2), 20);
-    assert.equal(scenario.energy, "SREV", "only Native can mark a command temporary");
+    assert.equal(
+        scenario.energy,
+        "SREV",
+        "only Native can mark a command temporary",
+    );
     scenario.request({ IVI_SOC_MODESET: 3 }, 10);
-    assert.equal(scenario.energy, "REV", "explicit Native selections still persist");
+    assert.equal(
+        scenario.energy,
+        "REV",
+        "explicit Native selections still persist",
+    );
     assert.equal(scenario.request(temporaryEnergy(scenario, 4), 10), -1);
 }
-console.log("PASS: temporary energy, immediate disable restore and queued command cancellation");
+console.log(
+    "PASS: temporary energy, immediate disable restore and queued command cancellation",
+);
 
 {
     const scenario = fixture({ acc: 2 });
     scenario.startup = "selected"; // durable provider state from VehicleAir or widget, including reattach
     scenario.bootstrap();
-    assert.equal(scenario.sends.length, 0, "recorded user selection suppresses startup restore");
+    assert.equal(
+        scenario.sends.length,
+        0,
+        "recorded user selection suppresses startup restore",
+    );
 }
 {
     const scenario = fixture({ acc: 2 });
@@ -776,7 +926,7 @@ console.log("PASS: temporary energy, immediate disable restore and queued comman
     assert.equal(
         scenario.sends.length,
         1,
-        "screen selection before readiness cancels startup restore"
+        "screen selection before readiness cancels startup restore",
     );
     assert.equal(scenario.mode, "COMFORT");
 }
@@ -784,38 +934,59 @@ console.log("PASS: temporary energy, immediate disable restore and queued comman
 for (const [recycle, level] of Object.entries({ LOW: 2, MEDIUM: 3, HIGH: 4 })) {
     const scenario = fixture({ recycleEnabled: 1, recycle });
     scenario.frame();
-    assert.equal(scenario.sends[0].vehicle.values.HUM_ENERGY_PTREGEN_LEVL, level);
+    assert.equal(
+        scenario.sends[0].vehicle.values.HUM_ENERGY_PTREGEN_LEVL,
+        level,
+    );
     assert.equal(
         scenario.originalBundle.values.HUM_ENERGY_PTREGEN_LEVL,
         4,
-        "never mutate OEM input"
+        "never mutate OEM input",
     );
-    const late = fixture({ acc: 2, enabled: 0, energyEnabled: 0, recycleEnabled: 1, recycle });
+    const late = fixture({
+        acc: 2,
+        enabled: 0,
+        energyEnabled: 0,
+        recycleEnabled: 1,
+        recycle,
+    });
     late.bootstrap();
     assert.equal(late.sends[0].vehicle.values.HUM_ENERGY_PTREGEN_LEVL, level);
     late.bootstrap();
     assert.equal(late.sends.length, 1);
     const snow = fixture({ mode: "SNOW", recycleEnabled: 1, recycle });
     snow.frame();
-    assert.equal(snow.sends[0].vehicle.values.HUM_ENERGY_PTREGEN_LEVL, undefined);
+    assert.equal(
+        snow.sends[0].vehicle.values.HUM_ENERGY_PTREGEN_LEVL,
+        undefined,
+    );
 }
 console.log("PASS: early ACC and late bootstrap recuperation, including Snow");
 
-for (const platform of ["H97Y", "H97X", "H97C"]) {
+for (const platform of ["H97Y", "H97X"]) {
     const early = fixture({ platform, energyEnabled: 1, energy: "SREV" });
     early.frame();
     assert.equal(
         early.sends[0].vehicle.values.DRIVING_MODE_SET,
         3,
-        platform + " guest reset restores Sport"
+        platform + " guest reset restores Sport",
     );
     assert.equal(early.sends[0].vehicle.values.IVI_SOC_MODESET, 4);
     assert.deepEqual(early.accObservations, [2]);
     assert.equal(early.settingsPasses, 1);
 
-    const late = fixture({ platform, acc: 2, energyEnabled: 1, energy: "SREV" });
+    const late = fixture({
+        platform,
+        acc: 2,
+        energyEnabled: 1,
+        energy: "SREV",
+    });
     late.bootstrap();
-    assert.equal(late.sends.length, 1, platform + " late attach submits startup modes");
+    assert.equal(
+        late.sends.length,
+        1,
+        platform + " late attach submits startup modes",
+    );
     assert.equal(late.sends[0].vehicle.values.DRIVING_MODE_SET, 3);
     assert.equal(late.sends[0].vehicle.values.IVI_SOC_MODESET, 4);
     assert.equal(late.settingsPasses, 1);
@@ -824,14 +995,18 @@ for (const platform of ["H97Y", "H97X", "H97C"]) {
     assert.equal(late.settingsPasses, 1);
 }
 
-for (const platform of ["H97Y", "H97X", "H97C"]) {
+for (const platform of ["H97Y", "H97X"]) {
     for (const rawOff of [0, 1]) {
         const cycle = fixture({ platform, energyEnabled: 1, energy: "SREV" });
         for (let expectedCycle = 1; expectedCycle <= 2; expectedCycle++) {
             cycle.frame([0x40 | rawOff]);
             assert.equal(cycle.acc, 0);
             cycle.frame([0x42]);
-            assert.equal(cycle.cycle, expectedCycle, platform + " creates a fresh ACC cycle");
+            assert.equal(
+                cycle.cycle,
+                expectedCycle,
+                platform + " creates a fresh ACC cycle",
+            );
             assert.equal(cycle.providerAcc, 2);
             assert.equal(cycle.settingsPasses, expectedCycle);
             assert.equal(cycle.sends.at(-1).vehicle.values.DRIVING_MODE_SET, 3);
@@ -841,71 +1016,104 @@ for (const platform of ["H97Y", "H97X", "H97C"]) {
             assert.equal(
                 cycle.sends.length,
                 expectedCycle * 2,
-                "one OEM reset and one startup command per cycle"
+                "one OEM reset and one startup command per cycle",
             );
             cycle.frame([0x42]);
             cycle.bootstrap();
             assert.equal(
                 cycle.sends.length,
                 expectedCycle * 2,
-                "repeated ON and timer do not resend"
+                "repeated ON and timer do not resend",
             );
             assert.equal(
                 cycle.settingsPasses,
                 expectedCycle,
-                "remaining settings run once per cycle"
+                "remaining settings run once per cycle",
             );
         }
-        assert.ok(cycle.accObservations.includes(0), "OEM OFF is persisted before the next ON");
+        assert.ok(
+            cycle.accObservations.includes(0),
+            "OEM OFF is persisted before the next ON",
+        );
     }
 }
 
-{
-    const unsupported = fixture({ platform: "UNKNOWN" });
+for (const platform of ["H97C", "UNKNOWN"]) {
+    const unsupported = fixture({ platform });
     unsupported.frame();
     unsupported.bootstrap();
     assert.deepEqual(
         unsupported.accObservations,
         [],
-        "unsupported platforms cannot create ACC cycles"
+        "unsupported platforms cannot create ACC cycles",
     );
     assert.equal(unsupported.sends.length, 1);
     assert.equal(unsupported.sends[0].vehicle.values.DRIVING_MODE_SET, 1);
     assert.equal(unsupported.dispatches, 0);
 }
 console.log(
-    "PASS: H97Y/H97X/H97C guest reset, late attach, repeated ACC cycles and unsupported platform isolation"
+    "PASS: H97X/Y guest reset, late attach, repeated ACC cycles; other firmware keeps Native ownership",
 );
 
 {
-    const scenario = fixture({ acc: 2, energy: "SREV", smartSaveEnabled: true });
-    assert.equal(scenario.request({ IVI_SOC_MODESET: 4, __vt_auto: true }, 10), 0);
+    const scenario = fixture({
+        acc: 2,
+        energy: "SREV",
+        smartSaveEnabled: true,
+    });
+    assert.equal(
+        scenario.request({ IVI_SOC_MODESET: 4, __vt_auto: true }, 10),
+        0,
+    );
     scenario.execute(0);
-    assert.equal(scenario.revision, 0, "Drive restoration cannot become a manual choice");
+    assert.equal(
+        scenario.revision,
+        0,
+        "Drive restoration cannot become a manual choice",
+    );
     assert.equal(scenario.energy, "SREV");
     assert.equal(scenario.sends.at(-1).vehicle.values.__vt_auto, undefined);
 }
 console.log("PASS: Native Drive restoration preserves explicit mode selection");
 
 for (const energyEnabled of [0, 1]) {
-    const scenario = fixture({ acc: 2, energy: "SREV", smartSaveEnabled: true, energyEnabled });
+    const scenario = fixture({
+        acc: 2,
+        energy: "SREV",
+        smartSaveEnabled: true,
+        energyEnabled,
+    });
     scenario.request(temporaryEnergy(scenario, 2), 10);
     scenario.execute(0);
     scenario.frame([0]);
     scenario.frame();
-    assert.equal(scenario.sends.at(-1).vehicle.values.IVI_SOC_MODESET, undefined);
+    assert.equal(
+        scenario.sends.at(-1).vehicle.values.IVI_SOC_MODESET,
+        undefined,
+    );
     assert.equal(scenario.sends.at(-1).vehicle.values.DRIVING_MODE_SET, 3);
     scenario.execute(scenario.tasks.length - 1);
     assert.equal(scenario.executed.has("IVI_SOC_MODESET"), false);
     assert.equal(scenario.energy, "SREV");
     scenario.bootstrap();
-    assert.equal(scenario.sends.at(-1).vehicle.values.IVI_SOC_MODESET, undefined);
+    assert.equal(
+        scenario.sends.at(-1).vehicle.values.IVI_SOC_MODESET,
+        undefined,
+    );
 }
 console.log("PASS: Smart Save owns energy across ACC and startup restoration");
 
 for (const caller of [10, 20]) {
-    const scenario = fixture({ acc: 2, energy: "SREV", energyEnabled: 1, smartSaveEnabled: true });
-    scenario.request({ IVI_SOC_MODESET: 4, DRIVING_MODE_SET: 2, __vt_auto: true }, caller);
+    const scenario = fixture({
+        acc: 2,
+        energy: "SREV",
+        energyEnabled: 1,
+        smartSaveEnabled: true,
+    });
+    scenario.request(
+        { IVI_SOC_MODESET: 4, DRIVING_MODE_SET: 2, __vt_auto: true },
+        caller,
+    );
     assert.equal(scenario.sends[0].vehicle.values.IVI_SOC_MODESET, undefined);
     scenario.execute(0);
     assert.equal(scenario.executed.has("IVI_SOC_MODESET"), false);
@@ -914,11 +1122,21 @@ for (const caller of [10, 20]) {
 }
 
 for (const changeBeforeExecution of [
-    scenario => { scenario.smartSaveEnabled = true; },
-    scenario => { scenario.revision++; },
-    scenario => { scenario.cycle++; },
-    scenario => { scenario.providerAcc = 0; },
-    scenario => { scenario.queryError = true; }
+    (scenario) => {
+        scenario.smartSaveEnabled = true;
+    },
+    (scenario) => {
+        scenario.revision++;
+    },
+    (scenario) => {
+        scenario.cycle++;
+    },
+    (scenario) => {
+        scenario.providerAcc = 0;
+    },
+    (scenario) => {
+        scenario.queryError = true;
+    },
 ]) {
     const scenario = fixture({ acc: 2, energy: "SREV", energyEnabled: 1 });
     scenario.bootstrap();
@@ -927,33 +1145,57 @@ for (const changeBeforeExecution of [
     scenario.execute(0);
     assert.equal(scenario.executed.has("IVI_SOC_MODESET"), false);
     assert.equal(scenario.executed.get("DRIVING_MODE_SET"), 3);
-    assert.equal(scenario.tasks[0].values.get("IVI_SOC_MODESET"), 4, "filter a task-local copy");
+    assert.equal(
+        scenario.tasks[0].values.get("IVI_SOC_MODESET"),
+        4,
+        "filter a task-local copy",
+    );
 }
 
 {
-    const scenario = fixture({ acc: 2, enabled: 0, energy: "SREV", energyEnabled: 1 });
+    const scenario = fixture({
+        acc: 2,
+        enabled: 0,
+        energy: "SREV",
+        energyEnabled: 1,
+    });
     scenario.bootstrap();
     scenario.smartSaveEnabled = true;
-    assert.equal(scenario.execute(0), false, "an energy-only automatic task becomes empty");
+    assert.equal(
+        scenario.execute(0),
+        false,
+        "an energy-only automatic task becomes empty",
+    );
     assert.equal(scenario.executed, undefined);
 }
 
 for (const caller of [10, 20]) {
-    const scenario = fixture({ acc: 2, energy: "SREV", energyEnabled: 1, smartSaveEnabled: true });
+    const scenario = fixture({
+        acc: 2,
+        energy: "SREV",
+        energyEnabled: 1,
+        smartSaveEnabled: true,
+    });
     scenario.request({ IVI_SOC_MODESET: 4, __vt_user: true }, caller);
     scenario.execute(0);
-    assert.equal(scenario.executed.get("IVI_SOC_MODESET"), 4, "explicit Save must be preserved");
+    assert.equal(
+        scenario.executed.get("IVI_SOC_MODESET"),
+        4,
+        "explicit Save must be preserved",
+    );
     assert.equal(scenario.revision, 1);
 }
 
 for (const options of [
     { smartSaveEnabled: false, energy: "SREV", expected: 4 },
     { smartSaveEnabled: true, energy: "EV", expected: 2 },
-    { smartSaveEnabled: true, energy: "SREV", forcedEv: 1, expected: 5 }
+    { smartSaveEnabled: true, energy: "SREV", forcedEv: 1, expected: 5 },
 ]) {
     const scenario = fixture({ acc: 2, energyEnabled: 1, ...options });
     scenario.bootstrap();
     scenario.execute(0);
     assert.equal(scenario.executed.get("IVI_SOC_MODESET"), options.expected);
 }
-console.log("PASS: automatic energy ownership, queued task filtering and explicit mode priority");
+console.log(
+    "PASS: automatic energy ownership, queued task filtering and explicit mode priority",
+);

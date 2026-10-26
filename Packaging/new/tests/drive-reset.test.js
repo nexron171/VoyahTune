@@ -4,7 +4,9 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
 const path = require("node:path");
-const source = fs.readFileSync(path.join(__dirname, "../runtime/adapters.js"), "utf8") + "\n" +
+const source =
+    fs.readFileSync(path.join(__dirname, "../runtime/adapters.js"), "utf8") +
+    "\n" +
     fs.readFileSync(path.join(__dirname, "../agents/drive-reset.js"), "utf8");
 
 function fixture(options = {}) {
@@ -610,3 +612,23 @@ for (const failure of ["energyProviderError", "energyProviderMissing"]) {
     assert.equal(state.resume(), 42);
     assert.equal(state.energyVisibility, undefined);
 }
+
+{
+    const scenario = fixture({ platform: false, stockEnergySupported: true });
+    scenario.reset();
+    scenario.overseas();
+    assert.equal(scenario.originals, 2);
+    for (const send of scenario.sends) {
+        assert.equal(send.vehicle.values.DRIVING_MODE_SET, 1);
+        assert.equal(send.vehicle.values.__vt_auto, undefined);
+    }
+    scenario.screen(3);
+    scenario.screen(2, true);
+    assert.equal(scenario.sends[2].vehicle.values.DRIVING_MODE_SET, 3);
+    assert.equal(scenario.sends[2].vehicle.values.__vt_user, true);
+    assert.equal(scenario.sends[3].vehicle.values.IVI_SOC_MODESET, 2);
+    assert.equal(scenario.sends[3].vehicle.values.__vt_user, true);
+}
+console.log(
+    "PASS: H97C stock resets stay untouched while explicit OEM selections remain tagged",
+);

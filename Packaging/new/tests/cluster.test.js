@@ -54,7 +54,7 @@ function fixture(compatible) {
 (async function () {
     const supported = fixture(true);
     await supported.ready;
-    for (const [meters, unit] of [[0, "м"], [999, "м"], [1000, "км"], [100000, "км"]]) {
+    for (const [meters, unit] of [[0, "м"], [500, "м"], [999, "м"], [1000, "км"], [1500, "км"], [100000, "км"]]) {
         assert.equal(supported.distanceUnit.implementation(null, meters), unit);
     }
     assert.ok(supported.messages.includes("[cluster] hook ready v1 card=unsupported"));

@@ -13,10 +13,10 @@ Java.perform(function () {
     function log(message) {
         try {
             Log.i(TAG, message);
-        } catch (_) { }
+        } catch (_) {}
         try {
             console.log(message);
-        } catch (_) { }
+        } catch (_) {}
     }
     function install(method, implementation) {
         method.implementation = implementation;
@@ -151,9 +151,9 @@ Java.perform(function () {
                 } catch (e) {
                     log(
                         "vehicle user drive=" +
-                        mode +
-                        " persistence failed: " +
-                        e,
+                            mode +
+                            " persistence failed: " +
+                            e,
                     );
                 }
             }
@@ -335,8 +335,8 @@ Java.perform(function () {
                                         status === 1
                                             ? Outcome.ACTIVE
                                             : status === 2
-                                                ? Outcome.ARMED
-                                                : Outcome.RESULT_UNKNOWN;
+                                              ? Outcome.ARMED
+                                              : Outcome.RESULT_UNKNOWN;
                                 }
                                 response.putInt("outcome", outcome);
                             } else if (operation !== "status") {
@@ -569,9 +569,9 @@ Java.perform(function () {
                 outgoing.putBoolean("__vt_user", true);
                 log(
                     "screen request drive=" +
-                    vehicle.getInt("DRIVING_MODE_SET", -1) +
-                    " energy=" +
-                    vehicle.getInt("IVI_SOC_MODESET", -1),
+                        vehicle.getInt("DRIVING_MODE_SET", -1) +
+                        " energy=" +
+                        vehicle.getInt("IVI_SOC_MODESET", -1),
                 );
             }
             if (scope.get() !== null && vehicle !== null) {
@@ -609,15 +609,15 @@ Java.perform(function () {
                             outgoing.remove("HUM_ENERGY_PTREGEN_LEVL");
                         log(
                             "replace " +
-                            scope.get() +
-                            " drive=" +
-                            (profile === null ? "stock" : profile[0]) +
-                            " energy=" +
-                            (targets.energy === null
-                                ? "stock"
-                                : targets.energy) +
-                            " suspension=" +
-                            targets.maintenance,
+                                scope.get() +
+                                " drive=" +
+                                (profile === null ? "stock" : profile[0]) +
+                                " energy=" +
+                                (targets.energy === null
+                                    ? "stock"
+                                    : targets.energy) +
+                                " suspension=" +
+                                targets.maintenance,
                         );
                     }
                 } catch (e) {
@@ -630,7 +630,8 @@ Java.perform(function () {
         ["resetSettings", "resetOverseaDriveMode"].forEach(function (name) {
             var method = Memory[name].overload();
             install(method, function () {
-                if (!firmwareAdapter.supportsReset(Platform)) return method.call(this);
+                if (!firmwareAdapter.supportsReset(Platform))
+                    return method.call(this);
                 var previous = scope.get();
                 scope.set(JString.$new(name));
                 try {
@@ -644,7 +645,8 @@ Java.perform(function () {
         ["setDriveMode", "setPowerMode"].forEach(function (name) {
             var method = Fragment[name].overload("int");
             install(method, function (value) {
-                if (!firmwareAdapter.supportsReset(Platform)) return method.call(this, value);
+                if (!firmwareAdapter.supportsUserSelection(Platform))
+                    return method.call(this, value);
                 var previous = uiScope.get();
                 uiScope.set(JString.$new(name));
                 try {
@@ -661,7 +663,10 @@ Java.perform(function () {
         );
         install(hint, function (state, value) {
             var previous = uiScope.get();
-            if (firmwareAdapter.supportsReset(Platform) && String(state) === "IVI_SOC_MODESET")
+            if (
+                firmwareAdapter.supportsUserSelection(Platform) &&
+                String(state) === "IVI_SOC_MODESET"
+            )
                 uiScope.set(JString.$new("energy switch"));
             try {
                 return hint.call(this, state, value);
@@ -716,7 +721,11 @@ Java.perform(function () {
         var recycler = Fragment.setEnergyRecyclerMode.overload("int");
         install(recycler, function (value) {
             var result = recycler.call(this, value);
-            if (firmwareAdapter.supportsReset(Platform) && value >= 2 && value <= 4) {
+            if (
+                firmwareAdapter.supportsReset(Platform) &&
+                value >= 2 &&
+                value <= 4
+            ) {
                 try {
                     var args = Bundle.$new();
                     args.putString(
@@ -747,12 +756,12 @@ Java.perform(function () {
             while (cleanupActions.length > powerHoldCleanupStart) {
                 try {
                     cleanupActions.pop()();
-                } catch (_) { }
+                } catch (_) {}
             }
             while (installed.length > powerHoldHookStart) {
                 try {
                     installed.pop().implementation = null;
-                } catch (_) { }
+                } catch (_) {}
             }
             log("Power Hold manager bridge unavailable: " + error);
         }
@@ -766,12 +775,12 @@ Java.perform(function () {
         cleanupActions.forEach(function (cleanup) {
             try {
                 cleanup();
-            } catch (_) { }
+            } catch (_) {}
         });
         for (var i = installed.length - 1; i >= 0; i--) {
             try {
                 installed[i].implementation = null;
-            } catch (_) { }
+            } catch (_) {}
         }
         log("[drive-reset] hook failed stage=install reason=" + e);
     }

@@ -30,15 +30,15 @@ sh Packaging/new/check.sh
 sh Packaging/new/build.sh
 ```
 
-Результат: `build/runtime/` с Android ARM64 PIE loader, Frida 16.2.1, агентами и конфигурацией; `build/system/` с init/wrapper/stop; `build/install-layout.json` со схемой размещения. Runtime самодостаточен. ARM64 Frida читается из `Packaging/od/tools/`, официальный ARM32 — из `tools/`; оба бинарника проверяются по закреплённым SHA-256. Хеши готовых runtime-файлов записаны в `build/runtime/runtime-manifest.json`.
+Результат: `build/runtime/` с Android ARM64 PIE loader, Frida 16.2.1, агентами и конфигурацией; `build/system/` с init/wrapper/stop; `build/install-layout.json` со схемой размещения. Runtime самодостаточен. Официальные ARM64 и ARM32 Frida читаются из `tools/`; оба бинарника проверяются по закреплённым SHA-256. Хеши готовых runtime-файлов записаны в `build/runtime/runtime-manifest.json`.
 
-`check.sh` выполняет проверки нового Go-модуля, все `tests/*.test.js` и десять существующих сценарных fixtures с перенаправлением чтения production-кода на новые исходники. Проверяются ACC, reset, Power Hold, Apollo, dock, RDS, окна после сна, CarPlay, navigation-source, cluster units, выбор адаптеров, rollback и lifecycle загрузчика. OEM/Frida окружение моделируется; исполнение на автомобиле этими тестами не подтверждается.
+`check.sh` выполняет проверки нового Go-модуля, все `tests/*.test.js` напрямую на исходниках `new`, а также общие поведенческие проверки ACC preferences, остановки старого загрузчика и Apollo из `Packaging/tests/`. Проверяются ACC, reset, Power Hold, Apollo, dock, RDS, окна после сна, CarPlay, navigation-source, cluster units, выбор адаптеров, rollback и lifecycle загрузчика. OEM/Frida окружение моделируется; исполнение на автомобиле этими тестами не подтверждается.
 
 Сборщик общего релиза запускает `check.sh` до сборки payload вместе с существующими проверками общих Android-контрактов.
 
 ## Контракт установки и диагностика
 
-Для нового runtime необходимы общие Native/RestoreMode с контрактом `driveHookV2` и политикой восстановления `acc-hooks`. Общий сборщик использует совместимое внутреннее значение APK metadata `od`; оно не задаёт отдельный вариант релиза. Старые APK с другим контрактом восстановления для этого runtime не подходят. Подробности — в [контракте payload](../../Docs/installer-payload.md).
+Native/RestoreMode используют общую Java-базу с `driveHookV2` и восстановлением через ACC. APK metadata, manifest и root-служба имеют единственное значение `infrastructure: unified`; классов и переключателей PI/OD нет. OEM-различия определяются по модели и доступным API. Подробности — в [контракте payload](../../Docs/installer-payload.md).
 
 Boot-ресурсы используют существующий сервис `voyahtune_load`. `build.sh` создаёт `build/release-inputs.json`; общий сборщик включает его в единый USB/OTA payload без инфраструктурного суффикса. Штатные исполнители recipe заменяют runtime и удаляют прежние loader, Frida и хуки по точным путям из `config/retired-files.txt` и общего spec. Смена eternalized-хуков требует перезагрузки Android.
 

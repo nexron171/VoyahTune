@@ -2,7 +2,7 @@
   "injectors": [
     {
       "name": "frida-inject",
-      "source": "Packaging/od/tools/frida-inject-16.2.1-android-arm64",
+      "source": "Packaging/new/tools/frida-inject-16.2.1-android-arm64",
       "sha256": "1c9d04257b9b44fe082f596bf7b20dc969571f6f7e818c80000522bf44e0d2f2"
     },
     {
