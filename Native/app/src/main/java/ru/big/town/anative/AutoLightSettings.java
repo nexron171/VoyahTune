@@ -5,7 +5,6 @@ import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
 
-import ru.big.town.common.InfrastructureProfile;
 import ru.big.town.common.ScreenBrightnessSettings;
 
 /** Restores the service switch from RestoreMode, with NativePrefs as an offline fallback. */
@@ -97,9 +96,8 @@ final class AutoLightSettings {
                     }
                 }
                 boolean brightnessEnabled =
-                        InfrastructureProfile.read(context) == InfrastructureProfile.OD
-                                && context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE)
-                                        .getBoolean(ScreenBrightnessSettings.ENABLED, false);
+                        context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE)
+                                .getBoolean(ScreenBrightnessSettings.ENABLED, false);
                 boolean needsSensor = scenarioNeedsLight || brightnessEnabled;
                 // Keep headlight commands disabled until an unused sensor service has stopped.
                 LightSensorService.setObserveOnly(
@@ -116,11 +114,9 @@ final class AutoLightSettings {
                 } else context.stopService(service);
                 Intent brightness = new Intent(context, ScreenBrightnessService.class);
                 if (brightnessEnabled
-                        || (InfrastructureProfile.read(context) == InfrastructureProfile.OD
-                                && context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE)
-                                        .getBoolean(
-                                                ScreenBrightnessModeController.RESTORE_PENDING,
-                                                false))) {
+                        || (context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE)
+                                .getBoolean(
+                                        ScreenBrightnessModeController.RESTORE_PENDING, false))) {
                     context.startForegroundService(brightness);
                 } else context.stopService(brightness);
             }

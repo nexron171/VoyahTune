@@ -71,8 +71,8 @@ final class EarlyDriveModeRestore {
             Settings settings = MainActivity.readEarlyDriveRestoreSettings(context);
             if (!current(generation)) return;
             if (settings == null) return; // Retry missing settings within the same fixed window.
-            if (!policy.acceptTarget(generation, SystemClock.elapsedRealtime(),
-                    settings.enabled, settings.mode)) {
+            if (!policy.acceptTarget(
+                    generation, SystemClock.elapsedRealtime(), settings.enabled, settings.mode)) {
                 Log.i(TAG, "stop: drive restore disabled, invalid or selection changed");
                 return;
             }
@@ -80,13 +80,25 @@ final class EarlyDriveModeRestore {
                     OemVehicleStateTransport.readVehicleStates(
                             context, Collections.singleton(DRIVE_STATE));
             Integer observed = snapshot == null ? null : snapshot.get(DRIVE_STATE);
-            EarlyDriveModeRestorePolicy.Decision decision = policy.observe(
-                    generation, SystemClock.elapsedRealtime(), observed);
-            Log.i(TAG, "check gen=" + generation + " observed=" + observed
-                    + " target=" + settings.mode + " decision=" + decision);
+            EarlyDriveModeRestorePolicy.Decision decision =
+                    policy.observe(generation, SystemClock.elapsedRealtime(), observed);
+            Log.i(
+                    TAG,
+                    "check gen="
+                            + generation
+                            + " observed="
+                            + observed
+                            + " target="
+                            + settings.mode
+                            + " decision="
+                            + decision);
             if (decision == EarlyDriveModeRestorePolicy.Decision.RESTORE_ECO) {
-                boolean accepted = CanSender.runGuardedSend(() -> current(generation),
-                        () -> DriveModeCanTransport.dispatch(context, settings.mode).accepted());
+                boolean accepted =
+                        CanSender.runGuardedSend(
+                                () -> current(generation),
+                                () ->
+                                        DriveModeCanTransport.dispatch(context, settings.mode)
+                                                .accepted());
                 // Acceptance is not physical confirmation and never extends the 30-second window.
                 Log.i(TAG, "Eco repair accepted=" + accepted + " target=" + settings.mode);
             }

@@ -10,7 +10,7 @@ import android.util.Log;
 
 import androidx.core.content.ContextCompat;
 
-import ru.big.town.common.InfrastructureProfile;
+import ru.big.town.common.VehiclePlatform;
 
 import java.util.Arrays;
 import java.util.Map;
@@ -84,7 +84,7 @@ final class PowerHoldStatusTracker implements AutoCloseable {
         seedThread.start();
         Handler statusHandler = new Handler(statusThread.getLooper());
         Handler seedHandler = new Handler(seedThread.getLooper());
-        boolean stockManager = InfrastructureProfile.read(app) == InfrastructureProfile.OD;
+        boolean stockManager = VehiclePlatform.current().isH97XY();
         PowerHoldOemTransport oemTransport = stockManager ? new PowerHoldOemTransport(app) : null;
         Scheduler scheduler = statusHandler::post;
         SeedLoader seedLoader =

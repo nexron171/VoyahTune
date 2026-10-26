@@ -10,8 +10,6 @@ import android.os.SystemClock;
 import android.util.Log;
 import android.view.KeyEvent;
 
-import ru.big.town.common.InfrastructureProfile;
-
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -133,11 +131,8 @@ final class MediaControlRouter {
 
             MediaControlPolicy.Candidate candidate = candidate(target, false);
             MediaControlPolicy.Plan plan =
-                    "com.pateo.rdsapp".equals(candidate.packageName)
-                                    && InfrastructureProfile.read(context)
-                                            == InfrastructureProfile.OD
-                            ? MediaControlPolicy.radioPlan(candidate, command)
-                            : MediaControlPolicy.plan(candidate, command);
+                    MediaControlPolicy.plan(
+                            ru.big.town.common.VehiclePlatform.current(), candidate, command);
             Result result = executePlan(target, candidate, command, plan);
             Log.i(
                     TAG,
@@ -179,7 +174,8 @@ final class MediaControlRouter {
             boolean handled;
             switch (command) {
                 case PLAY_PAUSE:
-                    handled = isPlaying(state)
+                    handled =
+                            isPlaying(state)
                                     ? pauseTarget(target, controls, state)
                                     : playTarget(target, controls, state);
                     break;
@@ -210,8 +206,14 @@ final class MediaControlRouter {
                     return false;
             }
             if (handled) rememberCommandTarget(target, command);
-            Log.i(TAG, "control " + command + " -> " + (handled ? "ok" : "not accepted")
-                    + " pkg=" + safePackage(target));
+            Log.i(
+                    TAG,
+                    "control "
+                            + command
+                            + " -> "
+                            + (handled ? "ok" : "not accepted")
+                            + " pkg="
+                            + safePackage(target));
             return handled;
         } catch (Exception e) {
             Log.w(TAG, "control " + command + ": " + e.getMessage());

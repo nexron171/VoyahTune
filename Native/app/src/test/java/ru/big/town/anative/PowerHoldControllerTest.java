@@ -6,11 +6,40 @@ import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
 
+import ru.big.town.common.VehiclePlatform;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 public class PowerHoldControllerTest {
+    @Test
+    public void firmwareSelectsOneActivationTransportWithoutRetryingUnknownResults() {
+        for (VehiclePlatform platform : VehiclePlatform.values()) {
+            FakeSession session = new FakeSession();
+            List<Boolean> managerRequests = new ArrayList<>();
+            PowerHoldController controller =
+                    PowerHoldController.create(
+                            platform,
+                            action -> action.run(session),
+                            enabled -> {
+                                managerRequests.add(enabled);
+                                return null;
+                            });
+            PowerHoldPolicy.Outcome result = controller.activate(true);
+            if (platform == VehiclePlatform.H97X || platform == VehiclePlatform.H97Y) {
+                assertEquals(PowerHoldPolicy.Outcome.RESULT_UNKNOWN, result);
+                assertEquals(java.util.Collections.singletonList(true), managerRequests);
+                assertTrue(session.calls.isEmpty());
+            } else {
+                assertEquals(PowerHoldPolicy.Outcome.ACCEPTED, result);
+                assertTrue(managerRequests.isEmpty());
+                assertEquals(1, session.bundleCalls);
+                assertEquals(Integer.valueOf(1), session.sentValues.get("SCENE_MODE_EXTENDER_SET"));
+            }
+        }
+    }
+
     @Test
     public void activationUsesExactGearSocBundleOrder() {
         FakeSession session = new FakeSession();
@@ -18,7 +47,9 @@ public class PowerHoldControllerTest {
 
         assertEquals(PowerHoldPolicy.Outcome.ACCEPTED, controller.activate());
         assertEquals(java.util.Arrays.asList("gear", "soc", "bundle"), session.calls);
-        assertEquals(PowerHoldPolicy.activationValues(), session.sentValues);
+        assertEquals(Integer.valueOf(15), session.sentValues.get("POWER_HOLD_MODE_TIME"));
+        assertEquals(Integer.valueOf(0), session.sentValues.get("SCENE_MODE_EXTENDER_SET"));
+        assertEquals(Integer.valueOf(1), session.sentValues.get("POWER_HOLD_MODE_SWITCH"));
         assertEquals("power hold activate", session.label);
     }
 

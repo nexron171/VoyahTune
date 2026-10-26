@@ -285,52 +285,8 @@ public final class NativeContractService extends SetModesService {
     }
 
     @Override
-    protected void setLoggingEnabled(boolean on) {
-        operation("logging", null, on ? 1 : 0);
-    }
-
-    @Override
-    protected void shareLogFile() {
-        operation("share", null, 0);
-    }
-
-    @Override
     protected void requestPowerHold(boolean enableEngineExtender) {
-        PowerHoldController controller =
-                new PowerHoldController(
-                        action -> {
-                            if (!vehicle.connected)
-                                return PowerHoldPolicy.Outcome.TRANSPORT_FAILURE;
-                            return action.run(
-                                    new PowerHoldController.Session() {
-                                        public PowerHoldController.Gear readGear() {
-                                            OemVehicleStateTransport.GearStatus g =
-                                                    vehicle.readGearStatus();
-                                            return new PowerHoldController.Gear(g.ordinal, g.value);
-                                        }
-
-                                        public Integer readSoc() {
-                                            return vehicle.readVehicleState(
-                                                    new OemVehicleStateTransport.StateKey(
-                                                            "BMS_SOC_DISPLAY", 615));
-                                        }
-
-                                        public boolean sendActivation(
-                                                Map<String, Integer> values, String label) {
-                                            Map<OemVehicleStateTransport.StateKey, Integer> keyed =
-                                                    new LinkedHashMap<>();
-                                            for (Map.Entry<String, Integer> e : values.entrySet())
-                                                keyed.put(
-                                                        new OemVehicleStateTransport.StateKey(
-                                                                e.getKey(),
-                                                                PowerHoldPolicy.stableIds()
-                                                                        .get(e.getKey())),
-                                                        e.getValue());
-                                            return vehicle.sendBundle(keyed, label).accepted();
-                                        }
-                                    });
-                        });
-        operation("powerHoldResult", controller.activate(enableEngineExtender).name(), 0);
+        operation("powerHold", null, enableEngineExtender ? 1 : 0);
     }
 
     @Override

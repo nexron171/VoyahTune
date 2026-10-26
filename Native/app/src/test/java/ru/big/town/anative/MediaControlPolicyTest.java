@@ -7,6 +7,29 @@ import org.junit.Test;
 import java.util.Arrays;
 
 public class MediaControlPolicyTest {
+    @Test
+    public void olderRadioFirmwareKeepsTargetedKeysForActivePlayback() {
+        MediaControlPolicy.Candidate radio =
+                new MediaControlPolicy.Candidate(
+                        "radio",
+                        "com.pateo.rdsapp",
+                        MediaControlPolicy.STATE_ACTIVE,
+                        false,
+                        false,
+                        false);
+        for (ru.big.town.common.VehiclePlatform platform :
+                ru.big.town.common.VehiclePlatform.values()) {
+            MediaControlPolicy.Plan next =
+                    MediaControlPolicy.plan(platform, radio, MediaControlPolicy.Command.NEXT);
+            if (platform == ru.big.town.common.VehiclePlatform.H97X
+                    || platform == ru.big.town.common.VehiclePlatform.H97Y) {
+                assertEquals(MediaControlPolicy.Operation.TRANSPORT_NEXT, next.operation);
+            } else {
+                assertEquals(MediaControlPolicy.Operation.TARGET_KEY, next.operation);
+                assertEquals(87, next.keyCode);
+            }
+        }
+    }
 
     private static MediaControlPolicy.Candidate candidate(
             String token, int state, boolean pause, boolean bridge, boolean nativeQinggan) {

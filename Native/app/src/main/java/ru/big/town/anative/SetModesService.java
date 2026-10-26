@@ -35,7 +35,6 @@ import androidx.core.content.ContextCompat;
 
 import ru.big.town.common.CarPlayTarget;
 import ru.big.town.common.CarPlayWidgetProtocol;
-import ru.big.town.common.InfrastructureProfile;
 
 import java.lang.reflect.Method;
 import java.util.HashMap;
@@ -77,20 +76,13 @@ public class SetModesService extends Service {
     static final int MSG_CLOSE_ALL =
             ru.big.town.common.SystemWidgetProtocol
                     .CLEAR; // закрыть все сторонние приложения (forceStopPackage)
-    static final int MSG_SET_THEME =
-            28; // тема системы/приложений (arg1: 0 авто, 1 светлая, 2 тёмная)
-    static final int MSG_LOGGING_ENABLE = 32; // вкл/выкл захват логов в файл (arg1: 1=вкл)
-    static final int MSG_LOGGING_SHARE = 33; // «Выгрузить логи» → share лог-файла
+    static final int MSG_SET_THEME = 28; // «Выгрузить логи» → share лог-файла
     static final int MSG_SPLIT_LAUNCH_VD = 34; // single → physical WM-clamped task; pair → VD split
     static final int MSG_EMBEDDED_TRANSFER = 38; // перенос/обмен запущенными экземплярами виджетов
 
     /** Диспетчер задач: forceStopPackage в AMS асинхронный, поэтому список отдаём с задержкой. */
     private static final long TASK_LIST_SETTLE_MS = 600L;
 
-    static final String ACTION_REQUEST_LOG = "ru.big.town.anative.REQUEST_LOG";
-    static final String ACTION_LOG_UPDATE = "ru.big.town.anative.LOG_UPDATE";
-    static final String ACTION_LOGGING_SET = "ru.big.town.anative.LOGGING_SET"; // extra "on" bool
-    static final String ACTION_LOGGING_SHARE = "ru.big.town.anative.LOGGING_SHARE";
     static final String ACTION_REQUEST_POWER_HOLD_STATUS =
             "ru.big.town.anative.REQUEST_POWER_HOLD_STATUS";
     static final String ACTION_POWER_HOLD_STATUS_UPDATE =
@@ -341,16 +333,6 @@ public class SetModesService extends Service {
                         }
                         break;
                     }
-
-                case MSG_LOGGING_ENABLE:
-                    Log.i(TAG, "handleMessage() MSG_LOGGING_ENABLE arg1=" + msg.arg1);
-                    setLoggingEnabled(msg.arg1 == 1);
-                    break;
-
-                case MSG_LOGGING_SHARE:
-                    Log.i(TAG, "handleMessage() MSG_LOGGING_SHARE");
-                    shareLogFile();
-                    break;
 
                 case MSG_EMBEDDED_TRANSFER:
                     {
@@ -866,7 +848,7 @@ public class SetModesService extends Service {
                 nm.createNotificationChannel(
                         new NotificationChannel(
                                 CH, "Автозапуск VoyahTune", NotificationManager.IMPORTANCE_HIGH));
-                android.app.PendingIntent pi =
+                android.app.PendingIntent pendingIntent =
                         android.app.PendingIntent.getActivity(
                                 this,
                                 0,
@@ -881,7 +863,7 @@ public class SetModesService extends Service {
                                 .setContentText("Открытие приложения")
                                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                                 .setCategory(NotificationCompat.CATEGORY_CALL)
-                                .setFullScreenIntent(pi, true)
+                                .setFullScreenIntent(pendingIntent, true)
                                 .setAutoCancel(true)
                                 .setOngoing(false)
                                 .build();
@@ -1664,72 +1646,6 @@ public class SetModesService extends Service {
     // Логирование в файл (экран «Логирование» в RestoreMode)
     // -------------------------------------------------------------------------
 
-    /** Вкл/выкл захват всего вывода Native в файл (persist в NativePrefs). */
-    protected void setLoggingEnabled(boolean enable) {
-        prefs().edit().putBoolean("logging", enable).apply();
-        if (enable) NativeLog.get().start(getApplicationContext());
-        else NativeLog.get().stopAndDelete(getApplicationContext()); // выкл → удаляем файл
-    }
-
-    /** На старте сервиса восстанавливаем захват логов, если был включён. */
-    private void restoreLoggingState() {
-        if (prefs().getBoolean("logging", false)) {
-            NativeLog.get().start(getApplicationContext());
-        }
-    }
-
-    /** «Выгрузить логи»: share лог-файла через FileProvider (LocalSend и любое приложение). */
-    protected void shareLogFile() {
-        try {
-            java.io.File f = NativeLog.get().logFile(getApplicationContext());
-            if (f == null || !f.exists()) {
-                Log.w(TAG, "shareLogFile: файла нет");
-                return;
-            }
-            android.net.Uri uri =
-                    androidx.core.content.FileProvider.getUriForFile(
-                            this, "ru.big.town.anative.fileprovider", f);
-            Intent send = new Intent(Intent.ACTION_SEND);
-            send.setType("text/plain");
-            send.putExtra(Intent.EXTRA_STREAM, uri);
-            send.putExtra(Intent.EXTRA_SUBJECT, f.getName());
-            // ClipData — чтобы grant применился и к превью чузера, и к выбранному приложению
-            send.setClipData(android.content.ClipData.newRawUri(f.getName(), uri));
-            send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            Intent chooser = Intent.createChooser(send, "Выгрузить логи");
-            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            startActivity(chooser);
-            Log.i(TAG, "shareLogFile: share " + uri);
-        } catch (Exception e) {
-            Log.e(TAG, "shareLogFile failed: " + e.getMessage());
-        }
-    }
-
-    /** Запрос снимка логов от UI → отдаём последние строки + состояние. */
-    private final android.content.BroadcastReceiver logRequestReceiver =
-            new android.content.BroadcastReceiver() {
-                @Override
-                public void onReceive(Context context, Intent intent) {
-                    String a = intent.getAction();
-                    if (ACTION_LOGGING_SET.equals(a)) {
-                        setLoggingEnabled(intent.getBooleanExtra("on", false));
-                        return;
-                    }
-                    if (ACTION_LOGGING_SHARE.equals(a)) {
-                        shareLogFile();
-                        return;
-                    }
-                    // ACTION_REQUEST_LOG → снимок ленты
-                    Intent out = new Intent(ACTION_LOG_UPDATE);
-                    out.putExtra("log", NativeLog.get().snapshot());
-                    out.putExtra("running", NativeLog.get().isRunning());
-                    out.putExtra(
-                            "path",
-                            NativeLog.get().logFile(getApplicationContext()).getAbsolutePath());
-                    sendBroadcast(out);
-                }
-            };
-
     /** Перезагрузка системы (головы). Требует REBOOT (signature|privileged) — выдаётся priv-app. */
     protected void rebootSystem() {
         try {
@@ -1892,9 +1808,7 @@ public class SetModesService extends Service {
         boolean pauseMedia = prefs().getBoolean("pauseMediaOnDoor", false);
         Log.i(TAG, "restoreWiperColdState: wiperCold=" + wiper + " pauseMediaOnDoor=" + pauseMedia);
         boolean playMedia =
-                InfrastructureProfile.read(this).usesAccHooks()
-                        && prefs().getBoolean(
-                                        ru.big.town.common.DoorMediaSettings.PLAY_ON_DOOR, false);
+                prefs().getBoolean(ru.big.town.common.DoorMediaSettings.PLAY_ON_DOOR, false);
         if (wiper || pauseMedia || playMedia) {
             Intent intent = new Intent(this, WiperColdService.class);
             startForegroundService(intent);
@@ -2155,18 +2069,6 @@ public class SetModesService extends Service {
         screenLiftTaskRestorer = new ScreenLiftTaskRestorer(getApplicationContext());
         screenLiftTaskRestorer.register();
 
-        // Приёмник запроса снимка логов + восстановление захвата регистрируем в onCreate
-        // (срабатывает и при простом bind, не только при startService).
-        try {
-            IntentFilter logFilter = new IntentFilter(ACTION_REQUEST_LOG);
-            logFilter.addAction(ACTION_LOGGING_SET);
-            logFilter.addAction(ACTION_LOGGING_SHARE);
-            ContextCompat.registerReceiver(
-                    this, logRequestReceiver, logFilter, ContextCompat.RECEIVER_EXPORTED);
-        } catch (Exception e) {
-            Log.w(TAG, "register logRequestReceiver: " + e.getMessage());
-        }
-        restoreLoggingState();
         Log.i(TAG, "onCreated");
     }
 
@@ -2584,9 +2486,7 @@ public class SetModesService extends Service {
         }
         // Both an ACC notification and a normal service restart reconcile the same durable claim.
         ApplyEngine.scheduleAccApply(this);
-        if (intent != null
-                && "ru.big.town.anative.APPLY_APOLLO".equals(intent.getAction())
-                && InfrastructureProfile.read(this).usesAccHooks()) {
+        if (intent != null && "ru.big.town.anative.APPLY_APOLLO".equals(intent.getAction())) {
             ApplyEngine.applyApolloTargets(this);
         }
         // if(action.equals("ru.big.town.anative.APPLY_DRIVE_MODES")){
@@ -2629,6 +2529,7 @@ public class SetModesService extends Service {
         closeScenarios();
         serviceDestroyed = true;
         ApplyEngine.stopEarlyDriveRestore("service destroyed");
+
         releaseAllEmbeddedDisplays();
         if (powerHoldStatusReceiverRegistered) {
             try {
@@ -2657,10 +2558,6 @@ public class SetModesService extends Service {
                 Log.w(TAG, "unregisterReceiver: not registered");
             }
             receiverRegistered = false;
-        }
-        try {
-            unregisterReceiver(logRequestReceiver);
-        } catch (IllegalArgumentException ignored) {
         }
         super.onDestroy();
     }

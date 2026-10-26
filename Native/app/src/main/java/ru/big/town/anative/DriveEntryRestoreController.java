@@ -14,7 +14,7 @@ import androidx.core.content.ContextCompat;
 
 import ru.big.town.common.SmartSaveSettings;
 
-/** OD opt-in restoration; snapshots never create a door opening or Drive entry. */
+/** Opt-in Drive-entry restoration; snapshots never create a door opening or Drive entry. */
 final class DriveEntryRestoreController implements AutoCloseable {
     private final Context context;
     private final HandlerThread thread = new HandlerThread("DriveEntryRestore");

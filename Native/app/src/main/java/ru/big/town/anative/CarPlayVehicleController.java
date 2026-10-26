@@ -12,7 +12,6 @@ import ru.big.town.common.CarPlayAudioProtocol;
 import ru.big.town.common.CarPlayClimateProtocol;
 import ru.big.town.common.CarPlayVehicleProtocol;
 import ru.big.town.common.CarPlayWifiScanProtocol;
-import ru.big.town.common.InfrastructureProfile;
 import ru.big.town.common.MessengerSubscription;
 
 import java.util.Collections;
@@ -59,10 +58,7 @@ final class CarPlayVehicleController implements AutoCloseable {
         this.audio = audio;
         climate = new CarPlayClimateController(context, handler, this::publish);
         Context applicationContext = context.getApplicationContext();
-        wifiScan =
-                InfrastructureProfile.read(applicationContext) == InfrastructureProfile.OD
-                        ? new CarPlayWifiScanController(applicationContext)
-                        : null;
+        wifiScan = new CarPlayWifiScanController(applicationContext);
         lightState =
                 new CarPlayLightState(
                         lightQueryExecutor,

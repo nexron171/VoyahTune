@@ -16,7 +16,6 @@ import android.util.Log;
 
 import dalvik.system.PathClassLoader;
 
-import ru.big.town.common.InfrastructureProfile;
 import ru.big.town.common.SmartSaveSettings;
 
 import java.lang.reflect.Method;
@@ -428,7 +427,7 @@ final class OemVehicleStateTransport {
     }
 
     static Result sendTemporaryEnergyMode(Context context, int mode, long revision, long cycle) {
-        if (!InfrastructureProfile.read(context).usesAccHooks()
+        if (!ru.big.town.common.VehiclePlatform.current().isH97XY()
                 || (mode != VehicleRestorePolicy.SOC_EV && mode != VehicleRestorePolicy.SOC_SREV)) {
             return Result.TRANSIENT_FAILURE;
         }

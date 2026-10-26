@@ -11,32 +11,34 @@ public class CarPlayNavigationPolicyTest {
     @Test
     public void eitherHiddenPanelRequiresNavigationOnEachPhysicalDisplay() {
         for (int displayId : new int[] {0, 1}) {
-            assertTrue(CarPlayNavigationPolicy.shouldForceNavigation(true, displayId, HOST, 1, 0));
-            assertTrue(CarPlayNavigationPolicy.shouldForceNavigation(true, displayId, HOST, 0, 1));
-            assertTrue(CarPlayNavigationPolicy.shouldForceNavigation(true, displayId, HOST, 1, 1));
-            assertFalse(CarPlayNavigationPolicy.shouldForceNavigation(true, displayId, HOST, 0, 0));
+            assertTrue(CarPlayNavigationPolicy.shouldForceNavigation(displayId, HOST, 1, 0));
+            assertTrue(CarPlayNavigationPolicy.shouldForceNavigation(displayId, HOST, 0, 1));
+            assertTrue(CarPlayNavigationPolicy.shouldForceNavigation(displayId, HOST, 1, 1));
+            assertFalse(CarPlayNavigationPolicy.shouldForceNavigation(displayId, HOST, 0, 0));
         }
     }
 
     @Test
     public void missingHookReportsStillLeaveFullscreenCarPlayWithNavigation() {
-        assertTrue(CarPlayNavigationPolicy.shouldForceNavigation(true, 0, HOST, -1, -1));
-        assertTrue(CarPlayNavigationPolicy.shouldForceNavigation(true, 1, HOST, 0, -1));
-        assertTrue(CarPlayNavigationPolicy.shouldForceNavigation(true, 1, HOST, -1, 0));
+        assertTrue(CarPlayNavigationPolicy.shouldForceNavigation(0, HOST, -1, -1));
+        assertTrue(CarPlayNavigationPolicy.shouldForceNavigation(1, HOST, 0, -1));
+        assertTrue(CarPlayNavigationPolicy.shouldForceNavigation(1, HOST, -1, 0));
     }
 
     @Test
     public void staleHiddenReportsCannotForceButtonsOverAnotherActivity() {
-        for (String activity : new String[] {
-                "", "ru.big.town.anative.CarPlayWindowedActivity",
-                "ru.big.town.anative.SplitHostActivity", "com.shilapi.xcertplay.CarPlayHostActivity"}) {
-            assertFalse(CarPlayNavigationPolicy.shouldForceNavigation(true, 0, activity, 1, 1));
+        for (String activity :
+                new String[] {
+                    "", "ru.big.town.anative.CarPlayWindowedActivity",
+                    "ru.big.town.anative.SplitHostActivity",
+                            "com.shilapi.xcertplay.CarPlayHostActivity"
+                }) {
+            assertFalse(CarPlayNavigationPolicy.shouldForceNavigation(0, activity, 1, 1));
         }
     }
 
     @Test
     public void piAndVirtualDisplaysDoNotReceiveTheOdOverride() {
-        assertFalse(CarPlayNavigationPolicy.shouldForceNavigation(false, 0, HOST, 1, 1));
-        assertFalse(CarPlayNavigationPolicy.shouldForceNavigation(true, 7, HOST, 1, 1));
+        assertFalse(CarPlayNavigationPolicy.shouldForceNavigation(7, HOST, 1, 1));
     }
 }

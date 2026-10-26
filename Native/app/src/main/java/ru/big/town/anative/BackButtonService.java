@@ -21,7 +21,6 @@ import android.view.KeyEvent;
 import android.view.accessibility.AccessibilityEvent;
 
 import ru.big.town.common.CarPlayTarget;
-import ru.big.town.common.InfrastructureProfile;
 
 import java.lang.reflect.Method;
 import java.util.LinkedHashMap;
@@ -54,32 +53,39 @@ public class BackButtonService extends AccessibilityService {
     }
 
     private static SharedPreferences prefs(Context context) {
-        return context.getApplicationContext().getSharedPreferences("NativePrefs", Context.MODE_PRIVATE);
+        return context.getApplicationContext()
+                .getSharedPreferences("NativePrefs", Context.MODE_PRIVATE);
     }
 
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
         instance = this;
-        if (InfrastructureProfile.read(this) == InfrastructureProfile.OD) {
-            panelObserver = new ContentObserver(overlayHandler) {
-                @Override
-                public void onChange(boolean selfChange) {
-                    if (instance != BackButtonService.this) return;
-                    overlayHandler.removeCallbacks(overlayReevaluate);
-                    reevaluateOverlayNow(null);
-                    scheduleOverlayEvaluation(null);
-                }
-            };
-            for (int displayId = 0; displayId <= 1; displayId++) {
-                for (String setting : new String[] {
+
+        panelObserver =
+                new ContentObserver(overlayHandler) {
+                    @Override
+                    public void onChange(boolean selfChange) {
+                        if (instance != BackButtonService.this) return;
+                        overlayHandler.removeCallbacks(overlayReevaluate);
+                        reevaluateOverlayNow(null);
+                        scheduleOverlayEvaluation(null);
+                    }
+                };
+        for (int displayId = 0; displayId <= 1; displayId++) {
+            for (String setting :
+                    new String[] {
                         CarPlayNavigationPolicy.DOCK_HIDDEN,
-                        CarPlayNavigationPolicy.STATUS_BAR_HIDDEN}) {
-                    getContentResolver().registerContentObserver(
-                            Settings.Global.getUriFor(setting + displayId), false, panelObserver);
-                }
+                        CarPlayNavigationPolicy.STATUS_BAR_HIDDEN
+                    }) {
+                getContentResolver()
+                        .registerContentObserver(
+                                Settings.Global.getUriFor(setting + displayId),
+                                false,
+                                panelObserver);
             }
         }
+
         reevaluateOverlayNow(null);
     }
 
@@ -94,31 +100,36 @@ public class BackButtonService extends AccessibilityService {
     }
 
     static void setFullscreenPackages(Context context, String packagesCsv) {
-        prefs(context).edit().putString(PREF_FULLSCREEN, FullscreenPackagePolicy.normalizeCsv(packagesCsv)).apply();
+        prefs(context)
+                .edit()
+                .putString(PREF_FULLSCREEN, FullscreenPackagePolicy.normalizeCsv(packagesCsv))
+                .apply();
         refreshAccessibility(context);
     }
 
     static void refreshCarPlayNavigation(Context context) {
-        if (InfrastructureProfile.read(context) == InfrastructureProfile.OD) {
-            refreshAccessibility(context);
-        }
+
+        refreshAccessibility(context);
     }
 
     static void refreshAccessibility(Context context) {
         SharedPreferences preferences = prefs(context);
-        boolean needed = FullscreenPackagePolicy.requiresAccessibilityService(
-                preferences.getBoolean(PREF_FLOATING, false),
-                preferences.getBoolean(PREF_STEERING, false),
-                preferences.getString(PREF_FULLSCREEN, "")) || carPlayNavigationEnabled(context);
+        boolean needed =
+                FullscreenPackagePolicy.requiresAccessibilityService(
+                                preferences.getBoolean(PREF_FLOATING, false),
+                                preferences.getBoolean(PREF_STEERING, false),
+                                preferences.getString(PREF_FULLSCREEN, ""))
+                        || carPlayNavigationEnabled(context);
         writeAccessibility(context, needed);
         BackButtonService live = instance;
         if (live != null) live.scheduleOverlayEvaluation(null);
     }
 
     static boolean carPlayNavigationEnabled(Context context) {
-        return InfrastructureProfile.read(context) == InfrastructureProfile.OD
-                && CarPlayTarget.isEnabled(context)
-                && Settings.Global.getInt(context.getContentResolver(), CarPlayTarget.FULLSCREEN_SETTING, 0) == 1;
+        return CarPlayTarget.isEnabled(context)
+                && Settings.Global.getInt(
+                                context.getContentResolver(), CarPlayTarget.FULLSCREEN_SETTING, 0)
+                        == 1;
     }
 
     static void disableForReconnect(Context context) {
@@ -127,8 +138,10 @@ public class BackButtonService extends AccessibilityService {
 
     private static void writeAccessibility(Context context, boolean present) {
         try {
-            String current = Settings.Secure.getString(
-                    context.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+            String current =
+                    Settings.Secure.getString(
+                            context.getContentResolver(),
+                            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
             LinkedHashSet<String> services = new LinkedHashSet<>();
             if (current != null) {
                 for (String service : current.split(":")) {
@@ -138,10 +151,12 @@ public class BackButtonService extends AccessibilityService {
             if (present) services.add(COMPONENT);
             else services.remove(COMPONENT);
             Settings.Secure.putString(
-                    context.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+                    context.getContentResolver(),
+                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
                     String.join(":", services));
             Settings.Secure.putInt(
-                    context.getContentResolver(), Settings.Secure.ACCESSIBILITY_ENABLED,
+                    context.getContentResolver(),
+                    Settings.Secure.ACCESSIBILITY_ENABLED,
                     services.isEmpty() ? 0 : 1);
         } catch (RuntimeException error) {
             Log.e(TAG, "Cannot update navigation accessibility service", error);
@@ -157,11 +172,13 @@ public class BackButtonService extends AccessibilityService {
         disableForReconnect(context);
         Handler handler = new Handler(Looper.getMainLooper());
         handler.postDelayed(() -> refreshAccessibility(context), 150);
-        handler.postDelayed(() -> {
-            BackButtonService retry = instance;
-            if (retry != null) retry.performNavigationAction(0, GLOBAL_ACTION_BACK);
-            else Log.w(TAG, "Back skipped: accessibility service is not connected");
-        }, 700);
+        handler.postDelayed(
+                () -> {
+                    BackButtonService retry = instance;
+                    if (retry != null) retry.performNavigationAction(0, GLOBAL_ACTION_BACK);
+                    else Log.w(TAG, "Back skipped: accessibility service is not connected");
+                },
+                700);
     }
 
     private void performNavigationAction(int displayId, int action) {
@@ -173,14 +190,27 @@ public class BackButtonService extends AccessibilityService {
         // A global action may target the driver even when the overlay was tapped by the passenger.
         try {
             Object inputManager = getSystemService(Context.INPUT_SERVICE);
-            Method inject = inputManager.getClass().getMethod("injectInputEvent", InputEvent.class, int.class);
+            Method inject =
+                    inputManager
+                            .getClass()
+                            .getMethod("injectInputEvent", InputEvent.class, int.class);
             Method setDisplayId = InputEvent.class.getMethod("setDisplayId", int.class);
             long time = SystemClock.uptimeMillis();
-            int keyCode = action == GLOBAL_ACTION_HOME ? KeyEvent.KEYCODE_HOME : KeyEvent.KEYCODE_BACK;
+            int keyCode =
+                    action == GLOBAL_ACTION_HOME ? KeyEvent.KEYCODE_HOME : KeyEvent.KEYCODE_BACK;
             for (int keyAction : new int[] {KeyEvent.ACTION_DOWN, KeyEvent.ACTION_UP}) {
-                KeyEvent key = new KeyEvent(
-                        time, time, keyAction, keyCode, 0, 0, KeyCharacterMap.VIRTUAL_KEYBOARD, 0,
-                        KeyEvent.FLAG_FROM_SYSTEM, InputDevice.SOURCE_KEYBOARD);
+                KeyEvent key =
+                        new KeyEvent(
+                                time,
+                                time,
+                                keyAction,
+                                keyCode,
+                                0,
+                                0,
+                                KeyCharacterMap.VIRTUAL_KEYBOARD,
+                                0,
+                                KeyEvent.FLAG_FROM_SYSTEM,
+                                InputDevice.SOURCE_KEYBOARD);
                 setDisplayId.invoke(key, displayId);
                 if (!Boolean.TRUE.equals(inject.invoke(inputManager, key, 0))) {
                     Log.w(TAG, "Navigation input rejected on display " + displayId);
@@ -216,21 +246,33 @@ public class BackButtonService extends AccessibilityService {
         String fullscreenCsv = prefs().getString(PREF_FULLSCREEN, "");
         ComponentName driver = foreground.get(Display.DEFAULT_DISPLAY);
         String driverPackage = driver == null ? "" : driver.getPackageName();
-        if (FullscreenPackagePolicy.contains(fullscreenCsv, fallbackPackage) || driverPackage.isEmpty()) {
+        if (FullscreenPackagePolicy.contains(fullscreenCsv, fallbackPackage)
+                || driverPackage.isEmpty()) {
             driverPackage = fallbackPackage;
         }
         boolean persistent = prefs().getBoolean(PREF_FLOATING, false);
-        boolean od = InfrastructureProfile.read(this) == InfrastructureProfile.OD;
+
         int forcedDisplays = 0;
         for (int displayId = 0; displayId <= 1; displayId++) {
             ComponentName activity = foreground.get(displayId);
-            boolean forced = CarPlayNavigationPolicy.shouldForceNavigation(
-                    od, displayId, activity == null ? "" : activity.getClassName(),
-                    Settings.Global.getInt(getContentResolver(), CarPlayNavigationPolicy.DOCK_HIDDEN + displayId, -1),
-                    Settings.Global.getInt(getContentResolver(), CarPlayNavigationPolicy.STATUS_BAR_HIDDEN + displayId, -1));
+            boolean forced =
+                    CarPlayNavigationPolicy.shouldForceNavigation(
+                            displayId,
+                            activity == null ? "" : activity.getClassName(),
+                            Settings.Global.getInt(
+                                    getContentResolver(),
+                                    CarPlayNavigationPolicy.DOCK_HIDDEN + displayId,
+                                    -1),
+                            Settings.Global.getInt(
+                                    getContentResolver(),
+                                    CarPlayNavigationPolicy.STATUS_BAR_HIDDEN + displayId,
+                                    -1));
             if (forced) forcedDisplays |= 1 << displayId;
-            boolean show = forced || (displayId == Display.DEFAULT_DISPLAY
-                    && FullscreenPackagePolicy.shouldShowOverlay(persistent, fullscreenCsv, driverPackage));
+            boolean show =
+                    forced
+                            || (displayId == Display.DEFAULT_DISPLAY
+                                    && FullscreenPackagePolicy.shouldShowOverlay(
+                                            persistent, fullscreenCsv, driverPackage));
             if (show) {
                 FloatingNavigationOverlay overlay = overlays.get(displayId);
                 if (overlay == null) {
@@ -238,9 +280,11 @@ public class BackButtonService extends AccessibilityService {
                     Display display = manager == null ? null : manager.getDisplay(displayId);
                     if (display == null) continue;
                     int targetDisplay = displayId;
-                    overlay = new FloatingNavigationOverlay(
-                            createDisplayContext(display), prefs(),
-                            action -> performNavigationAction(targetDisplay, action));
+                    overlay =
+                            new FloatingNavigationOverlay(
+                                    createDisplayContext(display),
+                                    prefs(),
+                                    action -> performNavigationAction(targetDisplay, action));
                     overlays.put(displayId, overlay);
                 }
                 overlay.show();

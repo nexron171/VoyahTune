@@ -21,7 +21,6 @@ import android.view.KeyEvent;
 import androidx.core.app.NotificationCompat;
 
 import ru.big.town.common.DoorMediaSettings;
-import ru.big.town.common.InfrastructureProfile;
 
 /**
  * Сервис «Сервисный режим дворников» (для холодного сезона).
@@ -313,7 +312,7 @@ public class WiperColdService extends Service {
     }
 
     private boolean isMediaPlayEnabled() {
-        return InfrastructureProfile.read(this).usesAccHooks()
+        return ApplyEngine.usesAccRestore()
                 && getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
                         .getBoolean(DoorMediaSettings.PLAY_ON_DOOR, false);
     }

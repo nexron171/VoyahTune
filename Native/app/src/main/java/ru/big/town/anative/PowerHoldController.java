@@ -3,7 +3,7 @@ package ru.big.town.anative;
 import android.content.Context;
 import android.util.Log;
 
-import ru.big.town.common.InfrastructureProfile;
+import ru.big.town.common.VehiclePlatform;
 
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -63,10 +63,8 @@ final class PowerHoldController {
 
     static PowerHoldController create(Context context) {
         Context app = context.getApplicationContext();
-        if (InfrastructureProfile.read(app) == InfrastructureProfile.OD) {
-            return new PowerHoldController(null, new PowerHoldOemTransport(app)::activate);
-        }
-        return new PowerHoldController(
+        return create(
+                VehiclePlatform.current(),
                 action -> {
                     PowerHoldPolicy.Outcome result =
                             OemVehicleStateTransport.withSession(
@@ -74,7 +72,15 @@ final class PowerHoldController {
                                     Arrays.asList(BMS_SOC_KEY, EXTENDER_KEY, SWITCH_KEY, TIME_KEY),
                                     oemSession -> action.run(createVehicleSession(oemSession)));
                     return result == null ? PowerHoldPolicy.Outcome.TRANSPORT_FAILURE : result;
-                });
+                },
+                new PowerHoldOemTransport(app)::activate);
+    }
+
+    static PowerHoldController create(
+            VehiclePlatform platform, VehicleGateway directCan, StockGateway stockManager) {
+        return platform.isH97XY()
+                ? new PowerHoldController(null, stockManager)
+                : new PowerHoldController(directCan);
     }
 
     private static Session createVehicleSession(OemVehicleStateTransport.Session oemSession) {

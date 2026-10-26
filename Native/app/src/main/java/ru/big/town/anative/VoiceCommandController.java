@@ -8,7 +8,6 @@ import android.os.ResultReceiver;
 import android.os.SystemClock;
 
 import ru.big.town.common.CustomVoiceCommandProtocol;
-import ru.big.town.common.InfrastructureProfile;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
@@ -270,7 +269,8 @@ final class VoiceCommandController {
                                     : MainActivity.sendRecuperationModeCommand(service, mode);
             if (sent) {
                 ApplyEngine.noteVehicleMode(key, mode);
-                if (InfrastructureProfile.read(service).usesAccHooks()) {
+
+                if (ApplyEngine.usesAccRestore()) {
                     MainActivity.persistExplicitMode(service, key, mode);
                 } else {
                     MainActivity.persistSavedMode(service, key, mode);

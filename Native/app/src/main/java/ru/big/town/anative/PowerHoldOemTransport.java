@@ -13,7 +13,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
-/** Calls the stock manager in VehicleSetting through the OD agent. */
+/** Calls the stock manager in VehicleSetting through the vehicle agent. */
 final class PowerHoldOemTransport {
     static final String ACTION_REQUEST = "ru.big.town.anative.POWER_HOLD_OEM_REQUEST";
     static final String ACTION_STATUS = "ru.big.town.anative.POWER_HOLD_OEM_STATUS";

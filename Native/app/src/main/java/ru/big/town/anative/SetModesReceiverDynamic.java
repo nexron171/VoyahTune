@@ -12,7 +12,6 @@ import android.os.Process;
 import android.util.Log;
 
 import ru.big.town.common.CarPlayTarget;
-import ru.big.town.common.InfrastructureProfile;
 
 import java.util.List;
 
@@ -97,8 +96,7 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                     sender == Process.myUid()
                             || sender == Process.SYSTEM_UID
                             || sender == Process.ROOT_UID
-                            || context.getPackageManager()
-                                            .checkSignatures(sender, Process.myUid())
+                            || context.getPackageManager().checkSignatures(sender, Process.myUid())
                                     == PackageManager.SIGNATURE_MATCH;
             if (trusted) {
                 openPassengerDashboard(context);
@@ -114,8 +112,7 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                     sender == Process.myUid()
                             || sender == Process.SYSTEM_UID
                             || sender == Process.ROOT_UID
-                            || context.getPackageManager()
-                                            .checkSignatures(sender, Process.myUid())
+                            || context.getPackageManager().checkSignatures(sender, Process.myUid())
                                     == PackageManager.SIGNATURE_MATCH;
             String pkg = intent.getStringExtra("pkg");
             int displayId = intent.getIntExtra("display", 0);
@@ -125,10 +122,7 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                 Log.w(TAG, "SET_MEDIA_AUTOSTART_PLAYER отклонён: пустой пакет");
             } else {
                 MediaPlayerAutostart.launchPlayerWithPlayback(
-                        context,
-                        pkg,
-                        displayId == 1 ? 1 : 0,
-                        new Handler(Looper.getMainLooper()));
+                        context, pkg, displayId == 1 ? 1 : 0, new Handler(Looper.getMainLooper()));
             }
         }
 
@@ -313,11 +307,11 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             // Per-package DPI остаётся для VD split-панелей: 0 тоже обязательно зеркалируем. Иначе
             // после выбора «Авто» в Settings.Global навсегда оставалось старое ненулевое значение.
             if (!"none".equals(pkg)) {
-                boolean accHooks = InfrastructureProfile.read(ctx).usesAccHooks();
-                if (accHooks) dpi = sanitizeDpi(dpi);
+
+                dpi = sanitizeDpi(dpi);
                 android.provider.Settings.Global.putString(
                         cr, "voyahtune_dpi_" + pkg, String.valueOf(dpi));
-                if (accHooks) updateAppDpiIndex(cr, pkg, dpi);
+                updateAppDpiIndex(cr, pkg, dpi);
             }
             // Сплит, открываемый долгим нажатием на слот дока. Флаг HasSplit читает launcherdock.js
             // (гейт долгого тапа), детали (L/R/Ratio/Dpi) — обработчик OPEN_DOCK_SPLIT ниже.
@@ -453,9 +447,7 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             String current = android.provider.Settings.Global.getString(cr, key);
             boolean valueChanged = !wanted.equals(current);
             if (valueChanged) android.provider.Settings.Global.putString(cr, key, wanted);
-            boolean indexed =
-                    InfrastructureProfile.read(ctx).usesAccHooks()
-                            && updateAppDpiIndex(cr, pkg, dpi);
+            boolean indexed = updateAppDpiIndex(cr, pkg, dpi);
             if (!valueChanged && !indexed) return false;
             sendWinReload(ctx);
             return true;

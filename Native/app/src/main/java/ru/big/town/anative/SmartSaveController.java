@@ -22,7 +22,7 @@ import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/** OD energy control with bounded startup readiness and event-driven speed updates. */
+/** Energy control with bounded startup readiness and event-driven speed updates. */
 final class SmartSaveController implements AutoCloseable {
     private static final String TAG = "SmartSave";
     private static final long CHARGE_INTERVAL_MS = 60_000;
@@ -358,12 +358,25 @@ final class SmartSaveController implements AutoCloseable {
                         : session.measurements(SystemClock.elapsedRealtime());
         Log.i(
                 TAG,
-                action + " mode=" + mode + " reason=" + reason
-                        + " cycle=" + configuration.getLong("cycle", -1)
-                        + " revision=" + configuration.getLong("revision", -1)
-                        + " selection=" + configuration.getLong("energySelectionRevision", 0)
-                        + " " + measurements + " chargeLock=" + policy.isChargingLocked()
-                        + " manualHold=" + policy.isManualSaveHeld() + " observed=" + observedMode);
+                action
+                        + " mode="
+                        + mode
+                        + " reason="
+                        + reason
+                        + " cycle="
+                        + configuration.getLong("cycle", -1)
+                        + " revision="
+                        + configuration.getLong("revision", -1)
+                        + " selection="
+                        + configuration.getLong("energySelectionRevision", 0)
+                        + " "
+                        + measurements
+                        + " chargeLock="
+                        + policy.isChargingLocked()
+                        + " manualHold="
+                        + policy.isManualSaveHeld()
+                        + " observed="
+                        + observedMode);
     }
 
     private void requestMode(int mode, String reason) {

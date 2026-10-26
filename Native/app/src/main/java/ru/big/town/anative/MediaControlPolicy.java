@@ -1,5 +1,7 @@
 package ru.big.town.anative;
 
+import ru.big.town.common.VehiclePlatform;
+
 import java.util.List;
 import java.util.Locale;
 
@@ -132,6 +134,10 @@ final class MediaControlPolicy {
             return new Plan(Operation.TRANSPORT_PAUSE, 0);
         }
         return new Plan(Operation.TARGET_KEY, keyFor(command));
+    }
+
+    static Plan plan(VehiclePlatform platform, Candidate target, Command command) {
+        return platform.isH97XY() ? radioPlan(target, command) : plan(target, command);
     }
 
     static Plan radioPlan(Candidate target, Command command) {

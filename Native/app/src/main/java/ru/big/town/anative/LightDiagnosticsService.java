@@ -16,12 +16,11 @@ import android.util.Log;
 
 import java.util.Arrays;
 import java.util.Map;
-import java.util.function.Consumer;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.RejectedExecutionException;
-import ru.big.town.common.InfrastructureProfile;
+import java.util.function.Consumer;
 
 /** Read-only, bound diagnostic observer. No light-control commands are issued here. */
 public final class LightDiagnosticsService extends Service {
@@ -31,44 +30,65 @@ public final class LightDiagnosticsService extends Service {
     private static final String TAG = "LightDiagnostics";
     private static final int UNKNOWN = Integer.MIN_VALUE;
     private static final int[] RSM_IDS = {1072, 1071, 1070, 1073};
-    private static final String[] RSM_NAMES = {"BCM_RSM_lightSWReason", "BCM_RSM_AmbBrightness",
-            "BCM_RSM_FwBrightness", "BCM_RSM_IRBrightness"};
+    private static final String[] RSM_NAMES = {
+        "BCM_RSM_lightSWReason",
+        "BCM_RSM_AmbBrightness",
+        "BCM_RSM_FwBrightness",
+        "BCM_RSM_IRBrightness"
+    };
     private static final String CAR_ACTION = "com.qinggan.carsignal.CarSignalService";
     private static final String CAR_PACKAGE = "com.qinggan.carsignal.service";
     private static final String CAR_DESCRIPTOR = "com.qinggan.carsignal.ICarSignalService";
-    private static final String CALLBACK_DESCRIPTOR = "com.qinggan.carsignal.ICarSignalServiceCallBack";
-    private static final ThreadPoolExecutor IO = new ThreadPoolExecutor(2, 2, 30,
-            TimeUnit.SECONDS, new ArrayBlockingQueue<>(4), runnable -> {
-                Thread thread = new Thread(runnable, "LightDiagnostics-io");
-                thread.setDaemon(true);
-                return thread;
-            }, new ThreadPoolExecutor.AbortPolicy());
+    private static final String CALLBACK_DESCRIPTOR =
+            "com.qinggan.carsignal.ICarSignalServiceCallBack";
+    private static final ThreadPoolExecutor IO =
+            new ThreadPoolExecutor(
+                    2,
+                    2,
+                    30,
+                    TimeUnit.SECONDS,
+                    new ArrayBlockingQueue<>(4),
+                    runnable -> {
+                        Thread thread = new Thread(runnable, "LightDiagnostics-io");
+                        thread.setDaemon(true);
+                        return thread;
+                    },
+                    new ThreadPoolExecutor.AbortPolicy());
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private final int[] values = new int[6];
-    private final LightDiagnosticsPoller rsmPoller = new LightDiagnosticsPoller(
-            new LightDiagnosticsPoller.Scheduler() {
-                @Override public void postDelayed(Runnable task, long delayMs) {
-                    main.postDelayed(task, delayMs);
-                }
-                @Override public void removeCallbacks(Runnable task) {
-                    main.removeCallbacks(task);
-                }
-            }, this::readRsmSnapshot, snapshot -> {
-                System.arraycopy(snapshot, 0, values, 0, snapshot.length);
-                publish();
-            });
-    private final Messenger endpoint = new Messenger(new Handler(Looper.getMainLooper()) {
-        @Override public void handleMessage(Message message) {
-            if (message.what == WATCH) {
-                client = message.replyTo;
-                clientSession = message.arg1;
-                publish();
-            } else {
-                super.handleMessage(message);
-            }
-        }
-    });
+    private final LightDiagnosticsPoller rsmPoller =
+            new LightDiagnosticsPoller(
+                    new LightDiagnosticsPoller.Scheduler() {
+                        @Override
+                        public void postDelayed(Runnable task, long delayMs) {
+                            main.postDelayed(task, delayMs);
+                        }
+
+                        @Override
+                        public void removeCallbacks(Runnable task) {
+                            main.removeCallbacks(task);
+                        }
+                    },
+                    this::readRsmSnapshot,
+                    snapshot -> {
+                        System.arraycopy(snapshot, 0, values, 0, snapshot.length);
+                        publish();
+                    });
+    private final Messenger endpoint =
+            new Messenger(
+                    new Handler(Looper.getMainLooper()) {
+                        @Override
+                        public void handleMessage(Message message) {
+                            if (message.what == WATCH) {
+                                client = message.replyTo;
+                                clientSession = message.arg1;
+                                publish();
+                            } else {
+                                super.handleMessage(message);
+                            }
+                        }
+                    });
     private Messenger client;
     private int clientSession;
     private CanBusEventHub.Subscription subscription;
@@ -76,24 +96,27 @@ public final class LightDiagnosticsService extends Service {
     private volatile IBinder carBinder;
     private volatile IBinder carCallback;
     private volatile int generation;
-    private int canSnapshotRevision;
 
-    @Override public void onCreate() {
+    @Override
+    public void onCreate() {
         super.onCreate();
         Arrays.fill(values, UNKNOWN);
     }
 
-    @Override public IBinder onBind(Intent intent) {
+    @Override
+    public IBinder onBind(Intent intent) {
         startWatching();
         return endpoint.getBinder();
     }
 
-    @Override public boolean onUnbind(Intent intent) {
+    @Override
+    public boolean onUnbind(Intent intent) {
         stopWatching();
         return false;
     }
 
-    @Override public void onDestroy() {
+    @Override
+    public void onDestroy() {
         stopWatching();
         super.onDestroy();
     }
@@ -102,54 +125,73 @@ public final class LightDiagnosticsService extends Service {
         if (subscription != null) return;
         final int session = ++generation;
         Arrays.fill(values, UNKNOWN);
-        subscription = CanBusEventHub.get(this).subscribe(
-                CanBusEventRouter.INTEREST_CONNECTION | CanBusEventRouter.INTEREST_VEHICLE_STATE,
-                RSM_IDS, main, event -> onCanEvent(session, event));
-        carConnection = new ServiceConnection() {
-            @Override public void onServiceConnected(ComponentName name, IBinder binder) {
-                if (generation != session) return;
-                carBinder = binder;
-                IBinder callback = new Binder() {
-                    @Override protected boolean onTransact(int code, Parcel data, Parcel reply,
-                                                            int flags) throws RemoteException {
-                        if (code == 13 || code == 25) {
-                            data.enforceInterface(CALLBACK_DESCRIPTOR);
-                            int value = data.readInt();
-                            int index = code == 13 ? 4 : 5;
-                            main.post(() -> {
-                                if (generation == session && carCallback == this) {
-                                    values[index] = value;
-                                    publish();
-                                }
-                            });
-                            return true;
-                        }
-                        if (code >= FIRST_CALL_TRANSACTION && code <= LAST_CALL_TRANSACTION) return true;
-                        return super.onTransact(code, data, reply, flags);
+        subscription =
+                CanBusEventHub.get(this)
+                        .subscribe(
+                                CanBusEventRouter.INTEREST_CONNECTION
+                                        | CanBusEventRouter.INTEREST_VEHICLE_STATE,
+                                RSM_IDS,
+                                main,
+                                event -> onCanEvent(session, event));
+        carConnection =
+                new ServiceConnection() {
+                    @Override
+                    public void onServiceConnected(ComponentName name, IBinder binder) {
+                        if (generation != session) return;
+                        carBinder = binder;
+                        IBinder callback =
+                                new Binder() {
+                                    @Override
+                                    protected boolean onTransact(
+                                            int code, Parcel data, Parcel reply, int flags)
+                                            throws RemoteException {
+                                        if (code == 13 || code == 25) {
+                                            data.enforceInterface(CALLBACK_DESCRIPTOR);
+                                            int value = data.readInt();
+                                            int index = code == 13 ? 4 : 5;
+                                            main.post(
+                                                    () -> {
+                                                        if (generation == session
+                                                                && carCallback == this) {
+                                                            values[index] = value;
+                                                            publish();
+                                                        }
+                                                    });
+                                            return true;
+                                        }
+                                        if (code >= FIRST_CALL_TRANSACTION
+                                                && code <= LAST_CALL_TRANSACTION) return true;
+                                        return super.onTransact(code, data, reply, flags);
+                                    }
+                                };
+                        carCallback = callback;
+                        submitIo(
+                                () -> {
+                                    boolean registered = transactCallback(binder, 46, callback);
+                                    if (generation != session
+                                            || carBinder != binder
+                                            || carCallback != callback) {
+                                        if (registered) transactCallback(binder, 47, callback);
+                                        return;
+                                    }
+                                    int light = readCarInt(binder, 36);
+                                    int pas = readCarInt(binder, 73);
+                                    main.post(
+                                            () -> {
+                                                if (generation != session || carBinder != binder)
+                                                    return;
+                                                if (values[4] == UNKNOWN) values[4] = light;
+                                                if (values[5] == UNKNOWN) values[5] = pas;
+                                                publish();
+                                            });
+                                });
+                    }
+
+                    @Override
+                    public void onServiceDisconnected(ComponentName name) {
+                        if (generation == session) clearCarSignal();
                     }
                 };
-                carCallback = callback;
-                submitIo(() -> {
-                    boolean registered = transactCallback(binder, 46, callback);
-                    if (generation != session || carBinder != binder || carCallback != callback) {
-                        if (registered) transactCallback(binder, 47, callback);
-                        return;
-                    }
-                    int light = readCarInt(binder, 36);
-                    int pas = readCarInt(binder, 73);
-                    main.post(() -> {
-                        if (generation != session || carBinder != binder) return;
-                        if (values[4] == UNKNOWN) values[4] = light;
-                        if (values[5] == UNKNOWN) values[5] = pas;
-                        publish();
-                    });
-                });
-            }
-
-            @Override public void onServiceDisconnected(ComponentName name) {
-                if (generation == session) clearCarSignal();
-            }
-        };
         Intent carIntent = new Intent(CAR_ACTION).setPackage(CAR_PACKAGE);
         try {
             if (!bindService(carIntent, carConnection, BIND_AUTO_CREATE)) {
@@ -164,49 +206,10 @@ public final class LightDiagnosticsService extends Service {
 
     private void onCanEvent(int session, CanBusEvent event) {
         if (generation != session) return;
-        if (InfrastructureProfile.read(this).usesAccHooks()) {
-            onOdCanEvent(event);
-            return;
-        }
-        if (event.kind == CanBusEvent.Kind.CONNECTION_LOST) {
-            ++canSnapshotRevision;
-            Arrays.fill(values, 0, 4, UNKNOWN);
-            publish();
-        } else if (event.kind == CanBusEvent.Kind.CONNECTION) {
-            final int snapshotRevision = ++canSnapshotRevision;
-            submitIo(() -> {
-                OemVehicleStateTransport.StateKey[] keys = new OemVehicleStateTransport.StateKey[4];
-                for (int i = 0; i < 4; i++) keys[i] =
-                        new OemVehicleStateTransport.StateKey(RSM_NAMES[i], RSM_IDS[i]);
-                Map<OemVehicleStateTransport.StateKey, Integer> snapshot =
-                        OemVehicleStateTransport.readVehicleStates(this, Arrays.asList(keys));
-                main.post(() -> {
-                    if (generation != session || canSnapshotRevision != snapshotRevision
-                            || snapshot == null) return;
-                    for (int i = 0; i < 4; i++) {
-                        if (values[i] == UNKNOWN && snapshot.get(keys[i]) != null) {
-                            values[i] = snapshot.get(keys[i]);
-                        }
-                    }
-                    publish();
-                });
-            });
-        } else if (event.kind == CanBusEvent.Kind.VEHICLE_STATE) {
-            for (int i = 0; i < 4; i++) {
-                if (event.first == RSM_IDS[i]) {
-                    values[i] = event.second;
-                    publish();
-                    break;
-                }
-            }
-        }
-    }
-
-    private void onOdCanEvent(CanBusEvent event) {
         if (event.kind == CanBusEvent.Kind.CONNECTION_LOST) {
             rsmPoller.stop();
         } else if (event.kind == CanBusEvent.Kind.CONNECTION) {
-            rsmPoller.start();
+            rsmPoller.start(ru.big.town.common.VehiclePlatform.current().isH97XY());
         } else if (event.kind == CanBusEvent.Kind.VEHICLE_STATE) {
             for (int i = 0; i < 4; i++) {
                 if (event.first == RSM_IDS[i]) {
@@ -219,30 +222,35 @@ public final class LightDiagnosticsService extends Service {
 
     private void readRsmSnapshot(Consumer<int[]> completion) {
         final int session = generation;
-        if (!submitIo(() -> {
-            int[] result = null;
-            try {
-                if (generation == session) {
-                    OemVehicleStateTransport.StateKey[] keys = new OemVehicleStateTransport.StateKey[4];
-                    for (int i = 0; i < keys.length; i++) keys[i] =
-                            new OemVehicleStateTransport.StateKey(RSM_NAMES[i], RSM_IDS[i]);
-                    Map<OemVehicleStateTransport.StateKey, Integer> snapshot =
-                            OemVehicleStateTransport.readVehicleStates(this, Arrays.asList(keys));
-                    if (snapshot != null) {
-                        result = new int[keys.length];
-                        for (int i = 0; i < keys.length; i++) {
-                            Integer value = snapshot.get(keys[i]);
-                            result[i] = value == null ? UNKNOWN : value;
+        if (!submitIo(
+                () -> {
+                    int[] result = null;
+                    try {
+                        if (generation == session) {
+                            OemVehicleStateTransport.StateKey[] keys =
+                                    new OemVehicleStateTransport.StateKey[4];
+                            for (int i = 0; i < keys.length; i++)
+                                keys[i] =
+                                        new OemVehicleStateTransport.StateKey(
+                                                RSM_NAMES[i], RSM_IDS[i]);
+                            Map<OemVehicleStateTransport.StateKey, Integer> snapshot =
+                                    OemVehicleStateTransport.readVehicleStates(
+                                            this, Arrays.asList(keys));
+                            if (snapshot != null) {
+                                result = new int[keys.length];
+                                for (int i = 0; i < keys.length; i++) {
+                                    Integer value = snapshot.get(keys[i]);
+                                    result[i] = value == null ? UNKNOWN : value;
+                                }
+                            }
                         }
+                    } catch (RuntimeException e) {
+                        Log.w(TAG, "RSM snapshot failed", e);
+                    } finally {
+                        final int[] snapshot = result;
+                        main.post(() -> completion.accept(snapshot));
                     }
-                }
-            } catch (RuntimeException e) {
-                Log.w(TAG, "RSM snapshot failed", e);
-            } finally {
-                final int[] snapshot = result;
-                main.post(() -> completion.accept(snapshot));
-            }
-        })) completion.accept(null);
+                })) completion.accept(null);
     }
 
     private void clearCarSignal() {
@@ -257,14 +265,20 @@ public final class LightDiagnosticsService extends Service {
         if (subscription == null && carConnection == null) return;
         ++generation;
         client = null;
-        if (InfrastructureProfile.read(this).usesAccHooks()) rsmPoller.stop();
-        if (subscription != null) { subscription.close(); subscription = null; }
+        rsmPoller.stop();
+        if (subscription != null) {
+            subscription.close();
+            subscription = null;
+        }
         IBinder binder = carBinder;
         IBinder callback = carCallback;
         carBinder = null;
         carCallback = null;
         if (carConnection != null) {
-            try { unbindService(carConnection); } catch (IllegalArgumentException ignored) { }
+            try {
+                unbindService(carConnection);
+            } catch (IllegalArgumentException ignored) {
+            }
             carConnection = null;
         }
         if (binder != null && callback != null)
@@ -279,12 +293,18 @@ public final class LightDiagnosticsService extends Service {
         android.os.Bundle data = new android.os.Bundle();
         data.putIntArray(VALUES, values.clone());
         message.setData(data);
-        try { client.send(message); } catch (RemoteException e) { client = null; }
+        try {
+            client.send(message);
+        } catch (RemoteException e) {
+            client = null;
+        }
     }
 
     private static boolean submitIo(Runnable task) {
-        try { IO.execute(task); return true; }
-        catch (RejectedExecutionException e) {
+        try {
+            IO.execute(task);
+            return true;
+        } catch (RejectedExecutionException e) {
             Log.w(TAG, "Diagnostic OEM queue full", e);
             return false;
         }
@@ -301,7 +321,10 @@ public final class LightDiagnosticsService extends Service {
         } catch (RemoteException | RuntimeException e) {
             Log.w(TAG, "CarSignal callback transaction " + code + " failed", e);
             return false;
-        } finally { data.recycle(); reply.recycle(); }
+        } finally {
+            data.recycle();
+            reply.recycle();
+        }
     }
 
     private static int readCarInt(IBinder binder, int code) {
@@ -314,6 +337,9 @@ public final class LightDiagnosticsService extends Service {
         } catch (RemoteException | RuntimeException e) {
             Log.w(TAG, "CarSignal read " + code + " failed", e);
             return UNKNOWN;
-        } finally { data.recycle(); reply.recycle(); }
+        } finally {
+            data.recycle();
+            reply.recycle();
+        }
     }
 }

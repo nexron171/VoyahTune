@@ -7,12 +7,12 @@ import android.os.Handler;
 import android.os.HandlerThread;
 import android.util.Log;
 
-import ru.big.town.common.InfrastructureProfile;
+import ru.big.town.common.VehiclePlatform;
 
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
-/** Shared restore execution, driven by the installed infrastructure's OEM event source. */
+/** Shared restore execution, driven by the vehicle firmware's OEM event source. */
 public final class ApplyEngine {
     static final String TAG = "$$$ ApplyEngine $$$";
 
@@ -33,8 +33,8 @@ public final class ApplyEngine {
     private static final String MODES_URI =
             "content://ru.big.town.restoremode.restoremodecontentprovider/";
 
-    static boolean usesAccHooks() {
-        return InfrastructureProfile.read(GlobalVars.SAVE_CONTEXT).usesAccHooks();
+    static boolean usesAccRestore() {
+        return VehiclePlatform.current().isH97XY();
     }
 
     private static long beginRestoreGate(String reason) {
@@ -176,7 +176,7 @@ public final class ApplyEngine {
     }
 
     static void persistModeFeedbackIfAllowed(Context context, String modeKey, String observedMode) {
-        if (usesAccHooks()) {
+        if (usesAccRestore()) {
             MODE_SYNC_POLICY.observe(modeKey, observedMode);
             // Origin-free callbacks are observations, never user intent.
             return;
@@ -222,10 +222,10 @@ public final class ApplyEngine {
     /** Wake side effects remain active independently of mode restoration. */
     public static void activateWake(String reason) {
         synchronized (RESTORE_LOCK) {
-            MODE_SYNC_POLICY.useAccHooks(usesAccHooks());
+            MODE_SYNC_POLICY.useAccRestore(usesAccRestore());
             RESTORE_RUN_STATE.activate(RESTORE_RUN_STATE.currentGeneration());
             MODE_SYNC_POLICY.activateWake();
-            if (!usesAccHooks())
+            if (!usesAccRestore())
                 EarlyDriveModeRestore.activate(RESTORE_RUN_STATE.currentGeneration(), reason);
         }
         Log.i(TAG, "wake active: " + reason);
@@ -233,7 +233,7 @@ public final class ApplyEngine {
 
     /** Provider owns the durable ACC-cycle claim; Native executes its remaining settings once. */
     static void applyApolloTargets(Context context) {
-        if (!InfrastructureProfile.read(context).usesAccHooks()) return;
+        if (!VehiclePlatform.current().isH97XY()) return;
         // Serialize with the ACC pass; changing Apollo must not cancel unrelated restoration.
         bg().post(
                         () -> {
@@ -252,7 +252,7 @@ public final class ApplyEngine {
     }
 
     public static void scheduleAccApply(Context context) {
-        if (!InfrastructureProfile.read(context).usesAccHooks()) return;
+        if (!VehiclePlatform.current().isH97XY()) return;
         final Context app = context.getApplicationContext();
         bg().post(
                         () -> {
@@ -326,9 +326,7 @@ public final class ApplyEngine {
         }
     }
 
-    /**
-     * PI retains the door/first-Drive triggers from master; OD uses the durable ACC claim above.
-     */
+    /** Firmware without ACC interception restores on the driver door and the first Drive entry. */
     private static final ThreadLocal<BooleanSupplier> DRIVE_ENTRY_GUARD = new ThreadLocal<>();
 
     static boolean isDriveEntryRestore() {
@@ -336,7 +334,7 @@ public final class ApplyEngine {
     }
 
     static void scheduleDriveEntryApply(BooleanSupplier allowed) {
-        if (!usesAccHooks()) return;
+        if (!usesAccRestore()) return;
         final long wakeGeneration;
         final long restoreEpoch;
         synchronized (RESTORE_LOCK) {
@@ -361,7 +359,7 @@ public final class ApplyEngine {
     }
 
     static void scheduleNativeApply(String reason) {
-        if (!usesAccHooks()) enqueueApply(reason, false, null);
+        if (!usesAccRestore()) enqueueApply(reason, false, null);
     }
 
     /** Explicit Apply supersedes older queued restores and always notifies the client. */
@@ -623,7 +621,7 @@ public final class ApplyEngine {
         if (manual) {
             DriveSelectionStore.applyConfigured(ctx);
             if (!current.getAsBoolean()) return CycleResult.CANCELLED;
-        } else if (!usesAccHooks()) {
+        } else if (!usesAccRestore()) {
             DriveSelectionStore.beginNativeRestore(ctx);
             if (!current.getAsBoolean()) return CycleResult.CANCELLED;
         }
@@ -636,7 +634,7 @@ public final class ApplyEngine {
         }
         final CanRestorePlan plan =
                 MainActivity.createCanRestorePlan(
-                        manual || !usesAccHooks() || isDriveEntryRestore());
+                        manual || !usesAccRestore() || isDriveEntryRestore());
         final CanRestorePlan.AttemptResult[] result = {
             CanRestorePlan.AttemptResult.TRANSIENT_FAILURE
         };

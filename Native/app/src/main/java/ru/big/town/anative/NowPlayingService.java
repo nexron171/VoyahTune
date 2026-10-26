@@ -16,8 +16,8 @@ import android.media.session.MediaSessionManager;
 import android.media.session.PlaybackState;
 import android.os.Handler;
 import android.os.HandlerThread;
-import android.os.PowerManager;
 import android.os.IBinder;
+import android.os.PowerManager;
 import android.os.Process;
 import android.system.Os;
 import android.util.Log;
@@ -267,7 +267,7 @@ public class NowPlayingService extends Service {
                         Log.e(
                                 TAG,
                                 "onCreate: нет MEDIA_CONTENT_CONTROL (whitelist на enforce-ROM?) —"
-                                    + " ридер инертен: "
+                                        + " ридер инертен: "
                                         + e.getMessage());
                     }
                 });
@@ -411,9 +411,7 @@ public class NowPlayingService extends Service {
                     watchedCbs.add(cb);
                     PlaybackState initial = safePlaybackState(watchedController);
                     rememberPlaybackState(
-                            watchedController,
-                            initial,
-                            MediaControlRouter.isActiveState(initial));
+                            watchedController, initial, MediaControlRouter.isActiveState(initial));
                 } catch (Exception ignored) {
                 }
             }
@@ -653,9 +651,8 @@ public class NowPlayingService extends Service {
                 sDuration = duration;
                 sHasArt = hasArt;
                 sUpdatedAt = System.currentTimeMillis();
-                if (ru.big.town.common.InfrastructureProfile.read(this).usesAccHooks()) {
-                    LastMediaSessionStore.remember(this, pkg, state);
-                }
+
+                LastMediaSessionStore.remember(this, pkg, state);
             }
             enqueueSnapshotBroadcast(buildSnapshotIntent());
 

@@ -60,30 +60,33 @@ public class SetModesConfigReceiver extends BroadcastReceiver {
                 Settings.Global.putString(
                         context.getContentResolver(), "voyahtune_" + key, style.value);
             }
-            if (ru.big.town.common.InfrastructureProfile.read(context)
-                    == ru.big.town.common.InfrastructureProfile.OD) {
-                if (intent.hasExtra(ru.big.town.common.CarPlayTarget.FULLSCREEN)) {
-                    int fullscreen = intent.getBooleanExtra(
-                            ru.big.town.common.CarPlayTarget.FULLSCREEN, false) ? 1 : 0;
-                    int previousFullscreen = Settings.Global.getInt(
-                            context.getContentResolver(),
-                            ru.big.town.common.CarPlayTarget.FULLSCREEN_SETTING, 0);
-                    Settings.Global.putInt(
-                            context.getContentResolver(),
-                            ru.big.town.common.CarPlayTarget.FULLSCREEN_SETTING,
-                            fullscreen);
-                    if (previousFullscreen != fullscreen) {
-                        SplitHostActivity.refreshCarPlayWindowMode();
-                    }
-                }
-                for (String key :
-                        new String[] {"dockHomeShortVoyahTune", "dockAllAppsShortVoyahTune"}) {
-                    Settings.Global.putString(
-                            context.getContentResolver(),
-                            "voyahtune_" + key,
-                            intent.getBooleanExtra(key, false) ? "1" : "0");
+
+            if (intent.hasExtra(ru.big.town.common.CarPlayTarget.FULLSCREEN)) {
+                int fullscreen =
+                        intent.getBooleanExtra(ru.big.town.common.CarPlayTarget.FULLSCREEN, false)
+                                ? 1
+                                : 0;
+                int previousFullscreen =
+                        Settings.Global.getInt(
+                                context.getContentResolver(),
+                                ru.big.town.common.CarPlayTarget.FULLSCREEN_SETTING,
+                                0);
+                Settings.Global.putInt(
+                        context.getContentResolver(),
+                        ru.big.town.common.CarPlayTarget.FULLSCREEN_SETTING,
+                        fullscreen);
+                if (previousFullscreen != fullscreen) {
+                    SplitHostActivity.refreshCarPlayWindowMode();
                 }
             }
+            for (String key :
+                    new String[] {"dockHomeShortVoyahTune", "dockAllAppsShortVoyahTune"}) {
+                Settings.Global.putString(
+                        context.getContentResolver(),
+                        "voyahtune_" + key,
+                        intent.getBooleanExtra(key, false) ? "1" : "0");
+            }
+
             BackButtonService.refreshCarPlayNavigation(context);
             Intent reload = new Intent("ru.big.town.anative.DOCK_RELOAD");
             reload.addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES);

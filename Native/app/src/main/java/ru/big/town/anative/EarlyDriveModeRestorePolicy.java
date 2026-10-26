@@ -3,7 +3,13 @@ package ru.big.town.anative;
 /** One 30-second observation window per wake, with no restart on repeated wake/connect events. */
 final class EarlyDriveModeRestorePolicy {
     static final long WINDOW_MS = 30_000L;
-    enum Decision { WAIT, MATCH, RESTORE_ECO, STOP }
+
+    enum Decision {
+        WAIT,
+        MATCH,
+        RESTORE_ECO,
+        STOP
+    }
 
     private long generation = -1L;
     private boolean active;
@@ -40,10 +46,11 @@ final class EarlyDriveModeRestorePolicy {
     }
 
     /** A changed/disabled saved selection ends this run instead of retargeting queued work. */
-    synchronized boolean acceptTarget(long wakeGeneration, long now,
-                                      boolean enabled, String selectedMode) {
+    synchronized boolean acceptTarget(
+            long wakeGeneration, long now, boolean enabled, String selectedMode) {
         if (!isActive(wakeGeneration, now)) return false;
-        if (!enabled || !DriveModeCanPolicy.isSupported(selectedMode)
+        if (!enabled
+                || !DriveModeCanPolicy.isSupported(selectedMode)
                 || (target != null && !target.equals(selectedMode))) {
             active = false;
             return false;
@@ -55,8 +62,8 @@ final class EarlyDriveModeRestorePolicy {
     synchronized Decision observe(long wakeGeneration, long now, Integer state) {
         if (!isActive(wakeGeneration, now)) return Decision.STOP;
         if (target == null || state == null) return Decision.WAIT;
-        ModeFeedbackDecoder.Feedback feedback = ModeFeedbackDecoder.decode(
-                ModeFeedbackDecoder.DRIVE_MODE_VSTATE_ID, state);
+        ModeFeedbackDecoder.Feedback feedback =
+                ModeFeedbackDecoder.decode(ModeFeedbackDecoder.DRIVE_MODE_VSTATE_ID, state);
         if (feedback == null) return Decision.WAIT;
         if (target.equals(feedback.mode)) return Decision.MATCH;
         if ("ECO".equals(feedback.mode)) return Decision.RESTORE_ECO;

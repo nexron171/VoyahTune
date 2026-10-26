@@ -66,10 +66,12 @@ final class ModeFeedbackController implements AutoCloseable {
                     feedbackHandler,
                     ContextCompat.RECEIVER_EXPORTED);
             receiverRegistered = true;
-            if (ru.big.town.common.InfrastructureProfile.read(appContext).usesAccHooks()) {
+
+            if (ApplyEngine.usesAccRestore()) {
                 smartSaveController = new SmartSaveController(appContext);
                 driveEntryRestoreController = new DriveEntryRestoreController(appContext);
             }
+
         } catch (RuntimeException e) {
             close();
             throw e;
@@ -85,9 +87,7 @@ final class ModeFeedbackController implements AutoCloseable {
         if (closed) return;
         ModeFeedbackDecoder.Feedback feedback = ModeFeedbackDecoder.decode(id, state);
         if (feedback == null) {
-            if (NativeLog.get().isRunning()) {
-                Log.i(TAG, "unknown mode state ignored id=" + id + " state=" + state);
-            }
+
             return;
         }
 
@@ -95,9 +95,6 @@ final class ModeFeedbackController implements AutoCloseable {
             ApplyEngine.persistModeFeedbackIfAllowed(appContext, feedback.modeKey, feedback.mode);
         } catch (RuntimeException e) {
             Log.w(TAG, "persist feedback: " + e.getMessage());
-        }
-        if (NativeLog.get().isRunning()) {
-            Log.i(TAG, "VSTATE mode id=" + id + " state=" + state);
         }
     }
 

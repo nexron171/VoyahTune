@@ -16,7 +16,6 @@ import android.util.Log;
 
 import androidx.core.app.NotificationCompat;
 
-import ru.big.town.common.InfrastructureProfile;
 import ru.big.town.common.ScreenBrightnessSettings;
 
 import java.util.List;
@@ -131,9 +130,13 @@ public final class ScreenBrightnessService extends Service {
                         status =
                                 result.target < 0
                                         ? "Основной экран: яркость недоступна"
-                                        : "Цель: " + result.target + "%"
+                                        : "Цель: "
+                                                + result.target
+                                                + "%"
                                                 + (result.night ? " · Ночь" : "")
-                                                + " · подтверждено экранов: " + result.confirmed + "/3";
+                                                + " · подтверждено экранов: "
+                                                + result.confirmed
+                                                + "/3";
                         if (!result.synchronizationConfirmed) {
                             status += " · синхронизация не подтверждена";
                         }
@@ -178,10 +181,9 @@ public final class ScreenBrightnessService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         latestStartId = startId;
         boolean enabled = preferences.getBoolean(ScreenBrightnessSettings.ENABLED, false);
-        if (InfrastructureProfile.read(this) != InfrastructureProfile.OD
-                || (!enabled
-                        && !preferences.getBoolean(
-                                ScreenBrightnessModeController.RESTORE_PENDING, false))) {
+        if ((!enabled
+                && !preferences.getBoolean(
+                        ScreenBrightnessModeController.RESTORE_PENDING, false))) {
             active = false;
             stopSelf();
             return START_NOT_STICKY;

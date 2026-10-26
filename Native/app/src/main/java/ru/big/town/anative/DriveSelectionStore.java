@@ -6,23 +6,34 @@ import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
 import android.util.Log;
+
 import ru.big.town.common.DriveSelectionPolicy;
 
 /** One persistent restore target shared by the widget, Native and the ACC hook. */
 final class DriveSelectionStore {
-    private static final Uri URI = Uri.parse("content://ru.big.town.restoremode.restoremodecontentprovider/");
+    private static final Uri URI =
+            Uri.parse("content://ru.big.town.restoremode.restoremodecontentprovider/");
+
     static void applyConfigured(Context context) {
         try {
             context.getContentResolver().call(URI, "driveHookV2", "manual", null);
-        } catch (RuntimeException e) { Log.w("DriveSelection", "Configured selection unavailable", e); }
+        } catch (RuntimeException e) {
+            Log.w("DriveSelection", "Configured selection unavailable", e);
+        }
     }
 
     static void beginNativeRestore(Context context) {
         try {
             context.getContentResolver().call(URI, "driveHookV2", "nativeRestore", null);
-        } catch (RuntimeException e) { Log.w("DriveSelection", "Native restore state unavailable", e); }
+        } catch (RuntimeException e) {
+            Log.w("DriveSelection", "Native restore state unavailable", e);
+        }
     }
-    static DriveSelectionPolicy read(Context context) { return read(context, URI); }
+
+    static DriveSelectionPolicy read(Context context) {
+        return read(context, URI);
+    }
+
     static DriveSelectionPolicy read(Context context, Uri endpoint) {
         try (Cursor c = context.getContentResolver().query(endpoint, null, null, null, null)) {
             if (c != null && c.moveToFirst()) {
@@ -31,14 +42,22 @@ final class DriveSelectionStore {
                 int medium = c.getColumnIndex(DriveSelectionPolicy.MEDIUM);
                 int current = c.getColumnIndex(DriveSelectionPolicy.CURRENT);
                 if (configured < 0 || override < 0 || medium < 0) return null;
-                return new DriveSelectionPolicy(c.getString(configured), c.getString(override),
-                        c.getString(medium), current < 0 ? "" : c.getString(current));
+                return new DriveSelectionPolicy(
+                        c.getString(configured),
+                        c.getString(override),
+                        c.getString(medium),
+                        current < 0 ? "" : c.getString(current));
             }
-        } catch (RuntimeException e) { Log.w("DriveSelection", "Read failed", e); }
+        } catch (RuntimeException e) {
+            Log.w("DriveSelection", "Read failed", e);
+        }
         return null;
     }
 
-    static boolean record(Context context, String mode, String source) { return record(context, URI, mode, source); }
+    static boolean record(Context context, String mode, String source) {
+        return record(context, URI, mode, source);
+    }
+
     static boolean record(Context context, Uri endpoint, String mode, String source) {
         if (context == null || !DriveSelectionPolicy.valid(mode)) return false;
         try {
@@ -54,9 +73,12 @@ final class DriveSelectionStore {
             if (state == null) return false;
             MainActivity.driveMode = state.effective();
             ApplyEngine.noteSavedMode("driveMode", state.effective());
-            context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE).edit()
-                    .putString("cacheDriveMode", state.effective()).apply();
-            if (DriveSelectionPolicy.WIDGET.equals(source) || DriveSelectionPolicy.EXPLICIT.equals(source)) {
+            context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE)
+                    .edit()
+                    .putString("cacheDriveMode", state.effective())
+                    .apply();
+            if (DriveSelectionPolicy.WIDGET.equals(source)
+                    || DriveSelectionPolicy.EXPLICIT.equals(source)) {
                 ApplyEngine.driveSelectionSaved();
             }
             Intent update = new Intent("ru.big.town.anative.MODE_SYNCED");
@@ -64,9 +86,21 @@ final class DriveSelectionStore {
             update.putExtra("modeKey", "driveMode");
             update.putExtra("mode", state.configured);
             context.sendBroadcast(update);
-            Log.i("DriveSelection", source + " mode=" + mode + " restore=" + state.effective()
-                    + " widget=" + state.override + " medium=" + state.medium);
+            Log.i(
+                    "DriveSelection",
+                    source
+                            + " mode="
+                            + mode
+                            + " restore="
+                            + state.effective()
+                            + " widget="
+                            + state.override
+                            + " medium="
+                            + state.medium);
             return true;
-        } catch (RuntimeException e) { Log.w("DriveSelection", "Save failed", e); return false; }
+        } catch (RuntimeException e) {
+            Log.w("DriveSelection", "Save failed", e);
+            return false;
+        }
     }
 }

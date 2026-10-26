@@ -5,12 +5,15 @@ import java.util.Map;
 
 /** Saved selection and current vehicle state are independent; feedback never requests a restore. */
 final class ModeSyncPolicy {
-    enum Decision { ACCEPT, IGNORE }
+    enum Decision {
+        ACCEPT,
+        IGNORE
+    }
 
     private long generation;
     private boolean wakeActive;
     private boolean feedbackOpen;
-    private boolean accHooks = true;
+    private boolean accRestore = true;
     private boolean driveEntered, waitingForDrive;
     private int lastGear = -1;
     private String expectedDrive;
@@ -19,12 +22,16 @@ final class ModeSyncPolicy {
     private boolean energyRememberLast = true;
     private boolean recycleRememberLast = true;
 
-    synchronized void activateWake() { wakeActive = true; }
+    synchronized void activateWake() {
+        wakeActive = true;
+    }
 
-    synchronized void useAccHooks(boolean enabled) { accHooks = enabled; }
+    synchronized void useAccRestore(boolean enabled) {
+        accRestore = enabled;
+    }
 
     synchronized void onDriverDoorOpened() {
-        if (accHooks) return;
+        if (accRestore) return;
         driveEntered = false;
         waitingForDrive = true;
         feedbackOpen = false;
@@ -32,7 +39,7 @@ final class ModeSyncPolicy {
     }
 
     synchronized void onGear(int gear) {
-        if (accHooks || gear < 0) return;
+        if (accRestore || gear < 0) return;
         if (wakeActive && waitingForDrive && gear == 3 && lastGear != 3) {
             driveEntered = true;
             waitingForDrive = false;
@@ -42,7 +49,7 @@ final class ModeSyncPolicy {
 
     /** Guard feedback until this ACC cycle's Native restore or an explicit command completes. */
     synchronized boolean canRememberSelection() {
-        return wakeActive && (accHooks ? feedbackOpen : driveEntered);
+        return wakeActive && (accRestore ? feedbackOpen : driveEntered);
     }
 
     /** Explicit commands can finish while feedback is frozen, including a selection in Snow. */
@@ -52,7 +59,11 @@ final class ModeSyncPolicy {
 
     /** A fresh Native process may reuse the completed durable ACC pass without sending it again. */
     synchronized boolean reconcileCompletedAcc(int acc, String settingsStartup) {
-        if (!accHooks || generation != 0 || !wakeActive || acc != 2 || !"submitted".equals(settingsStartup)) {
+        if (!accRestore
+                || generation != 0
+                || !wakeActive
+                || acc != 2
+                || !"submitted".equals(settingsStartup)) {
             return false;
         }
         feedbackOpen = true;
@@ -60,7 +71,9 @@ final class ModeSyncPolicy {
     }
 
     /** Drive choices can be made in Parking; automatic restore echoes remain gated. */
-    synchronized boolean canAcceptDriveSelection() { return wakeActive && feedbackOpen; }
+    synchronized boolean canAcceptDriveSelection() {
+        return wakeActive && feedbackOpen;
+    }
 
     synchronized long beginRestore() {
         wakeActive = true;
@@ -99,17 +112,27 @@ final class ModeSyncPolicy {
         return true;
     }
 
-    synchronized long currentGeneration() { return generation; }
-
-    synchronized boolean canPersist(long candidate, String modeKey) {
-        return candidate == generation && canRememberSelection()
-                && feedbackOpen && acceptsExternalFeedback(modeKey);
+    synchronized long currentGeneration() {
+        return generation;
     }
 
-    synchronized void updateExpected(String drive, String energy, String recycle,
-                                     boolean driveEnabled, boolean energyEnabled,
-                                     boolean recycleEnabled, boolean driveRememberLast,
-                                     boolean energyRememberLast, boolean recycleRememberLast) {
+    synchronized boolean canPersist(long candidate, String modeKey) {
+        return candidate == generation
+                && canRememberSelection()
+                && feedbackOpen
+                && acceptsExternalFeedback(modeKey);
+    }
+
+    synchronized void updateExpected(
+            String drive,
+            String energy,
+            String recycle,
+            boolean driveEnabled,
+            boolean energyEnabled,
+            boolean recycleEnabled,
+            boolean driveRememberLast,
+            boolean energyRememberLast,
+            boolean recycleRememberLast) {
         if (valid(drive)) expectedDrive = drive;
         this.driveRememberLast = driveRememberLast;
         this.energyRememberLast = energyRememberLast;
@@ -139,13 +162,15 @@ final class ModeSyncPolicy {
         // Even opted-out feedback is needed for steering cycles and Snow recuperation handling.
         observe(modeKey, observedMode);
         return canRememberSelection() && feedbackOpen && acceptsExternalFeedback(modeKey)
-                ? Decision.ACCEPT : Decision.IGNORE;
+                ? Decision.ACCEPT
+                : Decision.IGNORE;
     }
 
     private boolean acceptsExternalFeedback(String modeKey) {
         if ("energy".equals(modeKey)) return energyRememberLast;
         if ("driveMode".equals(modeKey)) return driveRememberLast;
-        return "recycle".equals(modeKey) && recycleRememberLast
+        return "recycle".equals(modeKey)
+                && recycleRememberLast
                 && !"SNOW".equals(currentMode("driveMode", expectedDrive));
     }
 
@@ -153,5 +178,7 @@ final class ModeSyncPolicy {
         return "driveMode".equals(key) || "energy".equals(key) || "recycle".equals(key);
     }
 
-    private static boolean valid(String mode) { return mode != null && !mode.isEmpty(); }
+    private static boolean valid(String mode) {
+        return mode != null && !mode.isEmpty();
+    }
 }

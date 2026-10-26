@@ -62,30 +62,40 @@ final class ApolloRestorePolicy {
     private static final int ENABLED = 2;
     private static final int DISABLED = 1;
 
-    private ApolloRestorePolicy() {
-    }
+    private ApolloRestorePolicy() {}
 
     /**
      * Entitlements are submitted first, then the selected ISA mode, then user switches. Separate
      * OEM tasks keep feature activation behind both the capability frame and mode selection.
      */
-    static void appendTo(Map<String, Integer> entitlements,
-                         Map<String, Integer> modes,
-                         Map<String, Integer> switches,
-                         boolean tlc, boolean trafficLights,
-                         boolean greenSound, boolean trafficSigns, boolean speedSigns) {
-        // Existing PI callers retain recognition-only behaviour.
-        appendBase(entitlements, switches, tlc, trafficLights, greenSound, trafficSigns, speedSigns);
+    static void appendTo(
+            Map<String, Integer> entitlements,
+            Map<String, Integer> modes,
+            Map<String, Integer> switches,
+            boolean tlc,
+            boolean trafficLights,
+            boolean greenSound,
+            boolean trafficSigns,
+            boolean speedSigns) {
+        // Recognition-only firmware must not receive correction or warning commands.
+        appendBase(
+                entitlements, switches, tlc, trafficLights, greenSound, trafficSigns, speedSigns);
         if (speedSigns) modes.put(ISA_ISLC_MODE, 4);
     }
 
-    static void appendTo(Map<String, Integer> entitlements,
-                         Map<String, Integer> modes,
-                         Map<String, Integer> switches,
-                         boolean tlc, boolean trafficLights,
-                         boolean greenSound, boolean trafficSigns, boolean speedSigns,
-                         int speedMode, boolean speedWarning) {
-        appendBase(entitlements, switches, tlc, trafficLights, greenSound, trafficSigns, speedSigns);
+    static void appendTo(
+            Map<String, Integer> entitlements,
+            Map<String, Integer> modes,
+            Map<String, Integer> switches,
+            boolean tlc,
+            boolean trafficLights,
+            boolean greenSound,
+            boolean trafficSigns,
+            boolean speedSigns,
+            int speedMode,
+            boolean speedWarning) {
+        appendBase(
+                entitlements, switches, tlc, trafficLights, greenSound, trafficSigns, speedSigns);
         // Separate mode task precedes enablement. Off also clears any active correction mode.
         modes.put(ISA_ISLC_MODE, speedSigns ? normalizeSpeedMode(speedMode) : 4);
         switches.put(ISA_ISLC_OVER_SPEED_WARNING_SWITCH, state(speedSigns && speedWarning));
@@ -95,10 +105,14 @@ final class ApolloRestorePolicy {
         return mode == 2 || mode == 3 ? mode : 4;
     }
 
-    private static void appendBase(Map<String, Integer> entitlements,
-                                   Map<String, Integer> switches,
-                                   boolean tlc, boolean trafficLights, boolean greenSound,
-                                   boolean trafficSigns, boolean speedSigns) {
+    private static void appendBase(
+            Map<String, Integer> entitlements,
+            Map<String, Integer> switches,
+            boolean tlc,
+            boolean trafficLights,
+            boolean greenSound,
+            boolean trafficSigns,
+            boolean speedSigns) {
         if (entitlements == null || switches == null) {
             throw new IllegalArgumentException("Apollo target maps are null");
         }
@@ -121,21 +135,42 @@ final class ApolloRestorePolicy {
     }
 
     interface Sender {
-        boolean send(Map<String, Integer> capabilities, Map<String, Integer> modes,
-                     Map<String, Integer> switches);
+        boolean send(
+                Map<String, Integer> capabilities,
+                Map<String, Integer> modes,
+                Map<String, Integer> switches);
     }
 
-    static void appendPlan(CanRestorePlan.Builder plan, boolean tlc, boolean lights,
-                           boolean sound, boolean signs, boolean speedSigns,
-                           int speedMode, boolean speedWarning, Sender sender) {
+    static void appendPlan(
+            CanRestorePlan.Builder plan,
+            boolean tlc,
+            boolean lights,
+            boolean sound,
+            boolean signs,
+            boolean speedSigns,
+            int speedMode,
+            boolean speedWarning,
+            Sender sender) {
         Map<String, Integer> capabilities = new LinkedHashMap<>();
         Map<String, Integer> modes = new LinkedHashMap<>();
         Map<String, Integer> switches = new LinkedHashMap<>();
-        appendTo(capabilities, modes, switches, tlc, lights, sound, signs, speedSigns,
-                speedMode, speedWarning);
-        plan.addOnce("Apollo individual targets", () -> sender.send(capabilities, modes, switches)
-                ? CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED
-                : CanRestorePlan.OperationResult.TRANSIENT_FAILURE);
+        appendTo(
+                capabilities,
+                modes,
+                switches,
+                tlc,
+                lights,
+                sound,
+                signs,
+                speedSigns,
+                speedMode,
+                speedWarning);
+        plan.addOnce(
+                "Apollo individual targets",
+                () ->
+                        sender.send(capabilities, modes, switches)
+                                ? CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED
+                                : CanRestorePlan.OperationResult.TRANSIENT_FAILURE);
     }
 
     private static void putAllEntitlements(Map<String, Integer> target, int value) {

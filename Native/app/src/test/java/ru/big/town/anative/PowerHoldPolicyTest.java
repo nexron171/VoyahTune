@@ -49,11 +49,20 @@ public class PowerHoldPolicyTest {
     }
 
     @Test
-    public void outcomeIpcCodesAreStable() {
-        for (PowerHoldPolicy.Outcome outcome : PowerHoldPolicy.Outcome.values()) {
-            assertEquals(outcome, PowerHoldPolicy.Outcome.fromIpcCode(outcome.ipcCode));
+    public void decodesOemOutcomesAndRejectsUnknownCodes() {
+        PowerHoldPolicy.Outcome[] expected = {
+            PowerHoldPolicy.Outcome.ACCEPTED, PowerHoldPolicy.Outcome.NOT_IN_PARK,
+            PowerHoldPolicy.Outcome.LOW_BATTERY, PowerHoldPolicy.Outcome.STATE_UNAVAILABLE,
+            PowerHoldPolicy.Outcome.TRANSPORT_FAILURE, PowerHoldPolicy.Outcome.ARMED,
+            PowerHoldPolicy.Outcome.ACTIVE, PowerHoldPolicy.Outcome.RESULT_UNKNOWN
+        };
+        for (int code = 1; code <= 8; code++) {
+            assertEquals(expected[code - 1], PowerHoldPolicy.Outcome.fromIpcCode(code));
         }
-        assertEquals(
-                PowerHoldPolicy.Outcome.TRANSPORT_FAILURE, PowerHoldPolicy.Outcome.fromIpcCode(-1));
+        for (int code : new int[] {-1, 0, 9, Integer.MAX_VALUE}) {
+            assertEquals(
+                    PowerHoldPolicy.Outcome.TRANSPORT_FAILURE,
+                    PowerHoldPolicy.Outcome.fromIpcCode(code));
+        }
     }
 }

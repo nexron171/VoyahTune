@@ -9,7 +9,7 @@ import android.util.Log;
 
 import ru.big.town.common.CarPlayWifiScanProtocol;
 
-/** Publishes the authenticated owner's heartbeat; the OD system agent owns recovery. */
+/** Publishes the authenticated owner's heartbeat; the system agent owns recovery. */
 final class CarPlayWifiScanController implements AutoCloseable {
     private final Context context;
     private final HandlerThread thread = new HandlerThread("CarPlayWifiScan");
@@ -27,10 +27,14 @@ final class CarPlayWifiScanController implements AutoCloseable {
 
     void update(boolean pause, long timestamp) {
         long now = SystemClock.elapsedRealtime();
-        pause = pause && timestamp > 0 && timestamp <= now
-                && now - timestamp < CarPlayWifiScanProtocol.LEASE_MILLIS;
-        if (pause == paused && (!pause
-                || now - lastScheduledAt < CarPlayWifiScanProtocol.RENEW_INTERVAL_MILLIS)) {
+        pause =
+                pause
+                        && timestamp > 0
+                        && timestamp <= now
+                        && now - timestamp < CarPlayWifiScanProtocol.LEASE_MILLIS;
+        if (pause == paused
+                && (!pause
+                        || now - lastScheduledAt < CarPlayWifiScanProtocol.RENEW_INTERVAL_MILLIS)) {
             return;
         }
         paused = pause;
@@ -43,8 +47,9 @@ final class CarPlayWifiScanController implements AutoCloseable {
     private void publishLease() {
         try {
             int bootCount = Settings.Global.getInt(context.getContentResolver(), "boot_count", -1);
-            String lease = CarPlayWifiScanProtocol.leaseValue(
-                    bootCount, requestedAt, SystemClock.elapsedRealtime());
+            String lease =
+                    CarPlayWifiScanProtocol.leaseValue(
+                            bootCount, requestedAt, SystemClock.elapsedRealtime());
             if (!Settings.Global.putString(
                     context.getContentResolver(), CarPlayWifiScanProtocol.LEASE_SETTING, lease)) {
                 Log.w("CarPlayWifiScan", "Scan pause heartbeat was not accepted");

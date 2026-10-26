@@ -10,6 +10,7 @@ final class LightDiagnosticsPoller {
 
     interface Scheduler {
         void postDelayed(Runnable task, long delayMs);
+
         void removeCallbacks(Runnable task);
     }
 
@@ -26,6 +27,7 @@ final class LightDiagnosticsPoller {
     private final Runnable tick = this::poll;
     private boolean active;
     private boolean reading;
+    private boolean continuous;
     private long generation;
 
     LightDiagnosticsPoller(Scheduler scheduler, Reader reader, Consumer<int[]> listener) {
@@ -36,8 +38,13 @@ final class LightDiagnosticsPoller {
     }
 
     void start() {
+        start(true);
+    }
+
+    void start(boolean continuous) {
         stop();
         active = true;
+        this.continuous = continuous;
         poll();
     }
 
@@ -59,20 +66,26 @@ final class LightDiagnosticsPoller {
 
     private void poll() {
         if (!active) return;
-        scheduler.postDelayed(tick, INTERVAL_MS);
+        if (continuous) scheduler.postDelayed(tick, INTERVAL_MS);
         if (reading) return;
         reading = true;
         long session = generation;
         long[] beforeRead = revisions.clone();
-        reader.read(snapshot -> {
-            reading = false;
-            if (!active || generation != session) return;
-            for (int i = 0; i < values.length; i++) {
-                if (revisions[i] == beforeRead[i]) {
-                    values[i] = snapshot == null ? UNKNOWN : snapshot[i];
-                }
-            }
-            listener.accept(values.clone());
-        });
+        reader.read(
+                snapshot -> {
+                    reading = false;
+                    if (!active) return;
+                    if (generation != session) {
+                        // A reconnect still needs its initial snapshot after an old read finishes.
+                        if (!continuous) poll();
+                        return;
+                    }
+                    for (int i = 0; i < values.length; i++) {
+                        if (revisions[i] == beforeRead[i]) {
+                            values[i] = snapshot == null ? UNKNOWN : snapshot[i];
+                        }
+                    }
+                    listener.accept(values.clone());
+                });
     }
 }

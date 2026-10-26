@@ -14,7 +14,7 @@ import android.view.View;
 import androidx.appcompat.app.AppCompatActivity;
 
 import ru.big.town.anative.databinding.ActivityMainBinding;
-import ru.big.town.common.InfrastructureProfile;
+import ru.big.town.common.VehiclePlatform;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -407,7 +407,7 @@ public class MainActivity extends AppCompatActivity {
                 boolean playMediaOnDoor =
                         playOnDoorColumn >= 0
                                 && cursor.getInt(playOnDoorColumn) == 1
-                                && InfrastructureProfile.read(context).usesAccHooks();
+                                && VehiclePlatform.current().isH97XY();
                 applyModeSideEffects(context, wiperColdMode, pauseMediaOnDoor, playMediaOnDoor);
                 saveModesCache(context, wiperColdMode, pauseMediaOnDoor, playMediaOnDoor);
                 ApplyEngine.noteLoadedModes(
@@ -490,9 +490,7 @@ public class MainActivity extends AppCompatActivity {
         return context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE);
     }
 
-    /**
-     * PI's bounded early check reads the next restore target without starting unrelated services.
-     */
+    /** The bounded wake check reads its target without starting unrelated services. */
     static EarlyDriveModeRestore.Settings readEarlyDriveRestoreSettings(Context context) {
         try (Cursor cursor =
                 context.getContentResolver().query(MODES_PROVIDER_URI, null, null, null, null)) {
@@ -621,8 +619,7 @@ public class MainActivity extends AppCompatActivity {
         boolean wiperColdMode = p.getBoolean("cacheWiperColdMode", false);
         boolean pauseMediaOnDoor = p.getBoolean("cachePauseMediaOnDoor", false);
         boolean playMediaOnDoor =
-                p.getBoolean("cachePlayMediaOnDoor", false)
-                        && InfrastructureProfile.read(context).usesAccHooks();
+                p.getBoolean("cachePlayMediaOnDoor", false) && VehiclePlatform.current().isH97XY();
         applyModeSideEffects(context, wiperColdMode, pauseMediaOnDoor, playMediaOnDoor);
         ApplyEngine.noteLoadedModes(
                 driveMode,
@@ -767,7 +764,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     static void appendApolloRestore(CanRestorePlan.Builder plan, Context context) {
-        if (!InfrastructureProfile.read(context).usesAccHooks()) return;
+        if (!VehiclePlatform.current().isH97XY()) return;
         ApolloRestorePolicy.appendPlan(
                 plan,
                 apolloTlcEnabled,
@@ -824,7 +821,7 @@ public class MainActivity extends AppCompatActivity {
                         + apolloSpeedWarningEnabled);
         CanRestorePlan.Builder plan = new CanRestorePlan.Builder();
         final Context context = GlobalVars.SAVE_CONTEXT;
-        final boolean accHooks = InfrastructureProfile.read(context).usesAccHooks();
+        final boolean accRestore = VehiclePlatform.current().isH97XY();
         plan.addOnce(
                 "auto light saved service switch",
                 () -> {
@@ -867,11 +864,11 @@ public class MainActivity extends AppCompatActivity {
                 trailingValues, recycleEnabled, recycle, driveMode);
         stableIds.putAll(VehicleRestorePolicy.stableIds());
 
-        if (accHooks) {
-            // OD applies Apollo independently of drive/fragrance support.
+        if (accRestore) {
+            // H97X/Y use independent Apollo tasks with ISA controls.
             appendApolloRestore(plan, context);
         } else {
-            // PI orders entitlements, ISA mode preparation, then switches.
+            // Other firmware keeps capability, recognition-mode and switch ordering.
             ApolloRestorePolicy.appendTo(
                     primaryValues,
                     apolloModes,
@@ -919,7 +916,7 @@ public class MainActivity extends AppCompatActivity {
                                                 apolloModes,
                                                 trailingValues,
                                                 stableIds,
-                                                accHooks
+                                                accRestore
                                                         ? "drive/energy/fragrance then recuperation"
                                                         : "drive/energy/fragrance/Apollo"
                                                                 + " entitlements then ISA mode then"
@@ -957,7 +954,7 @@ public class MainActivity extends AppCompatActivity {
                         sendSuspensionMaintenanceCommand(context, maintenance)
                                 ? CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED
                                 : CanRestorePlan.OperationResult.TRANSIENT_FAILURE);
-        if (accHooks) {
+        if (accRestore) {
             plan.addOnce(
                     "silent radio selection",
                     () -> {
@@ -1140,9 +1137,7 @@ public class MainActivity extends AppCompatActivity {
             }
             return;
         }
-        if (explicit
-                && InfrastructureProfile.read(context).usesAccHooks()
-                && "recycle".equals(modeKey)) {
+        if (explicit && VehiclePlatform.current().isH97XY() && "recycle".equals(modeKey)) {
             try {
                 android.content.ContentValues values = new android.content.ContentValues();
                 values.put("recycleSelection", mode);

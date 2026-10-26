@@ -1,17 +1,18 @@
 package ru.big.town.anative;
 
-import org.junit.Test;
 import static org.junit.Assert.*;
+
+import org.junit.Test;
 
 public class ModeSyncPolicyTest {
     private ModeSyncPolicy policy(boolean remember) {
         ModeSyncPolicy p = new ModeSyncPolicy();
-        p.updateExpected("COMFORT", "SREV", "HIGH", true, true, true,
-                remember, remember, remember);
+        p.updateExpected("COMFORT", "SREV", "HIGH", true, true, true, remember, remember, remember);
         return p;
     }
 
-    @Test public void accRestoreOpensFeedbackAfterCompletion() {
+    @Test
+    public void accRestoreOpensFeedbackAfterCompletion() {
         ModeSyncPolicy p = policy(true);
         long restore = p.beginRestore();
         assertFalse(p.canRememberSelection());
@@ -22,7 +23,8 @@ public class ModeSyncPolicyTest {
         assertTrue(p.canPersist(restore, "recycle"));
     }
 
-    @Test public void cancelledRestoreCannotOpenFeedback() {
+    @Test
+    public void cancelledRestoreCannotOpenFeedback() {
         ModeSyncPolicy p = policy(true);
         long restore = p.beginRestore();
         long command = p.cancelRestore();
@@ -32,7 +34,8 @@ public class ModeSyncPolicyTest {
         assertTrue(p.canRememberSelection());
     }
 
-    @Test public void sleepClosesFeedbackUntilNewRestore() {
+    @Test
+    public void sleepClosesFeedbackUntilNewRestore() {
         ModeSyncPolicy p = policy(true);
         long old = p.beginRestore();
         p.completeRestore(old);
@@ -44,7 +47,8 @@ public class ModeSyncPolicyTest {
         assertEquals(ModeSyncPolicy.Decision.ACCEPT, p.evaluate("energy", "REV"));
     }
 
-    @Test public void rememberOptOutAndSnowRecuperationRemainProtected() {
+    @Test
+    public void rememberOptOutAndSnowRecuperationRemainProtected() {
         ModeSyncPolicy p = policy(false);
         p.completeRestore(p.beginRestore());
         assertEquals(ModeSyncPolicy.Decision.IGNORE, p.evaluate("energy", "EV"));
@@ -55,7 +59,8 @@ public class ModeSyncPolicyTest {
         assertEquals(ModeSyncPolicy.Decision.IGNORE, p.evaluate("recycle", "HIGH"));
     }
 
-    @Test public void explicitRecuperationDoesNotWaitForCommandCompletionOrVehicleEcho() {
+    @Test
+    public void explicitRecuperationDoesNotWaitForCommandCompletionOrVehicleEcho() {
         ModeSyncPolicy p = policy(true);
         p.beginRestore();
         p.cancelRestore(); // postUserCommand closes feedback before running the command.
@@ -69,7 +74,8 @@ public class ModeSyncPolicyTest {
         assertTrue(p.canRememberSelection(true));
     }
 
-    @Test public void nativeRestartReusesSubmittedAccWithoutWaitingForAnotherRestore() {
+    @Test
+    public void nativeRestartReusesSubmittedAccWithoutWaitingForAnotherRestore() {
         ModeSyncPolicy p = policy(true);
         p.activateWake();
         assertFalse(p.canRememberSelection());
@@ -77,8 +83,9 @@ public class ModeSyncPolicyTest {
         assertEquals(ModeSyncPolicy.Decision.ACCEPT, p.evaluate("recycle", "MEDIUM"));
     }
 
-    @Test public void pendingUncertainOffAndFrozenCyclesCannotReopenFeedback() {
-        for (String state : new String[]{"idle", "pending", "claimed", "uncertain"}) {
+    @Test
+    public void pendingUncertainOffAndFrozenCyclesCannotReopenFeedback() {
+        for (String state : new String[] {"idle", "pending", "claimed", "uncertain"}) {
             ModeSyncPolicy p = policy(true);
             p.activateWake();
             assertFalse(p.reconcileCompletedAcc(2, state));
@@ -93,7 +100,8 @@ public class ModeSyncPolicyTest {
         assertFalse(p.canRememberSelection());
     }
 
-    @Test public void duplicateServiceStartCannotOpenFeedbackDuringAnExplicitCommand() {
+    @Test
+    public void duplicateServiceStartCannotOpenFeedbackDuringAnExplicitCommand() {
         ModeSyncPolicy p = policy(true);
         p.activateWake();
         p.reconcileCompletedAcc(2, "submitted");
@@ -103,9 +111,10 @@ public class ModeSyncPolicyTest {
         assertTrue(p.completeUserCommand(command));
     }
 
-    @Test public void nativeRestoreNeedsBothFirstDriveAndCompletedPassForFeedback() {
+    @Test
+    public void nativeRestoreNeedsBothFirstDriveAndCompletedPassForFeedback() {
         ModeSyncPolicy p = policy(true);
-        p.useAccHooks(false);
+        p.useAccRestore(false);
         p.activateWake();
         assertFalse(p.reconcileCompletedAcc(2, "submitted"));
         p.onDriverDoorOpened();
@@ -125,7 +134,8 @@ public class ModeSyncPolicyTest {
         assertFalse(p.completeRestore(drive));
     }
 
-    @Test public void accRestoreIgnoresDoorAndGearGates() {
+    @Test
+    public void accRestoreIgnoresDoorAndGearGates() {
         ModeSyncPolicy p = policy(true);
         long restore = p.beginRestore();
         p.onDriverDoorOpened();
@@ -136,9 +146,10 @@ public class ModeSyncPolicyTest {
         assertTrue(p.canPersist(restore, "recycle"));
     }
 
-    @Test public void nativeRestoreFeedbackIsFrozenAgainAfterSleep() {
+    @Test
+    public void nativeRestoreFeedbackIsFrozenAgainAfterSleep() {
         ModeSyncPolicy p = policy(true);
-        p.useAccHooks(false);
+        p.useAccRestore(false);
         p.activateWake();
         p.onDriverDoorOpened();
         p.onGear(0);

@@ -37,7 +37,6 @@ import android.widget.LinearLayout;
 import androidx.core.content.ContextCompat;
 
 import ru.big.town.common.CarPlayTarget;
-import ru.big.town.common.InfrastructureProfile;
 
 import java.lang.ref.WeakReference;
 import java.lang.reflect.Method;
@@ -414,8 +413,9 @@ public class SplitHostActivity extends Activity {
     }
 
     private static boolean carPlayFullscreenEnabled(Context context) {
-        return InfrastructureProfile.read(context) != InfrastructureProfile.OD
-                || Settings.Global.getInt(context.getContentResolver(), CarPlayTarget.FULLSCREEN_SETTING, 0) == 1;
+        return Settings.Global.getInt(
+                        context.getContentResolver(), CarPlayTarget.FULLSCREEN_SETTING, 0)
+                == 1;
     }
 
     private boolean matchesCarPlayWindowMode() {
@@ -425,9 +425,14 @@ public class SplitHostActivity extends Activity {
     private boolean reopenCarPlayForSelectedMode() {
         if (!singleCarPlay || matchesCarPlayWindowMode()) return false;
         android.view.Display display = getWindow().getDecorView().getDisplay();
-        int displayId = (display != null ? display : getWindowManager().getDefaultDisplay()).getDisplayId();
+        int displayId =
+                (display != null ? display : getWindowManager().getDefaultDisplay()).getDisplayId();
         if (displayId != 0 && displayId != 1) return false;
-        launchSingle(this, left.pkg, left.dpi, displayId,
+        launchSingle(
+                this,
+                left.pkg,
+                left.dpi,
+                displayId,
                 () -> !hostDestroyed && !isFinishing() && activeHost.get() == this);
         return true;
     }

@@ -108,10 +108,9 @@ androidComponents {
             releaseVersion.set(providers.gradleProperty("voyahReleaseVersion").orElse("0.0.0-dev"))
             revision.set(providers.gradleProperty("voyahBuildRevision").orElse("local"))
             val packaging = rootProject.projectDir.parentFile.resolve("Packaging")
-            val profile = providers.gradleProperty("voyahInfrastructure").orElse("od").get()
-            require(profile == "pi" || profile == "od") { "voyahInfrastructure must be pi or od" }
-            infrastructure.set(profile)
-            val infra = packaging.resolve(profile)
+            // Signed APK identity retains the existing shared Android contract.
+            infrastructure.set("unified")
+            val runtime = packaging.resolve("new")
             runtimeAliases.convention(emptyMap())
             val recipePath = providers.gradleProperty("voyahInstallRecipe").orNull
             if (recipePath != null) {
@@ -131,22 +130,11 @@ androidComponents {
                     runtimeAliases.put(runtimeSource.canonicalPath, operation["artifact"] as String)
                 }
             } else {
-            runtimeFiles.from(packaging.resolve("system/privapp-permissions-ru.big.town.anative.xml"))
-            run {
-                runtimeFiles.from(fileTree(infra.resolve("inject")) { include("*.js", "*.json") })
-                runtimeFiles.from(listOf("voyahtune.load.rc", "voyahtune.load.sh").map { infra.resolve("system/$it") })
-                if (profile == "od") runtimeFiles.from(infra.resolve("system/load.bin"))
-                if (profile == "pi") {
-                    runtimeFiles.from(infra.resolve("loaderFrida/injects.json"))
-                    providers.gradleProperty("voyahPiLoader").orNull?.let { runtimeFiles.from(file(it)) }
-                    providers.gradleProperty("voyahRunynApk").orNull?.let {
-                        val apk = file(it)
-                        runtimeFiles.from(apk)
-                        runtimeAliases.put(apk.canonicalPath, "runyn.apk")
-                    }
-                }
-                runtimeFiles.from(infra.resolve("tools/frida-inject-16.2.1-android-arm64"))
-            }
+                runtimeFiles.from(packaging.resolve("system/privapp-permissions-ru.big.town.anative.xml"))
+                runtimeFiles.from(fileTree(runtime) {
+                    include("agents/*.js", "adapters/**/*.js", "runtime/*.js", "config/*.json", "system/*")
+                })
+                runtimeFiles.from(runtime.resolve("tools/frida-inject-16.2.1-android-arm64"))
             }
             component.set(android.namespace!!)
             outputDirectory.set(layout.buildDirectory.dir("generated/voyahIdentity/${variant.name}"))
