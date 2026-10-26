@@ -1,6 +1,6 @@
 package ru.big.town.common;
 
-/** OD temporary energy commands never replace the driver's saved selection. */
+/** Temporary energy commands never replace the driver's saved selection. */
 public final class SmartSaveSettings {
     public static final String ENABLED = "smartSaveEnabled";
     public static final String CHANGED = "ru.big.town.anative.SMART_SAVE_CHANGED";

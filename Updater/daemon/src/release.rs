@@ -32,10 +32,6 @@ pub fn catalog(bytes: &[u8]) -> io::Result<Catalog> {
     catalog.releases = source
         .releases
         .into_iter()
-        .filter(|release| {
-            Infrastructure::from_version(&release.version)
-                .is_ok_and(|profile| profile == Infrastructure::Od)
-        })
         .map(|release| {
             UpdateRelease {
                 version: release.version,
@@ -104,7 +100,7 @@ pub fn payload(directory: &Path) -> io::Result<Payload> {
     Ok(Payload {
         root: directory.canonicalize()?,
         manifest: Manifest {
-            infrastructure: Infrastructure::Od,
+            infrastructure: Infrastructure::Unified,
             removal_only: false,
             requirements: None,
             recipe: files.recipe,
@@ -135,7 +131,7 @@ mod tests {
     fn only_ota_minimum_controls_selection() {
         let catalog = catalog(
             &serde_json::to_vec(&json!({"releases": [{
-                "version": "4.2.0-beta-od", "url": "https://example.org/payload.zip",
+                "version": "4.2.0-beta", "url": "https://example.org/payload.zip",
                 "sha256": "outdated", "minimumInstallerVersion": "invalid",
                 "minimumOtaVersion": "4.1.0", "extra": true
             }]}))
@@ -143,17 +139,17 @@ mod tests {
         )
         .unwrap();
         let release = &catalog.releases[0];
-        assert!(select(release, "4.1.0-beta-od").is_ok());
-        assert!(select(release, "4.2.0-beta-od").is_ok());
-        assert!(select(release, "4.9.0-od").is_ok());
+        assert!(select(release, "4.1.0-beta").is_ok());
+        assert!(select(release, "4.2.0-beta").is_ok());
+        assert!(select(release, "4.9.0").is_ok());
         assert_eq!(
-            select(release, "4.0.0-od").unwrap_err().code,
+            select(release, "4.0.0").unwrap_err().code,
             "OTA_USB_REQUIRED"
         );
         let mut missing = release.clone();
         missing.minimum_ota_version = None;
         assert_eq!(
-            select(&missing, "4.9.0-od").unwrap_err().code,
+            select(&missing, "4.9.0").unwrap_err().code,
             "OTA_USB_REQUIRED"
         );
     }

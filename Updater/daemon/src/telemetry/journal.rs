@@ -238,7 +238,7 @@ mod tests {
     fn create(root: &Path) -> Journal {
         Journal::create(
             root,
-            json!({"version":"4.2.0-od","infrastructure":"od"}),
+            json!({"version":"4.2.0","infrastructure":"unified"}),
             "keep",
             None,
         )

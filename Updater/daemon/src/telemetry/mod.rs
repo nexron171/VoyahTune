@@ -44,9 +44,6 @@ struct Channels {
 }
 
 pub fn initialize(root: &Path) -> io::Result<()> {
-    if !crate::restore_ui::enabled() {
-        return Ok(());
-    }
     let (events, receiver) = mpsc::channel();
     let (logcat, lines) = mpsc::sync_channel(512);
     let collecting = Arc::new(Mutex::new(None));
@@ -250,9 +247,6 @@ fn clear_previous(root: &Path) -> io::Result<()> {
 }
 
 fn enqueue(event: Event) -> io::Result<()> {
-    if !crate::restore_ui::enabled() {
-        return Ok(());
-    }
     CHANNELS
         .get()
         .ok_or_else(|| invalid("OTA logger unavailable"))?
@@ -262,7 +256,7 @@ fn enqueue(event: Event) -> io::Result<()> {
 }
 
 pub fn begin(_root: &Path, release: Value, dns: &str) -> io::Result<()> {
-    if crate::restore_ui::enabled() {
+    {
         ACTIVE.store(true, Ordering::Release);
     }
     enqueue(Event::Begin {
@@ -284,9 +278,6 @@ pub fn finish(error: Option<&str>) {
 }
 
 pub fn before_reboot() -> io::Result<()> {
-    if !crate::restore_ui::enabled() {
-        return Ok(());
-    }
     let (reply, result) = mpsc::channel();
     enqueue(Event::Reboot(reply))?;
     result

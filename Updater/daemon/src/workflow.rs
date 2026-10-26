@@ -77,15 +77,6 @@ pub fn start() -> io::Result<(Shared, mpsc::Sender<Job>)> {
     } else {
         let boot: serde_json::Value =
             state::read(Path::new("/system/etc/voyahtune-ota-bootstrap.json"))?;
-        let infrastructure: release_core::infrastructure::Infrastructure = serde_json::from_value(
-            boot.get("infrastructure")
-                .cloned()
-                .unwrap_or(serde_json::json!("od")),
-        )
-        .map_err(|error| invalid(&error.to_string()))?;
-        infrastructure
-            .require(release_core::infrastructure::Infrastructure::compiled())
-            .map_err(|error| invalid(&error.to_string()))?;
         State::fresh(
             boot["version"]
                 .as_str()
@@ -97,9 +88,7 @@ pub fn start() -> io::Result<(Shared, mpsc::Sender<Job>)> {
     if state.schema != 1 {
         return Err(invalid("Неизвестный формат OTA journal"));
     }
-    if !crate::restore_ui::enabled() && state.fingerprint.is_empty() {
-        return Err(invalid("Не определена прошивка ГУ"));
-    }
+
     crate::telemetry::initialize(root())?;
     crate::telemetry::resume();
     state.recover_interrupted(&device::boot());
@@ -110,7 +99,7 @@ pub fn start() -> io::Result<(Shared, mpsc::Sender<Job>)> {
     }
     if let Ok(config) = &config {
         if state.source_generation != config.source_generation && !state.repair() {
-            state.clear_od_catalog();
+            state.clear_catalog();
             state.selected = None;
             state.phase = "idle".into();
             state.source_generation = config.source_generation;
@@ -274,40 +263,8 @@ fn selected(shared: &Shared) -> io::Result<(Release, ota::Claims)> {
     let release = state
         .selected
         .ok_or_else(|| invalid("Нет выбранного релиза"))?;
-    if crate::restore_ui::enabled() {
-        let claims = catalog_selection::verify_selection(
-            &release,
-            &state.installed_version,
-            state.same_version,
-            release_core::infrastructure::Infrastructure::compiled(),
-        )
+    let claims = catalog_selection::verify_selection(&release, &state.installed_version)
         .map_err(|error| invalid(&error.to_string()))?;
-        return Ok((release, claims));
-    }
-    for version in [&release.version, &state.installed_version] {
-        release_core::infrastructure::Infrastructure::from_version(version)
-            .and_then(|infrastructure| {
-                infrastructure.require(release_core::infrastructure::Infrastructure::compiled())
-            })
-            .map_err(|error| invalid(&error.to_string()))?;
-    }
-    let claims = ota::verify(&release).map_err(|error| invalid(&error.to_string()))?;
-    if !crate::restore_ui::enabled()
-        && claims.version == state.installed_version
-        && !state.installed_archive_sha256.is_empty()
-        && claims.archive_sha256 != state.installed_archive_sha256
-    {
-        return Err(invalid(
-            "Повторная установка разрешена только для того же архива",
-        ));
-    }
-    ota::compatible(&claims, &state.installed_version, state.same_version)
-        .map_err(|error| invalid(&error.to_string()))?;
-    if device::prop("ro.build.fingerprint")? != state.fingerprint {
-        return Err(invalid(
-            "Прошивка ГУ изменилась: установите VoyahTune через USB",
-        ));
-    }
     Ok((release, claims))
 }
 
@@ -325,40 +282,19 @@ fn check(shared: &Shared, same: bool, automatic: bool) -> io::Result<()> {
         })?;
     }
     if url.is_empty() {
-        return Err(invalid("Адрес каталога не настроен. Укажите HTTPS адрес каталога для установленной инфраструктуры."));
+        return Err(invalid(
+            "Адрес каталога не настроен. Укажите HTTPS адрес каталога обновлений.",
+        ));
     }
-    update(shared, State::clear_od_catalog)?;
+    update(shared, State::clear_catalog)?;
     phase(shared, "checking", "Проверка каталога релизов")?;
-    if !crate::restore_ui::enabled()
-        && device::prop("ro.build.fingerprint")? != snapshot(shared).fingerprint
-    {
-        return Err(invalid("Прошивка ГУ изменилась. Требуется USB-установка"));
-    }
+
     let catalog = network::catalog(&url)?;
     let current = snapshot(shared);
-    if !crate::restore_ui::enabled() {
-        release_core::infrastructure::Infrastructure::from_version(&current.installed_version)
-            .and_then(|infrastructure| {
-                infrastructure.require(release_core::infrastructure::Infrastructure::compiled())
-            })
-            .map_err(|error| invalid(&error.to_string()))?;
-    }
-    let mut rejected = None;
-    let mut selection = catalog_selection::choose(
-        &catalog,
-        &current.installed_version,
-        same,
-        release_core::infrastructure::Infrastructure::compiled(),
-        |error| rejected = Some(error.to_string()),
-    );
-    if crate::restore_ui::enabled() && !automatic && !same && matches!(&selection, Ok(None)) {
-        selection = catalog_selection::choose(
-            &catalog,
-            &current.installed_version,
-            true,
-            release_core::infrastructure::Infrastructure::compiled(),
-            |error| rejected = Some(error.to_string()),
-        );
+
+    let mut selection = catalog_selection::choose(&catalog, &current.installed_version, same);
+    if !automatic && !same && matches!(&selection, Ok(None)) {
+        selection = catalog_selection::choose(&catalog, &current.installed_version, true);
     }
     let selection_error = selection.as_ref().err().map(ToString::to_string);
     let mut runtime = shared.lock().unwrap();
@@ -371,20 +307,16 @@ fn check(shared: &Shared, same: bool, automatic: bool) -> io::Result<()> {
     {
         return Err(invalid("Источник каталога изменён"));
     }
-    if crate::restore_ui::enabled() {
+    {
         runtime.state.catalog_versions = Some(
             catalog
                 .releases
                 .iter()
-                .filter(|release| {
-                    release_core::infrastructure::Infrastructure::compiled()
-                        .matches_version(&release.version)
-                })
                 .map(|release| release.version.clone())
                 .collect(),
         );
     }
-    if crate::restore_ui::enabled() {
+    {
         state::save(root(), "catalog.json", &catalog)?;
     }
     runtime.state.source_generation = generation;
@@ -420,9 +352,6 @@ fn check(shared: &Shared, same: bool, automatic: bool) -> io::Result<()> {
     }
     state::save(root(), "state.json", &runtime.state)?;
     drop(runtime);
-    if let Some(error) = rejected {
-        crate::log(root(), &format!("catalog_release_skipped {error}"))?;
-    }
     if let Some(error) = selection_error {
         return Err(invalid(&error));
     }
@@ -430,16 +359,10 @@ fn check(shared: &Shared, same: bool, automatic: bool) -> io::Result<()> {
 }
 
 fn download(shared: &Shared) -> io::Result<()> {
-    let (release, claims) = selected(shared)?;
+    let (release, _) = selected(shared)?;
     device::wake(true)?;
     phase(shared, "downloading", "Скачивание архива")?;
-    if !crate::restore_ui::enabled() {
-        // A full archive plus extraction and PackageManager reserve; actual expanded size is checked below.
-        device::space(
-            root(),
-            release.payload.size.saturating_mul(3) + 256 * 1024 * 1024,
-        )?;
-    }
+
     let archive = root().join("release.zip");
     let partial = root().join("release.part");
     for path in [&archive, &partial] {
@@ -450,36 +373,15 @@ fn download(shared: &Shared) -> io::Result<()> {
     if root().join("staging").exists() {
         fs::remove_dir_all(root().join("staging"))?;
     }
-    network::download(
-        &release.payload.url,
-        &partial,
-        release.payload.size,
-        &release.payload.sha256,
-        |processed_bytes| {
-            let _ = update(shared, |state| {
-                state.bytes = processed_bytes;
-                state.total = release.payload.size;
-            });
-        },
-    )?;
+    network::download(&release.payload.url, &partial, |processed_bytes| {
+        let _ = update(shared, |state| {
+            state.bytes = processed_bytes;
+            state.total = release.payload.size;
+        });
+    })?;
     fs::rename(&partial, &archive)?;
     phase(shared, "verifying", "Распаковка релиза")?;
-    if !crate::restore_ui::enabled() {
-        let mut zip = zip::ZipArchive::new(fs::File::open(&archive)?)
-            .map_err(|error| invalid(&error.to_string()))?;
-        let mut expanded = 0u64;
-        for index in 0..zip.len() {
-            expanded = expanded
-                .checked_add(
-                    zip.by_index(index)
-                        .map_err(|error| invalid(&error.to_string()))?
-                        .size(),
-                )
-                .ok_or_else(|| invalid("Размер ZIP переполнен"))?;
-        }
-        device::space(root(), expanded.saturating_add(256 * 1024 * 1024))?;
-        drop(zip);
-    }
+
     network::extract(
         &archive,
         &root().join("staging"),
@@ -490,9 +392,7 @@ fn download(shared: &Shared) -> io::Result<()> {
             });
         },
     )?;
-    let payload = open_ota_payload(&root().join("staging"))?;
-    verify_payload(&payload, &claims)?;
-    crate::install::compatible(&payload)?;
+    crate::release::payload(&root().join("staging"))?;
     phase(
         shared,
         "verified",
@@ -500,37 +400,7 @@ fn download(shared: &Shared) -> io::Result<()> {
     )
 }
 
-fn open_ota_payload(directory: &Path) -> io::Result<Payload> {
-    use release_core::infrastructure::Infrastructure;
-
-    let infrastructure = Infrastructure::compiled();
-    if infrastructure == Infrastructure::Unified {
-        return Payload::open_for_ota(directory, infrastructure)
-            .map_err(|error| invalid(&error.to_string()));
-    }
-    if infrastructure == Infrastructure::Od {
-        return crate::od_release::payload(directory);
-    }
-    let payload = Payload::open(directory).map_err(|error| invalid(&error.to_string()))?;
-    payload
-        .require_infrastructure(infrastructure)
-        .map_err(|error| invalid(&error.to_string()))?;
-    Ok(payload)
-}
-
-fn verify_payload(payload: &Payload, claims: &ota::Claims) -> io::Result<()> {
-    if release_core::infrastructure::Infrastructure::compiled()
-        == release_core::infrastructure::Infrastructure::Od
-    {
-        return Ok(());
-    }
-    ota::verify_payload(payload, claims).map_err(|error| invalid(&error.to_string()))
-}
-
 pub fn select_release(shared: &Shared, version: &str) -> io::Result<()> {
-    if !crate::restore_ui::enabled() {
-        return Err(invalid("Выбор версии не поддерживается этой службой"));
-    }
     let mut runtime = shared.lock().unwrap();
     if runtime.state.busy() || runtime.state.repair() {
         return Err(invalid(
@@ -551,16 +421,8 @@ pub fn select_release(shared: &Shared, version: &str) -> io::Result<()> {
         .into_iter()
         .find(|release| release.version == version)
         .ok_or_else(|| invalid("Релиз отсутствует в текущем каталоге"))?;
-    if !release_core::infrastructure::Infrastructure::compiled().matches_version(&release.version) {
-        return Err(invalid("Релиз не соответствует установленной службе"));
-    }
-    catalog_selection::verify_selection(
-        &release,
-        &runtime.state.installed_version,
-        true,
-        release_core::infrastructure::Infrastructure::compiled(),
-    )
-    .map_err(|error| invalid(&error.to_string()))?;
+    catalog_selection::verify_selection(&release, &runtime.state.installed_version)
+        .map_err(|error| invalid(&error.to_string()))?;
     crate::telemetry::finish(Some("Пользователь изменил выбранный релиз"));
     runtime.state.same_version =
         catalog_selection::same_release_version(version, &runtime.state.installed_version);
@@ -575,7 +437,6 @@ pub fn select_release(shared: &Shared, version: &str) -> io::Result<()> {
 
 pub fn verified(shared: &Shared) -> io::Result<(Payload, ota::Claims)> {
     let (_, claims) = selected(shared)?;
-    let payload = open_ota_payload(&root().join("staging"))?;
-    verify_payload(&payload, &claims)?;
+    let payload = crate::release::payload(&root().join("staging"))?;
     Ok((payload, claims))
 }

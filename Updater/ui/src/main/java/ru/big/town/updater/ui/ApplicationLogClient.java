@@ -2,7 +2,7 @@ package ru.big.town.updater.ui;
 
 import org.json.JSONObject;
 
-/** Uses the authenticated RestoreMode connection to the OD system log recorder. */
+/** Uses the authenticated RestoreMode connection to the system log recorder. */
 public final class ApplicationLogClient {
     private final RootClient client = new RootClient();
 

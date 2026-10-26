@@ -1,6 +1,6 @@
 package ru.big.town.common;
 
-/** An OD-only scan pause expires unless the live CarPlay owner renews it. */
+/** A scan pause expires unless the live CarPlay owner renews it. */
 public final class CarPlayWifiScanProtocol {
     public static final String PAUSED = "wifiScanPaused";
     public static final String LEASE_SETTING = "voyahtune_carplay_wifi_scan_lease";
@@ -10,7 +10,9 @@ public final class CarPlayWifiScanProtocol {
     private CarPlayWifiScanProtocol() {}
 
     public static String leaseValue(int bootCount, long requestedAt, long now) {
-        if (bootCount < 0 || requestedAt <= 0 || requestedAt > now
+        if (bootCount < 0
+                || requestedAt <= 0
+                || requestedAt > now
                 || now - requestedAt >= LEASE_MILLIS) {
             return "";
         }

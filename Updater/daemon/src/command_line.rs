@@ -4,7 +4,6 @@ use std::io;
 pub enum Command {
     StartService,
     Health,
-    UpdateUi,
     Version,
     RepairStatus,
 }
@@ -13,7 +12,6 @@ pub fn parse(mut arguments: impl Iterator<Item = String>) -> io::Result<Command>
     let command = match arguments.next().as_deref() {
         None => Command::StartService,
         Some("--health") => Command::Health,
-        Some("--update-ui") => Command::UpdateUi,
         Some("--version") => Command::Version,
         Some("--repair-status") => Command::RepairStatus,
         Some(argument) => {
@@ -62,9 +60,8 @@ mod tests {
     }
 
     #[test]
-    fn existing_maintenance_commands_remain_available() {
+    fn diagnostic_commands_remain_available() {
         for (argument, expected) in [
-            ("--update-ui", Command::UpdateUi),
             ("--version", Command::Version),
             ("--repair-status", Command::RepairStatus),
         ] {

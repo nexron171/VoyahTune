@@ -1,7 +1,5 @@
 use crate::config::invalid;
 use release_core::catalog::Catalog;
-use release_core::infrastructure::Infrastructure;
-use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, File, OpenOptions},
@@ -19,18 +17,11 @@ fn agent(seconds: u64, body_timeout: Option<Duration>) -> ureq::Agent {
         .build()
         .new_agent()
 }
-fn payload_body_timeout(infrastructure: Infrastructure) -> Option<Duration> {
-    match infrastructure {
-        // ureq's body timeout covers the entire transfer, not inactivity between reads.
-        // OD payloads use the global one-hour budget; PI retains its existing policy.
-        Infrastructure::Od | Infrastructure::Unified => None,
-        Infrastructure::Pi => Some(Duration::from_secs(45)),
-    }
-}
+
 pub fn catalog(url: &str) -> io::Result<Catalog> {
     let client = agent(60, Some(Duration::from_secs(45)));
     let mut request = client.get(url);
-    if crate::restore_ui::enabled() {
+    {
         request = request.header("Cache-Control", "no-cache");
     }
     let mut response = request
@@ -45,45 +36,19 @@ pub fn catalog(url: &str) -> io::Result<Catalog> {
     if bytes.len() > 4 * 1024 * 1024 {
         return Err(invalid("Слишком большой каталог"));
     }
-    if Infrastructure::compiled() == Infrastructure::Od {
-        return crate::od_release::catalog(&bytes);
-    }
-    let c: release_core::catalog::UpdateCatalog =
-        serde_json::from_slice(&bytes).map_err(|e| invalid(&e.to_string()))?;
-    c.resolve().map_err(|e| invalid(&e.to_string()))
+
+    crate::release::catalog(&bytes)
 }
-pub fn download(
-    url: &str,
-    path: &Path,
-    size: u64,
-    sha: &str,
-    progress: impl Fn(u64),
-) -> io::Result<()> {
-    let mut response = agent(3600, payload_body_timeout(Infrastructure::compiled()))
+pub fn download(url: &str, path: &Path, progress: impl Fn(u64)) -> io::Result<()> {
+    let mut response = agent(3600, None)
         .get(url)
         .call()
         .map_err(|e| invalid(&format!("Скачивание: {e}")))?;
-    receive_archive(
-        response.body_mut().as_reader(),
-        path,
-        size,
-        sha,
-        Infrastructure::compiled(),
-        progress,
-    )
+    receive_archive(response.body_mut().as_reader(), path, progress)
 }
 
-fn receive_archive(
-    mut reader: impl Read,
-    path: &Path,
-    size: u64,
-    sha: &str,
-    infrastructure: Infrastructure,
-    progress: impl Fn(u64),
-) -> io::Result<()> {
-    let verify = infrastructure != Infrastructure::Od;
+fn receive_archive(mut reader: impl Read, path: &Path, progress: impl Fn(u64)) -> io::Result<()> {
     let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
-    let mut hash = Sha256::new();
     let mut bytes = 0u64;
     let mut buffer = [0u8; 65536];
     let mut reported = 0;
@@ -93,20 +58,11 @@ fn receive_archive(
             break;
         }
         bytes += n as u64;
-        if verify && bytes > size {
-            return Err(invalid("Архив превысил заявленный размер"));
-        }
         file.write_all(&buffer[..n])?;
-        if verify {
-            hash.update(&buffer[..n]);
-        }
         if bytes - reported >= 1024 * 1024 {
             progress(bytes);
             reported = bytes;
         }
-    }
-    if verify && (bytes != size || hex::encode(hash.finalize()) != sha) {
-        return Err(invalid("Размер или SHA-256 архива не совпадает"));
     }
     file.sync_all()?;
     progress(bytes);
@@ -117,9 +73,7 @@ pub fn extract(source: &Path, target: &Path, progress: impl Fn(u64, u64)) -> io:
     fs::create_dir(target)?;
     let mut archive =
         zip::ZipArchive::new(File::open(source)?).map_err(|e| invalid(&e.to_string()))?;
-    if !crate::restore_ui::enabled() && archive.len() > 4096 {
-        return Err(invalid("Слишком много файлов ZIP"));
-    }
+
     let mut names = BTreeSet::new();
     let mut paths = BTreeMap::new();
     let mut total = 0u64;
@@ -154,9 +108,7 @@ pub fn extract(source: &Path, target: &Path, progress: impl Fn(u64, u64)) -> io:
         total = total
             .checked_add(entry.size())
             .ok_or_else(|| invalid("Переполнение ZIP"))?;
-        if !crate::restore_ui::enabled() && total > 4 * 1024 * 1024 * 1024 {
-            return Err(invalid("Распакованный архив слишком велик"));
-        }
+
         let out = target.join(name);
         if entry.is_dir() {
             fs::create_dir_all(out)?;
@@ -178,68 +130,19 @@ pub fn extract(source: &Path, target: &Path, progress: impl Fn(u64, u64)) -> io:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{net::TcpListener, thread};
 
     #[test]
-    fn only_legacy_od_download_ignores_declared_size_and_hash() {
-        for infrastructure in [
-            Infrastructure::Od,
-            Infrastructure::Pi,
-            Infrastructure::Unified,
-        ] {
-            for (size, hash) in [(0, "missing"), (7, "wrong"), (99, "wrong")] {
-                let directory = tempfile::tempdir().unwrap();
-                let path = directory.path().join("release.zip");
-                let result =
-                    receive_archive(&b"payload"[..], &path, size, hash, infrastructure, |_| {});
-                assert_eq!(result.is_ok(), infrastructure == Infrastructure::Od);
-                if infrastructure == Infrastructure::Od {
-                    assert_eq!(fs::read(path).unwrap(), b"payload");
-                }
-            }
+    fn archive_download_copies_bytes_without_catalog_admission_checks() {
+        for contents in [b"short".to_vec(), vec![42; 2 * 1024 * 1024 + 7]] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("release.zip");
+            let count = std::cell::Cell::new(0);
+            receive_archive(contents.as_slice(), &path, |bytes| count.set(bytes)).unwrap();
+            assert_eq!(fs::read(&path).unwrap(), contents);
+            assert_eq!(count.get(), contents.len() as u64);
+            assert!(receive_archive(&b"replacement"[..], &path, |_| {}).is_err());
+            assert_eq!(fs::read(path).unwrap(), contents);
         }
-    }
-
-    #[test]
-    fn continuous_payload_transfer_outlasts_body_budget_only_for_od() {
-        fn receive(infrastructure: Infrastructure) -> io::Result<Vec<u8>> {
-            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-            let address = listener.local_addr().unwrap();
-            let server = thread::spawn(move || {
-                let (mut socket, _) = listener.accept().unwrap();
-                socket.set_nodelay(true).unwrap();
-                let mut request = [0; 4096];
-                socket.read(&mut request).unwrap();
-                socket
-                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 7\r\nConnection: close\r\n\r\n")
-                    .unwrap();
-                for byte in b"payload" {
-                    if socket.write_all(&[*byte]).is_err() {
-                        break;
-                    }
-                    thread::sleep(Duration::from_millis(60));
-                }
-            });
-
-            // Scale the legacy 45-second budget to 200ms for a short streaming test.
-            let body_timeout = payload_body_timeout(infrastructure).map(|timeout| timeout / 225);
-            let mut response = agent(5, body_timeout)
-                .get(format!("http://{address}/payload"))
-                .config()
-                .https_only(false)
-                .build()
-                .call()
-                .unwrap();
-            let mut bytes = Vec::new();
-            let result = response.body_mut().as_reader().read_to_end(&mut bytes);
-            drop(response);
-            server.join().unwrap();
-            result.map(|_| bytes)
-        }
-
-        assert_eq!(receive(Infrastructure::Od).unwrap(), b"payload");
-        let error = receive(Infrastructure::Pi).unwrap_err();
-        assert!(error.to_string().contains("timeout: receive body"));
     }
 
     #[test]

@@ -516,7 +516,7 @@ public class UpdaterActivity extends Activity {
             catalogText =
                     "Каталог: "
                             + settings.optString("catalogUrl")
-                            + "\nВерсии OD: "
+                            + "\nВерсии: "
                             + (versions.isEmpty() ? "нет" : TextUtils.join(", ", versions));
         }
         visible(

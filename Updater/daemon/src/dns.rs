@@ -1,10 +1,9 @@
 //! Reuse the desktop's device helper; no DNS commands or paths come from IPC.
 use crate::{config::invalid, device};
-use release_core::payload::{self, Payload};
+use release_core::payload::Payload;
 use std::{fs, io, path::Path};
 
-const HELPER: &str = include_str!("../../../Packaging/od/installer/common/dns-overlay-device.sh");
-const DNS_SHA: &str = "c4694866ff920b2409ce58d3dd4c84b86ba102049b68d27a6998ef91d7a0308d";
+const HELPER: &str = include_str!("../../../Packaging/installer/common/dns-overlay-device.sh");
 const INCOMING: &str = "/data/local/tmp/open_voyah_yandex_dns.apk";
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -39,43 +38,24 @@ pub fn status() -> io::Result<String> {
     }
     Ok(status)
 }
-pub fn prepare(p: &Payload, desired: Option<bool>) -> io::Result<Action> {
+pub fn prepare(desired: Option<bool>) -> io::Result<Action> {
     // Keeping DNS must remain possible even if an external DNS setup is unknown.
     if desired.is_none() {
         return Ok(Action::Keep);
     }
-    if crate::restore_ui::enabled() {
+    {
         return Ok(if desired == Some(true) {
             Action::Install
         } else {
             Action::Disable
         });
     }
-    let action = plan(&status()?, desired)?;
-    if action == Action::Install {
-        let apk = p.file("dns.apk").map_err(|e| invalid(&e.to_string()))?;
-        if payload::sha256(&apk).map_err(|e| invalid(&e.to_string()))? != DNS_SHA {
-            return Err(invalid("DNS APK не совпадает с поддерживаемым SHA-256"));
-        }
-    }
-    if action != Action::Keep {
-        let _ = device::command("/system/bin/mount", &["-o", "rw,remount", "/vendor"], 20);
-        let probe = Path::new("/vendor/.voyahtune-dns-rwtest");
-        device::no_links(probe)?;
-        let file = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(probe)?;
-        file.sync_all()?;
-        fs::remove_file(probe)?;
-    }
-    Ok(action)
 }
 pub fn apply(p: &Payload, action: Action) -> io::Result<()> {
     if action == Action::Keep {
         return Ok(());
     }
-    if crate::restore_ui::enabled() {
+    {
         let _ = device::command("/system/bin/mount", &["-o", "rw,remount", "/vendor"], 20);
     }
     if action == Action::Install {
@@ -109,15 +89,29 @@ pub fn title(action: Action) -> &'static str {
 mod tests {
     use super::*;
     #[test]
-    fn dns_choices_follow_current_state_and_never_replace_unknown_dns() {
-        assert_eq!(plan("on", Some(true)).unwrap(), Action::Keep);
-        assert_eq!(plan("off", Some(false)).unwrap(), Action::Keep);
-        assert_eq!(plan("on", Some(false)).unwrap(), Action::Disable);
-        assert_eq!(plan("off", Some(true)).unwrap(), Action::Install);
-        for status in ["external", "broken", "unknown"] {
-            assert!(plan(status, Some(true)).is_err());
-            assert!(plan(status, Some(false)).is_err());
-            assert_eq!(plan(status, None).unwrap(), Action::Keep);
+    fn settings_validate_current_dns_without_blocking_the_ota_choice() {
+        for (state, desired, expected) in [
+            ("on", Some(true), Action::Keep),
+            ("off", Some(false), Action::Keep),
+            ("on", Some(false), Action::Disable),
+            ("off", Some(true), Action::Install),
+        ] {
+            assert_eq!(plan(state, desired).unwrap(), expected);
+        }
+        for state in ["external", "broken", "unknown"] {
+            assert!(plan(state, Some(true)).is_err());
+            assert_eq!(plan(state, None).unwrap(), Action::Keep);
+            assert_eq!(prepare(Some(true)).unwrap(), Action::Install);
+        }
+    }
+    #[test]
+    fn user_choice_controls_the_dns_action() {
+        for (desired, expected) in [
+            (None, Action::Keep),
+            (Some(true), Action::Install),
+            (Some(false), Action::Disable),
+        ] {
+            assert_eq!(prepare(desired).unwrap(), expected);
         }
     }
 }

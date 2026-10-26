@@ -8,18 +8,12 @@ use std::{
 };
 
 pub fn default_catalog_url() -> &'static str {
-    if crate::restore_ui::enabled() {
-        "https://voyahtune.ru/api/v1/releases"
-    } else {
-        release_core::catalog::CATALOG_URL
-    }
+    "https://voyahtune.ru/api/v1/releases"
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Config {
-    #[serde(default)]
-    pub infrastructure: release_core::infrastructure::Infrastructure,
     pub schema: u32,
     pub catalog_url: String,
     pub source_generation: u64,
@@ -29,7 +23,6 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            infrastructure: release_core::infrastructure::Infrastructure::compiled(),
             schema: 1,
             catalog_url: default_catalog_url().into(),
             source_generation: 0,
@@ -41,7 +34,7 @@ impl Default for Config {
 impl Config {
     pub fn response(&self) -> serde_json::Value {
         let mut settings = serde_json::json!(self);
-        if crate::restore_ui::enabled() {
+        {
             settings["defaultCatalogUrl"] = default_catalog_url().into();
         }
         settings
@@ -94,25 +87,25 @@ pub fn load(root: &Path) -> io::Result<Config> {
     if bytes.len() > 16 * 1024 {
         return Err(invalid("Настройки слишком велики"));
     }
-    let mut config: Config =
+    let mut value: serde_json::Value =
         serde_json::from_slice(&bytes).map_err(|_| invalid("Настройки повреждены"))?;
+    let retired_identity = value
+        .as_object_mut()
+        .is_some_and(|object| object.remove("infrastructure").is_some());
+    let mut config: Config =
+        serde_json::from_value(value).map_err(|_| invalid("Настройки повреждены"))?;
     if config.schema != 1 {
         return Err(invalid("Неизвестный формат настроек"));
     }
     config.catalog_url = normalize_url(&config.catalog_url)?;
-    let compiled = release_core::infrastructure::Infrastructure::compiled();
-    if compiled == release_core::infrastructure::Infrastructure::Unified
-        && config.infrastructure != compiled
-    {
-        config.infrastructure = compiled;
+    if retired_identity {
         config.source_generation = config
             .source_generation
             .checked_add(1)
             .ok_or_else(|| invalid("Счётчик источника исчерпан"))?;
         save(root, &config)?;
     }
-    if crate::restore_ui::enabled()
-        && matches!(
+    if matches!(
             config.catalog_url.as_str(),
             "https://raw.githubusercontent.com/nexron171/VoyahTune/master-od/Releases/ota/index.json"
                 | "https://raw.githubusercontent.com/nexron171/VoyahTune/master-od/Releases/ota/index-v4.json"
@@ -164,32 +157,38 @@ pub fn change_url(root: &Path, current: &mut Config, input: &str) -> io::Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
-    fn unified_service_preserves_settings_and_invalidates_legacy_selection_once() {
-        use release_core::infrastructure::Infrastructure;
-        if Infrastructure::compiled() != Infrastructure::Unified {
-            return;
-        }
-        for infrastructure in [Infrastructure::Od, Infrastructure::Pi] {
+    fn retired_identity_is_removed_once_without_losing_user_settings() {
+        for identity in ["pi", "od", "unified"] {
             let root = tempfile::tempdir().unwrap();
-            let config = Config {
-                infrastructure,
+            let mut value = serde_json::to_value(Config {
                 catalog_url: "https://example.org/custom.json".into(),
                 source_generation: 7,
                 dns_enabled: Some(true),
                 ..Config::default()
-            };
-            save(root.path(), &config).unwrap();
+            })
+            .unwrap();
+            value["infrastructure"] = serde_json::json!(identity);
+            fs::write(
+                root.path().join("settings.json"),
+                serde_json::to_vec(&value).unwrap(),
+            )
+            .unwrap();
             let migrated = load(root.path()).unwrap();
-            assert_eq!(migrated.infrastructure, Infrastructure::Unified);
             assert_eq!(migrated.source_generation, 8);
-            assert_eq!(migrated.catalog_url, config.catalog_url);
-            assert_eq!(migrated.dns_enabled, config.dns_enabled);
+            assert_eq!(migrated.catalog_url, "https://example.org/custom.json");
+            assert_eq!(migrated.dns_enabled, Some(true));
             assert_eq!(load(root.path()).unwrap(), migrated);
+            let saved: serde_json::Value =
+                serde_json::from_slice(&fs::read(root.path().join("settings.json")).unwrap())
+                    .unwrap();
+            assert!(saved.get("infrastructure").is_none());
         }
     }
+
     #[test]
-    fn legacy_default_migrates_only_for_od_and_keeps_custom_catalogs() {
+    fn legacy_catalog_address_migrates_and_preserves_custom_sources() {
         let root = tempfile::tempdir().unwrap();
         for legacy in [
             "https://raw.githubusercontent.com/nexron171/VoyahTune/master-od/Releases/ota/index.json",
@@ -204,12 +203,10 @@ mod tests {
             };
             save(root.path(), &config).unwrap();
             let migrated = load(root.path()).unwrap();
-            if crate::restore_ui::enabled() {
+            {
                 assert_eq!(migrated.catalog_url, "https://voyahtune.ru/api/v1/releases");
                 assert_eq!(migrated.source_generation, 8);
                 assert_eq!(migrated.dns_enabled, Some(true));
-            } else {
-                assert_eq!(migrated, config);
             }
             assert_eq!(load(root.path()).unwrap(), migrated);
         }
@@ -235,10 +232,8 @@ mod tests {
         };
         let response = config.response();
         assert_eq!(response["catalogUrl"], config.catalog_url);
-        if crate::restore_ui::enabled() {
+        {
             assert_eq!(response["defaultCatalogUrl"], default_catalog_url());
-        } else {
-            assert!(response.get("defaultCatalogUrl").is_none());
         }
         let stored = serde_json::to_value(&config).unwrap();
         assert!(stored.get("defaultCatalogUrl").is_none());
@@ -351,7 +346,7 @@ mod dns_tests {
     #[test]
     fn old_settings_default_to_preserving_dns_and_changes_are_atomic() {
         let original: Config = serde_json::from_value(
-            serde_json::json!({"schema":1,"infrastructure":release_core::infrastructure::Infrastructure::compiled(),"catalogUrl":default_catalog_url(),"sourceGeneration":0}),
+            serde_json::json!({"schema":1,"catalogUrl":default_catalog_url(),"sourceGeneration":0}),
         )
         .unwrap();
         assert_eq!(original.dns_enabled, None);

@@ -1,5 +1,5 @@
 use crate::{config::invalid, device, protocol};
-use release_core::{infrastructure::Infrastructure, payload};
+use release_core::payload;
 use std::{
     fs, io,
     os::unix::fs::{MetadataExt, PermissionsExt},
@@ -7,28 +7,19 @@ use std::{
     sync::Mutex,
 };
 
-pub fn enabled() -> bool {
-    Infrastructure::compiled().uses_restore_ui()
-}
 pub fn component() -> &'static str {
-    if enabled() {
-        "ru.big.town.restoremode/.OtaActivity"
-    } else {
-        "ru.big.town.updater/.MainActivity"
-    }
+    "ru.big.town.restoremode/.OtaActivity"
 }
 pub fn capabilities() -> Vec<&'static str> {
-    let mut result = vec!["install-step-progress", "dns-settings"];
-    if Infrastructure::compiled() == Infrastructure::Unified {
-        result.push("unified-runtime-v1");
-    }
-    if enabled() {
-        result.push("restoremode-ota-ui-v1");
-        result.push("catalog-releases");
-        result.push("select-release");
-        result.push("application-log-v1");
-    }
-    result
+    vec![
+        "install-step-progress",
+        "dns-settings",
+        "unified-runtime-v1",
+        "restoremode-ota-ui-v1",
+        "catalog-releases",
+        "select-release",
+        "application-log-v1",
+    ]
 }
 
 #[derive(Debug, PartialEq, Eq)]

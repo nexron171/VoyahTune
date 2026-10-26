@@ -11,30 +11,15 @@ pub enum Step {
 }
 
 /// The UI package replacement ends the visible session; only reboot finalization may follow it.
-pub fn execute(
-    embedded_ui: bool,
-    runyn: bool,
-    mut perform: impl FnMut(Step) -> io::Result<()>,
-) -> io::Result<()> {
-    let order = if embedded_ui {
-        [
-            Step::Native,
-            Step::Runyn,
-            Step::Dns,
-            Step::Sync,
-            Step::Restore,
-            Step::Reboot,
-        ]
-    } else {
-        [
-            Step::Native,
-            Step::Restore,
-            Step::Runyn,
-            Step::Dns,
-            Step::Sync,
-            Step::Reboot,
-        ]
-    };
+pub fn execute(runyn: bool, mut perform: impl FnMut(Step) -> io::Result<()>) -> io::Result<()> {
+    let order = [
+        Step::Native,
+        Step::Runyn,
+        Step::Dns,
+        Step::Sync,
+        Step::Restore,
+        Step::Reboot,
+    ];
     for step in order {
         if step != Step::Runyn || runyn {
             perform(step)?;
@@ -47,9 +32,9 @@ pub fn execute(
 mod tests {
     use super::*;
     #[test]
-    fn restore_is_the_last_od_operation_before_reboot() {
+    fn restore_is_the_last_operation_before_reboot() {
         let mut actual = Vec::new();
-        execute(true, false, |step| {
+        execute(false, |step| {
             actual.push(step);
             Ok(())
         })
@@ -66,9 +51,9 @@ mod tests {
         );
     }
     #[test]
-    fn legacy_pi_order_is_preserved() {
+    fn runyn_is_installed_before_the_ui_is_replaced() {
         let mut actual = Vec::new();
-        execute(false, true, |step| {
+        execute(true, |step| {
             actual.push(step);
             Ok(())
         })
@@ -77,10 +62,10 @@ mod tests {
             actual,
             [
                 Step::Native,
-                Step::Restore,
                 Step::Runyn,
                 Step::Dns,
                 Step::Sync,
+                Step::Restore,
                 Step::Reboot
             ]
         );
@@ -89,7 +74,7 @@ mod tests {
     fn failures_never_reach_later_writes_or_reboot() {
         for failure in [Step::Native, Step::Dns, Step::Sync, Step::Restore] {
             let mut actual = Vec::new();
-            let result = execute(true, false, |step| {
+            let result = execute(false, |step| {
                 actual.push(step);
                 if step == failure {
                     Err(io::Error::other("injected failure"))

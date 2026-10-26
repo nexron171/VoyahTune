@@ -35,10 +35,7 @@ pub struct State {
     pub apply_boot: String,
 }
 impl State {
-    pub fn clear_od_catalog(&mut self) {
-        if !crate::restore_ui::enabled() {
-            return;
-        }
+    pub fn clear_catalog(&mut self) {
         self.catalog_versions = None;
         self.selected = None;
         self.notice = None;
@@ -196,16 +193,13 @@ pub fn due(s: &State, wall: u64, boot: &str, uptime: u64) -> bool {
 mod tests {
     use super::*;
     #[test]
-    fn od_catalog_reset_discards_old_source_results_and_errors() {
-        if !crate::restore_ui::enabled() {
-            return;
-        }
+    fn catalog_reset_discards_old_source_results_and_errors() {
         let mut state = preparing();
         state.catalog_versions = Some(vec!["4.0.1-od".into()]);
         state.error = Some("old source failed".into());
         state.notice = Some("4.0.1-od".into());
         state.bytes = 100;
-        state.clear_od_catalog();
+        state.clear_catalog();
         assert!(state.selected.is_none());
         assert!(state.catalog_versions.is_none());
         assert!(state.error.is_none());

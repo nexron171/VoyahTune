@@ -74,13 +74,7 @@ pub fn wall() -> u64 {
 pub fn open_ui() -> io::Result<()> {
     command(
         "/system/bin/am",
-        &[
-            "start",
-            "--user",
-            "0",
-            "-n",
-            crate::restore_ui::component(),
-        ],
+        &["start", "--user", "0", "-n", crate::restore_ui::component()],
         20,
     )
     .and_then(|s| {
@@ -91,25 +85,7 @@ pub fn open_ui() -> io::Result<()> {
         }
     })
 }
-pub fn space(path: &Path, required: u64) -> io::Result<()> {
-    use std::os::unix::ffi::OsStrExt;
-    let name =
-        std::ffi::CString::new(path.as_os_str().as_bytes()).map_err(|_| invalid("Путь statvfs"))?;
-    let mut v: libc::statvfs = unsafe { std::mem::zeroed() };
-    if unsafe { libc::statvfs(name.as_ptr(), &mut v) } != 0 {
-        return Err(io::Error::last_os_error());
-    }
-    let available = (v.f_bavail as u64).saturating_mul(v.f_frsize as u64);
-    if available < required {
-        return Err(invalid(&format!(
-            "Недостаточно места {}: нужно {}, доступно {} байт",
-            path.display(),
-            required,
-            available
-        )));
-    }
-    Ok(())
-}
+
 pub fn no_links(path: &Path) -> io::Result<()> {
     let mut current = std::path::PathBuf::new();
     for part in path.components() {

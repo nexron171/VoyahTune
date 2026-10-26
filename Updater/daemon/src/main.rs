@@ -1,4 +1,5 @@
 mod application_log;
+mod command_line;
 mod config;
 mod device;
 mod dns;
@@ -6,13 +7,11 @@ mod health;
 mod install;
 mod install_tail;
 mod network;
-mod od_command;
-mod od_release;
 mod protocol;
+mod release;
 mod restore_ui;
 mod state;
 mod telemetry;
-mod ui_update;
 mod workflow;
 
 use fs2::FileExt;
@@ -31,34 +30,17 @@ use std::{
         },
     },
     path::Path,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::Duration,
 };
 
 const ROOT: &str = "/data/local/voyahtune-updater";
-const UI_APK: &str = "/system/priv-app/VoyahTuneUpdater/VoyahTuneUpdater.apk";
 const LOG_LIMIT: u64 = 512 * 1024;
 
-fn log(root: &Path, event: &str) -> io::Result<()> {
-    if restore_ui::enabled() {
+fn log(_root: &Path, event: &str) -> io::Result<()> {
+    {
         telemetry::record("step", "daemon.event", json!({"message":event}));
         return Ok(());
     }
-    let path = root.join("updater.log");
-    if fs::symlink_metadata(&path).is_ok_and(|m| m.len() >= LOG_LIMIT) {
-        fs::rename(&path, root.join("updater.log.1"))?;
-    }
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)?;
-    let time = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    writeln!(file, "{time} {event}")?;
-    file.sync_data()
 }
 
 fn logs(root: &Path) -> io::Result<String> {
@@ -112,27 +94,9 @@ fn peer_uid(_: &UnixStream) -> io::Result<u32> {
 
 fn authorize(stream: &UnixStream) -> io::Result<()> {
     let uid = peer_uid(stream)?;
-    if restore_ui::enabled() {
+    {
         return restore_ui::authorize(uid);
     }
-    // Only the separately installed system UI can use the control channel.
-    let apk = fs::symlink_metadata(UI_APK)?;
-    if !apk.is_file() || apk.uid() != 0 || apk.permissions().mode() & 0o022 != 0 {
-        return Err(config::invalid(
-            "Отсутствует доверенный системный интерфейс",
-        ));
-    }
-    let packages = fs::read_to_string("/data/system/packages.list")?;
-    let package_settings = fs::read_to_string("/data/system/packages.xml")?;
-    if protocol::ui_uid(&packages) != Some(uid)
-        || protocol::system_ui_uid(&package_settings) != Some(uid)
-    {
-        return Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            "Клиент не имеет доступа",
-        ));
-    }
-    Ok(())
 }
 
 fn listener_from_init() -> io::Result<UnixListener> {
@@ -170,7 +134,7 @@ fn run() -> io::Result<()> {
         .custom_flags(libc::O_NOFOLLOW)
         .open(root.join("daemon.lock"))?;
     lock.try_lock_exclusive()?;
-    let application_log = if restore_ui::enabled() {
+    let application_log = {
         match application_log::Service::start(root) {
             Ok(service) => Some(service),
             Err(error) => {
@@ -178,8 +142,6 @@ fn run() -> io::Result<()> {
                 None
             }
         }
-    } else {
-        None
     };
     log(root, "service_started")?;
     let (shared, jobs) = workflow::start()?;
@@ -188,7 +150,7 @@ fn run() -> io::Result<()> {
         let mut stream = stream?;
         stream.set_read_timeout(Some(Duration::from_secs(5)))?;
         stream.set_write_timeout(Some(Duration::from_secs(5)))?;
-        let root_health = restore_ui::enabled() && peer_uid(&stream).is_ok_and(|uid| uid == 0);
+        let root_health = peer_uid(&stream).is_ok_and(|uid| uid == 0);
         if !root_health && authorize(&stream).is_err() {
             continue;
         }
@@ -203,7 +165,7 @@ fn run() -> io::Result<()> {
                     let mut response = json!({"schema":1,"ok":true,"serviceVersion":env!("CARGO_PKG_VERSION"),
                         "capabilities":restore_ui::capabilities(),"pid":std::process::id(),"uid":0,"state":rt.state,"settings":rt.config.as_ref().ok().map(config::Config::response),
                         "settingsError":rt.config.as_ref().err()});
-                    if restore_ui::enabled() {
+                    {
                         response["infrastructure"] = json!(release_core::infrastructure::Infrastructure::compiled());
                     }
                     Ok(response)
@@ -231,7 +193,7 @@ fn run() -> io::Result<()> {
                     let changed = config::change_settings(root, current, &url, dns_enabled)?;
                     if changed {
                         telemetry::finish(Some("Пользователь изменил источник релизов"));
-                        rt.state.clear_od_catalog();
+                        rt.state.clear_catalog();
                         rt.state.selected = None;
                         rt.state.notice = None;
                         rt.state.phase = "idle".into();
@@ -250,7 +212,7 @@ fn run() -> io::Result<()> {
                     let current = rt.config.as_mut().map_err(|e| config::invalid(e))?;
                     if config::change_url(root, current, &url)? {
                         telemetry::finish(Some("Пользователь изменил источник релизов"));
-                        rt.state.clear_od_catalog();
+                        rt.state.clear_catalog();
                         rt.state.selected = None;
                         rt.state.notice = None;
                         if !rt.state.repair() {
@@ -301,7 +263,7 @@ fn run() -> io::Result<()> {
                 protocol::Request::Logs {} => Ok(json!({"schema":1,"ok":true,"logs":logs(root)?})),
                 protocol::Request::ApplicationLog { action, app_version } => application_log
                     .as_ref()
-                    .ok_or_else(|| config::invalid("Системный журнал недоступен: требуется обновление OD root-службы через USB"))?
+                    .ok_or_else(|| config::invalid("Системный журнал недоступен: требуется обновление root-службы через USB"))?
                     .call(action, app_version),
             }
         })();
@@ -314,15 +276,15 @@ fn run() -> io::Result<()> {
 }
 
 fn main() {
-    if restore_ui::enabled() {
-        let command = match od_command::parse(std::env::args().skip(1)) {
+    {
+        let command = match command_line::parse(std::env::args().skip(1)) {
             Ok(command) => command,
             Err(error) => {
                 eprintln!("{error}");
                 std::process::exit(2);
             }
         };
-        if command == od_command::Command::Health {
+        if command == command_line::Command::Health {
             if unsafe { libc::geteuid() } != 0 {
                 std::process::exit(1);
             }
@@ -335,13 +297,6 @@ fn main() {
             }
             return;
         }
-    }
-    if std::env::args().nth(1).as_deref() == Some("--update-ui") {
-        if let Err(error) = ui_update::run() {
-            let _ = log(Path::new(ROOT), &format!("ui_update_error {error}"));
-            std::process::exit(1);
-        }
-        return;
     }
     if std::env::args().nth(1).as_deref() == Some("--version") {
         println!(
