@@ -125,9 +125,9 @@ compatibility. The harness does not validate:
 Consequently a keyboard ready marker is only a hook-installation smoke result;
 layout rendering and text entry still require an H97C integration test.
 
-## Drift rule
+## Fixture maintenance
 
-`tests/agent-contract-checks.sh` compares this fixture surface with the six
-scripts currently under `Packaging/od/inject`. If a target class or primary method
-changes, static validation fails until this document and the relevant fixture
-are deliberately updated.
+When production hooks change their target classes or methods, update the relevant
+fixture and this ABI reference. Validate compatibility by executing the hooks
+against the fixture and observing their effects; source-text comparisons do not
+verify hook installation or runtime behavior.

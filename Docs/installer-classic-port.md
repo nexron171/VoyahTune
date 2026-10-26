@@ -73,7 +73,6 @@ SHA/подписи всего payload проверяются при сборке
 ## Как проверять изменения
 
 ```sh
-python3 Installer/scripts/sync-classic-commands.py --check
 cargo test --manifest-path Installer/Cargo.toml -p installer-core -p installer-build
 cargo build --release --manifest-path Installer/Cargo.toml -p installer-core --example fixture-driver
 VOYAH_TEST_PAYLOAD="$PWD/Releases/build/installer-payload-VERSION" python3 Installer/tests/test_canbus.py
@@ -92,7 +91,7 @@ VOYAH_TEST_PAYLOAD="$PWD/Releases/build/installer-payload-VERSION" \
 
 При изменении классического сценария обновите соответствующий Rust-метод и тест
 соответствия. Для изменившихся удалённых команд обновите привязку в
-`sync-classic-commands.py` и запустите его без `--check`, затем форматирование Rust.
+`sync-classic-commands.py` и запустите его, затем форматирование Rust.
 Новый install/remove-шаг должен появиться и в `classic_steps()`.
 Новые файлы schema 4 исполняются по recipe без изменения движка. Если выпускается
 также классический ZIP, его фиксированные списки обновляются отдельно.

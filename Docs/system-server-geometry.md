@@ -100,12 +100,9 @@ LocalService берёт mGlobalLock перед requestTraversal. ABI прове�
   Включён OEM-сценарий с загрузчиком потока `main`, не видящим классы services.jar.
 - `python3 Packaging/tests/test_parallel_hook_loader.py`: 25 сценариев настоящего
   shell supervisor/worker с имитацией Android/Frida, включая поколение и отсутствие ready.
-- `test_vd_hot_hooks_disabled.sh`, `test_vd_reparent_replay.sh`,
-  `test_screen_lift_resize_restore.sh`, `test_hook_status.sh`,
-  `test_saved_config_startup_wake.sh`: прежние контракты геометрии и статусов.
 - Native JVM-тесты и assembleDebug: индекс DPI и APK собираются с прежним протоколом.
 
-Поведенческие тесты включены в test_vd_hot_hooks_disabled.sh и проверку перед сборкой
+Поведенческие тесты запускаются напрямую через `test_infrastructure_profiles.py` перед сборкой
 payload/классического релиза. После исправления выбора загрузчика на подключённой
 системе Android 11 (`RQ3A.211001.001 test-keys`) и перезагрузки подтверждены статус
 `active|geometry`, установка перехватов DPI/геометрии и разрешений VD. В `dumpsys`

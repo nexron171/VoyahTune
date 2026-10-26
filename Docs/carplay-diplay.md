@@ -1748,7 +1748,6 @@ DEFAULT_OEM_LABEL в AirPlayPersistence — **Voyah Free**, в том числе
 | [common/src/main/java/com/shilapi/xcertplay/WheelKeyService.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/WheelKeyService.kt) | Guard штатного Siri-перехвата и новой назначенной play/pause при available; обычные медиаклавиши сохраняются. |
 | [common/src/main/res/raw/ic_car_home.png](../RestoreMode/diplay/common/src/main/res/raw/ic_car_home.png) | Бинарный ресурс из указанного commit VoyahPlay; отдельный от штатного drawable/ic_carplay.png и значка стартового экрана drawable-nodpi/carplay_home_logo.png. |
 | [common/src/test/java/com/shilapi/xcertplay/AppLocaleTest.kt](../RestoreMode/diplay/common/src/test/java/com/shilapi/xcertplay/AppLocaleTest.kt) | Default ru и сохранение явного выбора языка при Voyah integration. |
-| [common/src/test/java/com/shilapi/xcertplay/SettingsTranslationsTest.kt](../RestoreMode/diplay/common/src/test/java/com/shilapi/xcertplay/SettingsTranslationsTest.kt) | Полное покрытие переводимых русских строк common/shared и совпадение форматных параметров; translatable=false (включая FPS) исключаются. |
 | [common/src/test/java/com/shilapi/xcertplay/SmoothVideoHostLifecycleTest.kt](../RestoreMode/diplay/common/src/test/java/com/shilapi/xcertplay/SmoothVideoHostLifecycleTest.kt) | Смена дисплея Voyah: ждать единственного stop, не принимать старый controller, новый размер 1280×600 вместо 1920×990. |
 | [common/src/test/java/com/shilapi/xcertplay/LocationReportingSettingsTest.kt](../RestoreMode/diplay/common/src/test/java/com/shilapi/xcertplay/LocationReportingSettingsTest.kt) | GPS default on; сохранение явного отключения, permission flow и переподключение сессии. |
 | [common/src/test/java/com/shilapi/xcertplay/WheelSiriWindowTest.kt](../RestoreMode/diplay/common/src/test/java/com/shilapi/xcertplay/WheelSiriWindowTest.kt) | Дополнительная проверка отсутствия конкурирующего Siri-перехвата на Voyah. |
@@ -2108,6 +2107,14 @@ SWReason управляет только проекцией в режиме VEHI
 
 ## 12. Критерии восстановления и проверки
 
+Тесты проверяют выполнение рабочей реализации на разных входах, включая границы
+и ошибки. По правилам корневого `AGENTS.md` удалены проверки текста и структуры
+исходников, XML-объявлений и отдельных констант: `SettingsLayoutSourceRulesTest`,
+`SettingsTranslationsTest`, `JapaneseTranslationsTest`, `TraditionalChineseTranslationsTest`,
+`BluetoothManifestTest` и статические сценарии смешанных наборов. При обновлении
+upstream не восстанавливать их. Проверки UI, выбора ресурсов во время выполнения,
+формирования протокольных сообщений и обработки данных сохраняются.
+
 Для чистой правки этой документации сборка не нужна. После обновления кода выбирать
 минимальный набор по затронутым строкам; расширенный набор — только по явному запросу.
 При полной замене DiPlay затронуты все библиотечные контракты ниже.
@@ -2291,8 +2298,9 @@ OEM-панели полноэкранного CarPlay OD (§4). Пользова
 окна создаются на физических дисплеях 0/1. Прошли 27 целевых Node-сценариев
 chrome/statusbar и проверки синтаксиса обоих OD-агентов. Новый JVM-тест политики
 подготовлен, но не запускался: сборка/компиляция запрещена пользователем.
-Также прошли `test_vd_hot_hooks_disabled.sh`, `git diff --check` и проверка
-186 локальных ссылок спецификации.
+Также прошли поведенческие сценарии `test_vd_stability.js`, `git diff --check`
+и проверка 186 локальных ссылок спецификации. Запускавшая их оболочка с проверками
+исходников позднее удалена; сценарии включены напрямую в проверку инфраструктуры.
 
 По отдельному запросу запущен существующий эмулятор VoyahTune_Automotive_13
 (Android 13, emulator-5554, user 10) без очистки данных и установки APK.
@@ -2327,8 +2335,9 @@ TextureView, VD или цветового фильтра этим наблюде
 сбоя iPhone или окончательного исправления. Новая схема кнопок и геометрия
 **не собраны, не установлены и не проверены на автомобиле/эмуляторе**.
 Обновлены исходники целевых JVM-тестов; их запуск требует компиляции и отложен
-по указанию пользователя. Прошли контракт `test_app_client.sh`, 24 Node-сценария
-OEM-панелей и 5 целевых тестов загрузчика (исключение Hiboard и сохранение SystemUI).
+по указанию пользователя. Прошли 24 Node-сценария OEM-панелей и 5 целевых тестов
+загрузчика (исключение Hiboard и сохранение SystemUI). Проверка текста app-client,
+также запускавшаяся тогда, позднее удалена.
 Проверены синтаксис JS/sh, `git diff --check` и локальные ссылки документации.
 Для доставки нужны Native, RestoreMode и OD hook/loader;
 PI не меняется. Installer пересобирать не требуется: recipe, состав payload и

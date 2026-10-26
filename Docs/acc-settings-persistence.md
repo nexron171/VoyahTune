@@ -119,11 +119,10 @@ Provider хранит `settingsStartup`: `pending` → `claimed` → `submitted`
 - `Packaging/tests/test_acc_preferences.py`: 8 сценариев реального
   `DriveSelectionPreferences` с адаптерами Bundle/SharedPreferences: restart,
   новый boot, однократный claim, отказ commit, запоздалое завершение, opt-out и
-  Forced EV. Запускается из `test_mode_restore_events.sh`; нужен JDK.
-- Пройдены `test_acc_restore_hook.sh`, `test_drive_reset_hook.sh`,
-  `test_mode_restore_events.sh`, `test_mode_feedback.sh`,
-  `test_saved_config_startup_wake.sh`, `test_light_sensor_event_driven.sh`,
-  `test_vehicle_state_controllers.sh`, `test_wash_mode_oem.sh`.
+  Forced EV. Запускается напрямую или через `test_infrastructure_profiles.py`; нужен JDK.
+- Пройдены поведенческие `test_acc_restore_hook.sh` и `test_drive_reset_hook.sh`.
+  Прежние проверки текста исходников удалены; они не подтверждали выполнение
+  восстановления настроек.
 
 Порядок и значения сверены по локальному CanBusService 1.2.0 (versionCode 7),
 `DongfengH97CCanBusComponentImpl`, и VehicleSettings Sport+ 13.1.

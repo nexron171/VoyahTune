@@ -273,18 +273,17 @@ Native и выключении опции. PI использует другую 
 
 - `./gradlew testDebugUnitTest --offline`: Native — **347**, RestoreMode — **127**,
   все прошли, пропущенных нет.
-- `test_acc_restore_hook.sh`, `test_drive_reset_hook.sh`,
-  `test_mode_restore_events.sh` (8 сценариев Java), `test_mode_feedback.sh`,
-  `test_saved_config_startup_wake.sh`, `test_light_sensor_event_driven.sh`,
-  `test_battery_heat_event_driven.sh`, `test_apollo_direct_only.sh`,
-  `test_wash_mode_oem.sh` — прошли. Shell-проверки частично проверяют структуру
-  исходников; JS/Java-сценарии моделируют поведение, без автомобиля.
+- `test_acc_restore_hook.sh`, `test_drive_reset_hook.sh` и
+  `test_acc_preferences.py` (8 сценариев Java) — прошли.
+  JS/Java-сценарии моделируют поведение, без автомобиля.
 - `node Packaging/tests/test_rds_restore.js` — **43** сценария прошли.
-- `test_power_hold_oem.sh` — **не прошёл**: проверяет `powerHoldBadge` в прежнем
+- Прежняя проверка текста Power Hold **не прошла**: искала `powerHoldBadge` в прежнем
   `layout-land/activity_main.xml`. Сейчас элемент находится в
   [tile_power_hold.xml](../RestoreMode/app/src/main/res/layout/tile_power_hold.xml)
-  и подключается при построении сетки. Тест и эти файлы уже такими находятся
-  в master-od; это расхождение проверки с текущим layout, не доказанный отказ Power Hold.
+  и подключается при построении сетки. На момент аудита это расхождение уже было
+  в master-od; оно не доказывало отказ Power Hold.
+  Эта проверка и остальные проверки структуры исходников удалены 26 октября 2026;
+  поведенческие сценарии Power Hold сохранены в `test_power_hold_bridge.js` и JVM-тестах.
 
 После доработок выполнены JVM-тесты и `assembleDebug` обоих APK, проверки
 ACC/reset/remember, Apollo и app-client. Результаты: Native — 348 JVM-тестов,

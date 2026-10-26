@@ -315,8 +315,8 @@ OEM-службы. После проверки готовности и запис
 
 Тесты политики и настоящих Frida-адаптеров с моделью OEM:
 `node Packaging/tests/test_rds_restore.js` (48 сценариев). Они включены также
-в существующий `sh Packaging/tests/test_app_client.sh`, который запускает
-релизная проверка. Shell-loader проверяется
+в `python3 Packaging/tests/test_infrastructure_profiles.py --profile od`
+вместе с `test_rds_widget.js`. Shell-loader проверяется
 `python3 Packaging/tests/test_parallel_hook_loader.py`; он проверяет оба ABI радио,
 отказ другим 32-битным приложениям, обязательную готовность RDS и защиту от
 быстрых перезапусков.

@@ -94,12 +94,10 @@ Messenger-контракт определён в общем `SharedAndroid/.../c
 
 ## Проверки
 
-JVM-тест `TaskManagerCardsTest` проверяет число слотов, необходимость карточки «Закрыть все» и ширину
+JVM-тест `TaskManagerCardsTest` проверяет необходимость карточки «Закрыть все» и расчёт ширины
 карточки; `TaskListPolicyTest` — отбор задач (одна запись на пакет, приоритет копии вне виджета, признак
-«в виджете»). Контракт фиксации и виджетного признака — `Packaging/tests/test_task_manager_pins.sh`.
-Контракт хука дока — `Packaging/tests/test_launcher_dock_buttons.sh` (`node --check`,
-компонент активности диспетчера, отсутствие прежнего перехода на главный экран, запись в
-`ourInsetActivity`).
+«в виджете»). `PinnedAppsPolicyTest` проверяет закрепление и изменение порядка пакетов.
+Поведение кнопок дока проверяет `Packaging/tests/test_dock_navigation_actions.js`.
 
 ## Ограничения
 

@@ -96,15 +96,3 @@ Run commands from this directory:
 
 The foreground-service notifications are expected. They make process lifetime
 deterministic while an external injection test is running.
-
-## Static validation
-
-This validation does not invoke Gradle or `adb`:
-
-```sh
-./tests/static-checks.sh
-```
-
-It checks shell syntax, the API 30 contract, all five identities, manifest
-process wiring, minimal permissions, cleanup/install safety guards, and fixture
-drift against all six current production agent scripts.

@@ -71,7 +71,6 @@ VOYAH_TEST_PAYLOAD="$PWD/Releases/build/installer-payload-4.5.0" python3 Install
 VOYAH_TEST_PAYLOAD="$PWD/Releases/build/installer-payload-4.5.0" python3 Installer/tests/test_canbus.py
 python3 Installer/tests/test_release.py
 python3 Installer/tests/test_catalog_publish.py
-python3 Installer/scripts/sync-classic-commands.py --check
 ```
 
 Готовые APK, payload и GUI хранятся в игнорируемом `Releases/`. Первая команда
