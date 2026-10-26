@@ -1,7 +1,7 @@
 # DiPlay в VoyahTune: спецификация интеграции и восстановления
 
 Этот документ — контракт адаптации, по которому восстанавливают интеграцию после
-полной замены исходников DiPlay. Он описывает исходники на **23 октября 2026**;
+полной замены исходников DiPlay. Он описывает исходники на **26 октября 2026**;
 состав конкретного опубликованного релиза определяется его manifest и revision.
 Имена upstream-классов могут измениться: при обновлении сохранять поведение
 и границы ответственности, а не только переносить строки патча.
@@ -1025,21 +1025,67 @@ DARK/LIGHT/AUTO сохраняется, AUTO в VEHICLE следует сист�
 через существующий `CarPlayVehicleBridge`; зависимости shared на Native нет.
 Потеря IPC очищает снимок и завершает ожидающие команды ошибкой.
 
-В VoyahTune регистрация климатического адаптера отключена в конструкторе
-`CarPlayVehicleBridge`: `VehicleClimate.install(null)`. Поэтому `/info` не объявляет
-VSP, SETUP не согласует `vehicleStateProtocol`, климат не задаёт нижний док.
-Без автомобильной темы `displayPanels` также отсутствует. Это временное отключение
-до выяснения причины чёрного экрана; IPC и реализация VSP сохранены.
-При установленном адаптере библиотека `/info` объявляет `vehicleStateProtocolInfo` версии 1.0,
-один plug-in VoyahTune и аксессуары Climate/VehicleResources/Seats. SETUP принимает
-`vehicleStateProtocol` только если его предложил iPhone. `displayPanels` описывает
-только настроенные видеодисплеи: каждой панели соответствует существующий видеопоток.
-Геометрия берётся из соответствующего `display`; основной и опциональный приборный
-видеопотоки сохраняются. Служебная панель, Local UI `displayPlugins` и признак
-`showsInstruments` удалены, в том числе у приборного дисплея; `properties` пуст.
-Описание VSP-сервисов климата и сидений сохраняется.
-В прежних испытаниях удаление служебной панели скрывало климатический интерфейс
-на исследованном iPhone; появление UI после этого изменения требует проверки на ГУ.
+В настройках VoyahTune переключатель **CarPlay Ultra** по умолчанию включён
+(`voyah_carplay_availability/ultra`, отсутствующий ключ = true). Значение фиксируется
+при создании сессии; переключение требует нового подключения iPhone, без переустановки.
+`VehicleClimate.install(this)` регистрирует наш адаптер постоянно, но объявление VSP
+и согласование SETUP управляются `AirPlayConfig.vehicleStateProtocol`.
+При выключенном Ultra отсутствуют VSP, UI Sync, MFi4 и автомобильная тема; сохраняются
+обычные размеры, масштаб, док и оформление CarPlay. Автоматическая дневная/ночная
+тема по освещению остаётся независимой настройкой.
+
+Включённый Ultra использует тему **44C9FA31EC:985:19.0**, canvas **1920×720**,
+`Center_Display` и, при наличии приборного видеопотока, `Cluster_Display`.
+Физическая ширина берётся из текущей конфигурации, высота пропорциональна canvas.
+Принудительный нижний док климата не применяется к Ultra; HID и команды view area
+используют идентификатор и координаты выбранной темы.
+Панели перенесены из VoyahPlay: основная содержит свой видеопоток без Local UI,
+приборная/служебная — `showsInstruments` и `displayPlugins`. Когда отдельного
+приборного видео нет, служебная панель не объявляет дополнительный видеопоток.
+Это отличается от эксперимента 25 октября, когда Local UI добавлялся в основную панель.
+Отсутствие чёрного экрана у этой адаптации **ещё не проверено на ГУ**.
+
+Протокол заимствован из [VoyahPlay f34a2b0c](https://github.com/garik345/VoyahPlay/tree/f34a2b0c7a010dd66c476e1bf097e028489ae493):
+`airplay/mfi4`, `airplay/rcs`, `airplay/ultra`, `AirPlayAudioResource`, extension hooks,
+транскрипт PairVerify и iAP2 mutual-auth/theme/VehicleInformation. Upstream debug-код
+включён в main библиотеки; доступность управляется настройкой, а не типом APK.
+MFi4 объявляется при protocolMajor=3 существующей identity; обычный MFi-SAP остаётся
+fallback. Секреты и identity не заменяются. Как в upstream, проверяется подпись телефона,
+но полная цепочка сертификатов до доверенного корня Apple не валидируется.
+VehicleInformation описывает Voyah Free как gasoline+electric без фиктивного EV-status.
+
+VSP 1.0 содержит два независимых плагина: **0 / VoyahTune** — наша прежняя схема
+Climate/VehicleResources/Seats; **1 / org.voyahtune.vehicle** — Navigation,
+AutomakerSettings, топливо/запас хода/пробег/шины/громкость и радио из VoyahPlay.
+Идентификаторы климатических характеристик и Native-команды сохранены. RCS-потоки
+обслуживает перенесённый транспорт, маршрутизация pluginID=0 передаёт запрос нашему
+`VehicleStateProtocol`. Он принимает прямой OPACK и через адаптер старую bplist-обёртку;
+`readResponse`/`registerResponse` содержат `errors`, в том числе пустой словарь;
+`unregisterResponse` не содержит лишнего `errors`.
+Сессии и teardown отдельных каналов изолированы; транспортный ACK предшествует OEM-команде.
+
+`CarPlayUltraSource` в app объединяет Native STATE/122 `ultra: Bundle` и стандартный
+MediaBrowser/MediaController `com.pateo.rdsapp`. Новый IPC **182/183** использует тот же
+owner/generation/deadline и ограниченную очередь. Native подписывается через
+CanBusEventHub только при Ultra: давление (bar → kPa), SOC, топливо, одометр,
+бензиновый `mCanTravelMileage` и электрический `mEVCruisingRang_real` запас хода,
+режим движения, массаж и положение света. Неизвестные/невалидные и устаревшие более 6 секунд значения отсутствуют;
+общий запас хода появляется только при известных обеих составляющих.
+Массаж/программы используют общий OemVehicleStateTransport и подтверждение чтением;
+наружный свет — существующий HeadlightSelectionController с обратной связью
+`LAMP_SWITCH_POSITION_FB`, сохраняя автоматическую политику VoyahTune.
+Кнопки меню/настроек открывают системный HOME/AdvanceActivity на display 0.
+
+Радио поддерживает FM/AM, станции, play/pause/next/previous/tune и подтверждает
+операции по метаданным/состоянию OEM MediaSession. Перед воспроизведением запрашивается
+аудиоресурс CarPlay; при отказе команда не выполняется. Громкость и mute (уровень 0,
+восстановление последнего слышимого уровня) идут через существующий CarPlayAudioClient
+и OEM AudioPolicy Native, с чтением фактического диапазона и подтверждением уровня.
+Закрытый read-only RDS RT getter перенесён в Native `CarPlayRadioText`: доступ разрешён
+только для SHA-256 OEM APK `36b4d73a889aa78325f6a6ff0c8113c6b13605620a5a4b045209fbff36449cca`;
+на другой версии недоступен только дополнительный RT, стандартные метаданные остаются.
+Новых CAN/OEM Binder entry points в RestoreMode нет.
+
 Два DataStream UUID
 `3E2F3C61-AAD0-42CB-A8AA-BF22186DA62E` и
 `FF4A6720-F2BE-4F56-A3E1-DB3B4E37D634` принадлежат одной AirPlay-сессии.
@@ -1048,7 +1094,9 @@ ChaCha20-Poly1305, 2-байтная little-endian длина, 32-байтный 
 Ответ на `sync` сохраняет token; исходящий `asyn/cmnd` имеет **нулевой token**.
 ACK и команды разделяют сериализованный счётчик nonce. Закрытие сессии освобождает
 оба канала, подписки и ожидающие ответы. Исходящие команды выполняются отдельным
-writer с очередью до 32 пакетов; переполнение закрывает канал, не блокируя UI/Native IPC.
+writer с очередью до 32 пакетов в прежнем VehicleStateChannel; Ultra использует CAF worker
+с очередью до 64 задач. Ответы и наблюдения климата из Native также ставятся в очередь,
+а не пишутся в сокет на UI-потоке; переполнение закрывает канал.
 
 `OpackCodec` сохраняет 64-битные transactionID и числовые ключи, ограничивает размер,
 глубину и число объектов. Поддержаны config/register/read/unregister/write и
@@ -1958,7 +2006,7 @@ OEM-снимка и подтверждают переход чтением. IPC 
 | [CarPlayWidgetSettings.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/main/CarPlayWidgetSettings.java)<br>[settings_main_carplay_widget.xml](../RestoreMode/app/src/main/res/layout/settings_main_carplay_widget.xml) | Включение, Ярлык/Окно, размеры и общий предпросмотр сетки; сохраняет ID и параметры существующей записи (§4). |
 | [VoyahWifiScanPause.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/network/VoyahWifiScanPause.kt)<br>[WifiScanPause.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/network/WifiScanPause.kt)<br>[CarPlayWifiScanProtocol.java](../SharedAndroid/src/main/java/ru/big/town/common/CarPlayWifiScanProtocol.java)<br>[CarPlayWifiScanController.java](../Native/app/src/main/java/ru/big/town/anative/CarPlayWifiScanController.java)<br>[vd_bypass.js](../Packaging/new/agents/windows.js)<br>[carplay_wifi_scan.xml](../RestoreMode/diplay/common/src/main/res/values-ru/carplay_wifi_scan.xml) | OD lease автоматического поиска Wi-Fi: Host устанавливается Application, owner tokens передаются Bridge, Native публикует ограниченный heartbeat, system_server сохраняет/восстанавливает autojoin на Wi-Fi Handler. Default true, только Wi-Fi Direct; LocalAdb и PI не включать (§5/6). |
 | [RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/carplay/CarPlaySettingsFragment.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/carplay/CarPlaySettingsFragment.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/core/SettingsSection.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/core/SettingsSection.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/core/SettingsSectionLayouts.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/core/SettingsSectionLayouts.java)<br>[RestoreMode/app/src/main/res/layout/settings_carplay.xml](../RestoreMode/app/src/main/res/layout/settings_carplay.xml)<br>[RestoreMode/app/src/main/res/values/carplay_home.xml](../RestoreMode/app/src/main/res/values/carplay_home.xml)<br>[RestoreMode/app/src/main/res/layout/view_settings_navigation_rail.xml](../RestoreMode/app/src/main/res/layout/view_settings_navigation_rail.xml) | Раздел 9, общий выключатель, дискретный масштаб без выбора темы, navigation, живой статус, отключение, SWReason и четыре OEM-ползунка; без общего автоподключения (§5). |
-| [RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayVehicleBridge.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayVehicleBridge.java)<br>[SharedAndroid/src/main/java/ru/big/town/common/CarPlayVehicleProtocol.java](../SharedAndroid/src/main/java/ru/big/town/common/CarPlayVehicleProtocol.java)<br>[Native/app/src/main/java/ru/big/town/anative/CarPlayVehicleController.java](../Native/app/src/main/java/ru/big/town/anative/CarPlayVehicleController.java) | Двунаправленный IPC, owner/generation/подписки (§6/8); регистрация климатического адаптера VSP отключена (§6). |
+| [RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayVehicleBridge.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayVehicleBridge.java)<br>[SharedAndroid/src/main/java/ru/big/town/common/CarPlayVehicleProtocol.java](../SharedAndroid/src/main/java/ru/big/town/common/CarPlayVehicleProtocol.java)<br>[Native/app/src/main/java/ru/big/town/anative/CarPlayVehicleController.java](../Native/app/src/main/java/ru/big/town/anative/CarPlayVehicleController.java) | Двунаправленный IPC, owner/generation/подписки (§6/8); климат и Ultra-адаптер, включение VSP по настройке (§6). |
 | [Native/app/src/main/java/ru/big/town/anative/CarPlayLightState.java](../Native/app/src/main/java/ru/big/town/anative/CarPlayLightState.java)<br>[Native/app/src/test/java/ru/big/town/anative/CarPlayLightStateTest.java](../Native/app/src/test/java/ru/big/town/anative/CarPlayLightStateTest.java) | Начальное TX57-чтение SWReason, последующие события; защита от устаревшего snapshot после события/reconnect/close (§6). |
 | [Native/app/src/main/java/ru/big/town/anative/CanBusEvent.java](../Native/app/src/main/java/ru/big/town/anative/CanBusEvent.java)<br>[Native/app/src/main/java/ru/big/town/anative/CanBusEventRouter.java](../Native/app/src/main/java/ru/big/town/anative/CanBusEventRouter.java)<br>[Native/app/src/main/java/ru/big/town/anative/CanBusEventHub.java](../Native/app/src/main/java/ru/big/town/anative/CanBusEventHub.java) | Скорость, interests, OEM callback/getter в общем CAN hub (§6). |
 | [RestoreMode/app/src/main/java/ru/big/town/restoremode/voice/commands/VoiceSteeringPolicy.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/voice/commands/VoiceSteeringPolicy.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/voice/VoiceSettingsPage.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/voice/VoiceSettingsPage.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/integration/config/SplitConfigSync.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/integration/config/SplitConfigSync.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/steering/SteeringSettingsFragment.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/steering/SteeringSettingsFragment.java)<br>[RestoreMode/app/src/main/res/layout/settings_steering_reserved.xml](../RestoreMode/app/src/main/res/layout/settings_steering_reserved.xml)<br>[Native/app/src/main/java/ru/big/town/anative/SetModesReceiverDynamic.java](../Native/app/src/main/java/ru/big/town/anative/SetModesReceiverDynamic.java) | Выбор нажатия Siri, пояснение, экспорт действия и broadcast (§7). |
@@ -2117,6 +2165,24 @@ Authentication assets и бинарную иконку сохранить отд
 тёмный значок, заголовок CarPlay, «Вернуться в настройки» и «Отмена» рядом; русская
 подсказка жеста не содержит DiPlay. Тёмный host UI не должен менять тему iPhone:
 SWReason управляет только проекцией в режиме VEHICLE.
+
+### Карта переноса Ultra, 26 октября 2026
+
+- `diplay/shared/airplay/{mfi4,rcs,ultra}` и `AirPlayProtocolExtension` — протоколы VoyahPlay;
+  `VehicleStateProtocol` остаётся отдельным климатическим плагином.
+- `CarPlaySettingsAccess`, `CarPlaySettingsFragment`, `settings_carplay.xml`,
+  `CarPlayHostActivity`, `CarPlayUltraHost` — переключатель и согласованный профиль сессии.
+- `app/carplay/{CarPlayUltraSource,VoyahRadioClient,CarPlayVehicleBridge}` — адаптеры приложения;
+  dependency `androidx.media:media:1.6.0` нужна для OEM списка станций MediaSessionCompat.
+- `SharedAndroid/CarPlayUltraProtocol`, Native `CarPlayUltraController`, `CarPlayRadioText`,
+  `CarPlayVehicleController`, `EnergyTelemetrySample` — данные, команды, RDS и жизненный цикл.
+- `Iap2IdentificationClient`, `Iap2VehicleStatus`, `CarPlayController`, wired/wireless endpoints —
+  тема, тип двигателя и MFi4; bootstrap Bluetooth не объявляет VehicleInformation.
+- Целевые проверки: компиляция app/common/shared и Native, MFi4, UI Sync, RadioAudio,
+  AirPlayAudioResource, наш климат, `VoyahTuneUltraIntegrationTest` (два плагина на реальном
+  локальном encrypted RCS-канале), `CarPlaySettingsAccessTest`, `CarPlayUltraTelemetryTest`.
+  Установка/проверка на автомобиле не выполнялась; для доставки нужны APK RestoreMode и Native,
+  пересборка Installer не требуется — его код и установочный контракт не менялись.
 
 ## 12. Критерии восстановления и проверки
 
