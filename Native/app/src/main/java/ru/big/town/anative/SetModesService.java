@@ -142,6 +142,7 @@ public class SetModesService extends Service {
                 case ru.big.town.common.CarPlayVehicleProtocol.UNWATCH:
                 case ru.big.town.common.CarPlayVehicleProtocol.NAVIGATION:
                 case ru.big.town.common.CarPlayAudioProtocol.FOCUS:
+                case ru.big.town.common.CarPlayUltraProtocol.SET:
                 case ru.big.town.common.CarPlayClimateProtocol.SET:
                     if (carPlayAudio == null)
                         carPlayAudio = new CarPlayAudioController(SetModesService.this);

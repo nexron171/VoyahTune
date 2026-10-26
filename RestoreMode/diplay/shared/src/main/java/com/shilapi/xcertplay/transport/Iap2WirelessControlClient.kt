@@ -280,6 +280,7 @@ class Iap2WirelessControlClient(
                 sourceVersion = endpoint.sourceVersion,
                 sdkVersion = endpoint.sdkVersion,
                 clusterAsset = endpoint.clusterAsset,
+                mutualAuth = endpoint.mutualAuthentication,
             )
 
         private fun later(
@@ -312,6 +313,7 @@ class Iap2WirelessCarPlayEndpoint(
     accessPointBssid: ByteArray? = null,
     val sdkVersion: String? = null,
     val clusterAsset: Iap2ClusterAsset? = null,
+    val mutualAuthentication: Boolean? = null,
 ) {
     val ipAddresses: List<String> = ipAddresses.toList()
     val accessPointBssid: ByteArray? = accessPointBssid?.copyOf()

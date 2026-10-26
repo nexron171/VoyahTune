@@ -108,7 +108,7 @@ class AirPlayVehicleThemeTest {
         assertEquals("Center_Display", panels.first()["uid"])
         val stream = (panels.first()["initialVideoStreams"] as List<*>).single() as Map<*, *>
         assertEquals("Center_Display", stream["uuid"])
-        assertEquals(emptyList<Any>(), panels.last()["initialVideoStreams"])
+        assertEquals(1, panels.size)
         val devices = (info["hidDevices"] as List<*>).map { it as Map<*, *> }
         devices.forEach { assertEquals("Center_Display", it["displayUUID"]) }
         assertArrayEquals(

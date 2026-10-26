@@ -66,7 +66,7 @@ internal class VehicleStateProtocol(private val send: (Boolean, ByteArray) -> Un
             "unregisterRequest" -> {
                 val identifiers = (values as? List<*>)?.filterIsInstance<Long>() ?: subscribed.toList()
                 subscribed.removeAll(identifiers.toSet())
-                answer(highPriority, "unregisterResponse", transaction, errors = identifiers.associateWith { 0 })
+                answer(highPriority, "unregisterResponse", transaction)
             }
 
             "writeRequest" -> write(highPriority, transaction, data, values as? Map<*, *> ?: return)
@@ -171,7 +171,7 @@ internal class VehicleStateProtocol(private val send: (Boolean, ByteArray) -> Un
     ) {
         val response = linkedMapOf<String, Any?>("command" to command, "transactionID" to transaction)
         if (values != null) response["values"] = values
-        if (errors.isNotEmpty()) response["errors"] = errors
+        if (errors.isNotEmpty() || command == "readResponse" || command == "registerResponse") response["errors"] = errors
         send(highPriority, wrap(response))
     }
 

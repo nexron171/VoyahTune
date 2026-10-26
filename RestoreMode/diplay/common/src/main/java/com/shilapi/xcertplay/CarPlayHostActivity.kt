@@ -4861,7 +4861,14 @@ class CarPlayHostActivity : ComponentActivity() {
         // The home settings page can change the name while this host stays alive.
         if (!menuOpen) oemLabel = AirPlayPersistence.loadOemLabel(this)
         val dock = CarPlayDock.load(this)
-        val mainDisplay = createMainDisplayConfig(size, dock)
+        val ultra = CarPlaySettingsAccess.ultra(this)
+        val vehicleTheme = if (ultra) com.shilapi.xcertplay.airplay.AirPlayVehicleTheme.DUAL_SIDE_DOCKS else null
+        val ordinaryDisplay = createMainDisplayConfig(size, dock)
+        val mainDisplay = vehicleTheme?.mainDisplay(fps, ordinaryDisplay.primaryInputDevice)?.copy(
+            widthPhysicalMm = ordinaryDisplay.widthPhysicalMm,
+            heightPhysicalMm = ((ordinaryDisplay.widthPhysicalMm ?: 311) * 720.0 / 1920).toInt(),
+            viewAreas = null,
+        ) ?: ordinaryDisplay
         val carBluetoothAudio = AirPlayPersistence.loadCarBluetoothAudio(this)
         if (carBluetoothAudio) logCarBluetoothAudio()
         return AirPlayConfig(
@@ -4883,6 +4890,10 @@ class CarPlayHostActivity : ComponentActivity() {
             mainBufferedAudio = AirPlayPersistence.loadMainBufferedAudio(this),
             speechWithout8And16Khz = AirPlayPersistence.loadSpeechWithout8And16Khz(this),
             disableAudioOutput = carBluetoothAudio,
+            vehicleTheme = vehicleTheme,
+            vehicleStateProtocol = ultra,
+            mutualAuthentication = ultra,
+            protocolExtension = if (ultra) CarPlayUltraHost.create() else null,
         )
     }
 

@@ -31,6 +31,17 @@ class CarPlaySettingsAccessTest {
     }
 
     @Test
+    fun ultraDefaultsOnAndSurvivesFeatureToggle() {
+        assertTrue(CarPlaySettingsAccess.ultra(app))
+        CarPlaySettingsAccess.setUltra(app, false)
+        CarPlaySettingsAccess.setEnabled(app, false)
+        CarPlaySettingsAccess.setEnabled(app, true)
+        assertFalse(CarPlaySettingsAccess.ultra(app))
+        CarPlaySettingsAccess.setUltra(app, true)
+        assertTrue(CarPlaySettingsAccess.ultra(app))
+    }
+
+    @Test
     fun settingUsesTheSameValueInBothDirections() {
         CarPlaySettingsAccess.setAutoConnect(app, true)
         assertTrue(DiPlayPreferences.autoConnect(app))

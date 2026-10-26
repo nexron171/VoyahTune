@@ -62,7 +62,9 @@ public final class CarPlayVehicleBridge
                         Looper.getMainLooper(),
                         message -> {
                             if (!started || expectedGeneration != generation) return true;
-                            if (message.what == CarPlayClimateProtocol.RESULT) {
+                            if (message.what == CarPlayClimateProtocol.RESULT
+                                    || message.what
+                                            == ru.big.town.common.CarPlayUltraProtocol.RESULT) {
                                 Bundle response = message.getData();
                                 finishClimate(
                                         response.getInt(CarPlayClimateProtocol.REQUEST),
@@ -83,6 +85,9 @@ public final class CarPlayVehicleBridge
                                 }
                             }
                             VehicleClimate.update(observed);
+                            CarPlayUltraSource.update(
+                                    values.getBundle(
+                                            ru.big.town.common.CarPlayUltraProtocol.STATE));
                             VoyahCarPlayIntegration.update(
                                     values.getInt(CarPlayVehicleProtocol.SPEED_KMH, -1),
                                     values.getInt(CarPlayVehicleProtocol.GEAR, -1),
@@ -94,6 +99,7 @@ public final class CarPlayVehicleBridge
 
     private Messenger service;
     private boolean started, bound;
+    private boolean ultraEnabled;
     private int audioStream = CarPlayAudioProtocol.NONE;
     private final Runnable retry = this::bind;
     private final Runnable navigationTick =
@@ -175,13 +181,27 @@ public final class CarPlayVehicleBridge
 
     public CarPlayVehicleBridge(Context context) {
         this.context = context.getApplicationContext();
-        // Keep VSP unavailable while its display negotiation can produce a black screen.
-        VehicleClimate.install(null);
+        VehicleClimate.install(this);
+        CarPlayUltraSource.install(context, this);
     }
 
     @Override
     public void write(
             String field, double value, BooleanSupplier current, VehicleClimate.Result result) {
+        writeCommand(CarPlayClimateProtocol.SET, field, value, current, result);
+    }
+
+    public void writeUltra(
+            String field, double value, BooleanSupplier current, VehicleClimate.Result result) {
+        writeCommand(ru.big.town.common.CarPlayUltraProtocol.SET, field, value, current, result);
+    }
+
+    private void writeCommand(
+            int type,
+            String field,
+            double value,
+            BooleanSupplier current,
+            VehicleClimate.Result result) {
         handler.post(
                 () -> {
                     if (!started || service == null || !current.getAsBoolean()) {
@@ -203,7 +223,7 @@ public final class CarPlayVehicleBridge
                     data.putLong(
                             CarPlayClimateProtocol.DEADLINE,
                             android.os.SystemClock.elapsedRealtime() + 3000);
-                    Message message = Message.obtain(null, CarPlayClimateProtocol.SET);
+                    Message message = Message.obtain(null, type);
                     message.replyTo = replies;
                     message.setData(data);
                     try {
@@ -223,6 +243,7 @@ public final class CarPlayVehicleBridge
 
     private void resetClimate() {
         VehicleClimate.update(Collections.emptyMap());
+        CarPlayUltraSource.update(null);
         for (Integer request : new java.util.ArrayList<>(climateReplies.keySet())) {
             finishClimate(request, CarPlayClimateProtocol.UNAVAILABLE);
         }
@@ -287,6 +308,7 @@ public final class CarPlayVehicleBridge
     public void start() {
         if (started) return;
         started = true;
+        ultraEnabled = com.shilapi.xcertplay.CarPlaySettingsAccess.ultra(context);
         ContextCompat.registerReceiver(
                 context,
                 siri,
@@ -325,6 +347,11 @@ public final class CarPlayVehicleBridge
     private void send(int what) {
         if (service == null) return;
         Message message = Message.obtain(null, what);
+        if (what == CarPlayVehicleProtocol.WATCH) {
+            Bundle data = new Bundle();
+            data.putBoolean(ru.big.town.common.CarPlayUltraProtocol.ENABLED, ultraEnabled);
+            message.setData(data);
+        }
         message.replyTo = replies;
         try {
             service.send(message);

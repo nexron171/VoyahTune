@@ -7,6 +7,7 @@ import com.shilapi.xcertplay.iap2.session.Iap2Session
 import com.shilapi.xcertplay.iap2.wire.Iap2Frame
 import com.shilapi.xcertplay.iap2.wire.Iap2Parameter
 import com.shilapi.xcertplay.transport.Iap2VehicleStatus.electricVehicleComponents
+import com.shilapi.xcertplay.transport.Iap2VehicleStatus.vehicleInformationComponent
 import java.io.IOException
 import kotlin.math.min
 
@@ -59,6 +60,7 @@ data class Iap2IdentificationConfig(
     /** Also offer wheel speed ($PASCD) in the location component; needs [locationInformationEnabled]. */
     val vehicleSpeedEnabled: Boolean = false,
     val carPlayThemeAssetIdentifier: String? = null,
+    val vehicleInformation: Iap2VehicleInformation? = null,
 ) {
     constructor(
         name: String,
@@ -134,6 +136,7 @@ internal fun Iap2IdentificationConfig.forWirelessLink(
             locationInformationEnabled = false,
             vehicleStatusEnabled = false,
             vehicleSpeedEnabled = false,
+            vehicleInformation = null,
         )
         Iap2WirelessLinkRole.RUNTIME_TUNNEL -> wirelessConfig
     }
@@ -384,6 +387,7 @@ class Iap2IdentificationClient(private val session: Iap2Session) {
                     }
                 }
                 if (config.vehicleStatusEnabled) electricVehicleComponents(config.manufacturer, config.chargingConnectors)
+                else config.vehicleInformation?.let { vehicleInformationComponent(it) }
                 if (config.locationInformationEnabled) {
                     group(22) {
                         u16(0, 0)

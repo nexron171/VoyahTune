@@ -19,6 +19,7 @@
         tools:ignore="QueryAllPackagesPermission" />
 
     <queries>
+        <package android:name="com.pateo.rdsapp" />
         <provider android:authorities="ru.big.town.anative.trips" />
         <package android:name="ru.big.town.restoremode" />
         <!-- Нужно для bindService к SetModesService (видимость пакетов, API 30+) -->
