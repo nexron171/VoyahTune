@@ -6,6 +6,7 @@ pub enum Step {
     Restore,
     Runyn,
     Dns,
+    NavigationFonts,
     Sync,
     Reboot,
 }
@@ -16,6 +17,7 @@ pub fn execute(runyn: bool, mut perform: impl FnMut(Step) -> io::Result<()>) -> 
         Step::Native,
         Step::Runyn,
         Step::Dns,
+        Step::NavigationFonts,
         Step::Sync,
         Step::Restore,
         Step::Reboot,
@@ -44,6 +46,7 @@ mod tests {
             [
                 Step::Native,
                 Step::Dns,
+                Step::NavigationFonts,
                 Step::Sync,
                 Step::Restore,
                 Step::Reboot
@@ -64,6 +67,7 @@ mod tests {
                 Step::Native,
                 Step::Runyn,
                 Step::Dns,
+                Step::NavigationFonts,
                 Step::Sync,
                 Step::Restore,
                 Step::Reboot
@@ -72,7 +76,13 @@ mod tests {
     }
     #[test]
     fn failures_never_reach_later_writes_or_reboot() {
-        for failure in [Step::Native, Step::Dns, Step::Sync, Step::Restore] {
+        for failure in [
+            Step::Native,
+            Step::Dns,
+            Step::NavigationFonts,
+            Step::Sync,
+            Step::Restore,
+        ] {
             let mut actual = Vec::new();
             let result = execute(false, |step| {
                 actual.push(step);

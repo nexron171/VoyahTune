@@ -1,5 +1,3 @@
-mod qconn;
-
 use crate::{events::Events, Error, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -47,6 +45,27 @@ pub struct Adb {
     pub step: Option<String>,
 }
 impl Adb {
+    pub(crate) fn qnx_navigation_fonts(
+        &self,
+        action: &str,
+        model: &str,
+    ) -> Result<serde_json::Value> {
+        let serial = self.serial.as_deref().ok_or_else(|| {
+            Error::new(
+                "QNX_TRANSPORT",
+                "Не выбран автомобиль для обработки тем приборки",
+            )
+        })?;
+        qnx_fonts::run(
+            &qnx_fonts::Endpoint::Adb {
+                path: &self.path,
+                serial,
+            },
+            action,
+            model,
+        )
+    }
+
     pub fn new(path: impl AsRef<Path>, events: Events) -> Result<Self> {
         let path = path.as_ref().canonicalize().map_err(|e| {
             Error::new(

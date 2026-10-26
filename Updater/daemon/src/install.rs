@@ -513,6 +513,10 @@ pub fn apply(shared: &Shared) -> io::Result<()> {
                     }
                     workflow::update(shared, |s| s.completed_steps = 6)?;
                 }
+                Step::NavigationFonts => {
+                    workflow::phase(shared, "applying", "Шрифты навигации приборки")?;
+                    apply_navigation_fonts(model)?;
+                }
                 Step::Sync => {
                     workflow::phase(shared, "applying", "Синхронизация перед перезагрузкой")?;
                     command("/system/bin/sync", &[], 30)?;
@@ -542,6 +546,18 @@ pub fn apply(shared: &Shared) -> io::Result<()> {
     // A failed reboot must not leave a permanently busy UI or report success.
     thread::sleep(Duration::from_secs(30));
     Err(invalid("ГУ не перезагрузилось после команды reboot"))
+}
+
+fn apply_navigation_fonts(model: release_core::vehicle_model::VehicleModel) -> io::Result<()> {
+    use release_core::vehicle_model::VehicleModel;
+    let model = match model {
+        VehicleModel::H97X => "H97X",
+        VehicleModel::H97Y => "H97Y",
+        VehicleModel::Other => return Ok(()),
+    };
+    let report = qnx_fonts::apply_on_device(model).map_err(error)?;
+    crate::state::save(root(), "navigation-fonts-apply.json", &report)?;
+    crate::log(root(), &format!("navigation_fonts {report}"))
 }
 
 pub fn validate(shared: &Shared) -> io::Result<()> {

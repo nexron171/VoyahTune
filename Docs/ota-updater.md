@@ -47,7 +47,13 @@ Native обновляется также через PackageManager, чтобы �
 `force-stop --user 0` → `uninstall -k --user 0` → `install-existing --user 0 --wait`.
 RunYN устанавливается по условию `except-h97xy`.
 
-RestoreMode устанавливается последним APK после Native, RunYN, DNS и sync.
+На H97X/H97Y перед заменой RestoreMode служба применяет общий структурный патчер
+шрифтов навигации в QNX-темах через qconn/TCP. Неизвестные темы пропускаются;
+это не новая проверка допуска OTA. Оригиналы и журнал сохраняются в QNX для
+восстановления при удалении компьютерным установщиком.
+[Поведение и откат](installer-payload.md#шрифты-навигации-h97xh97y).
+
+RestoreMode устанавливается последним APK после Native, RunYN, DNS, шрифтов и sync.
 PackageManager закрывает UI, а внешний root-исполнитель продолжает работу:
 фиксация `reboot-pending`, снятие блока, sync и reboot. При ошибке записи блок
 сохраняется для USB-восстановления. [Порядок доставки UI](updater-ui-ota.md).

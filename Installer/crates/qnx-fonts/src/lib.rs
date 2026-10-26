@@ -1,11 +1,12 @@
-//! Bounded access to the vehicle's existing QNX service through USB ADB.
+//! Shared QNX navigation font operation for USB installation and on-device OTA.
 
-use super::{Adb, ChildGuard};
-use crate::{Error, Result};
+use release_core::{Error, Result};
 use sha2::{Digest, Sha256};
 use std::{
     io::{Read, Write},
-    process::{ChildStdin, Command, Stdio},
+    net::{Shutdown, SocketAddr, TcpStream},
+    path::Path,
+    process::{Child, Command, Stdio},
     sync::mpsc::{self, Receiver},
     thread,
     time::{Duration, Instant},
@@ -14,6 +15,52 @@ use std::{
 const FILE_PROMPT: &[u8] = b"<qconn-file>";
 const LAUNCHER_PROMPT: &[u8] = b"<qconn-launcher>";
 const OUTPUT_LIMIT: usize = 256 * 1024;
+const SCRIPT: &[u8] = include_bytes!("../../../../Packaging/new/install/navigation_fonts.py");
+const RESULT_PREFIX: &str = "VOYAHTUNE_NAVIGATION_FONT_RESULT ";
+
+pub enum Endpoint<'a> {
+    Adb { path: &'a Path, serial: &'a str },
+    Tcp(SocketAddr),
+}
+
+pub fn apply_on_device(model: &str) -> Result<serde_json::Value> {
+    run(
+        &Endpoint::Tcp(([172, 16, 104, 41], 8000).into()),
+        "apply",
+        model,
+    )
+}
+
+pub fn run(endpoint: &Endpoint<'_>, action: &str, model: &str) -> Result<serde_json::Value> {
+    parse_result(&run_script(endpoint, SCRIPT, action, model)?, action, model)
+}
+
+pub fn parse_result(output: &str, action: &str, model: &str) -> Result<serde_json::Value> {
+    let results: Vec<_> = output
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix(RESULT_PREFIX))
+        .collect();
+    if results.len() != 1 {
+        return Err(
+            Error::new("QNX_FONT_RESULT", "Приборка не подтвердила обработку тем").detail(output),
+        );
+    }
+    let result: serde_json::Value = serde_json::from_str(results[0])?;
+    if result["ok"] != true
+        || result["action"] != action
+        || result["model"] != model
+        || !result["themes"]
+            .as_array()
+            .is_some_and(|themes| themes.len() == 3)
+    {
+        return Err(Error::new(
+            "QNX_FONT_FAILED",
+            "Не удалось обработать шрифты навигации приборки",
+        )
+        .detail(result));
+    }
+    Ok(result)
+}
 
 fn failure(detail: impl std::fmt::Display) -> Error {
     Error::new(
@@ -24,24 +71,35 @@ fn failure(detail: impl std::fmt::Display) -> Error {
 }
 
 struct Connection {
-    _child: ChildGuard,
-    input: ChildStdin,
+    child: Option<Child>,
+    socket: Option<TcpStream>,
+    input: Box<dyn Write>,
     output: Receiver<std::io::Result<Vec<u8>>>,
     buffer: Vec<u8>,
     deadline: Instant,
 }
 
 impl Connection {
-    fn open(adb: &Adb) -> Result<Self> {
-        let serial = adb
-            .serial
-            .as_ref()
-            .ok_or_else(|| failure("ADB serial is required"))?;
-        let mut command = Command::new(&adb.path);
+    fn open(endpoint: &Endpoint<'_>) -> Result<Self> {
+        if let Endpoint::Tcp(address) = endpoint {
+            let socket = TcpStream::connect_timeout(address, Duration::from_secs(5))?;
+            socket.set_read_timeout(Some(Duration::from_secs(30)))?;
+            socket.set_write_timeout(Some(Duration::from_secs(30)))?;
+            return Self::start(
+                socket.try_clone()?,
+                Box::new(socket.try_clone()?),
+                None,
+                Some(socket),
+            );
+        }
+        let Endpoint::Adb { path, serial } = endpoint else {
+            unreachable!()
+        };
+        let mut command = Command::new(path);
         command
             .args([
                 "-s",
-                serial,
+                *serial,
                 "shell",
                 "-T",
                 "toybox",
@@ -59,15 +117,27 @@ impl Connection {
             use std::os::windows::process::CommandExt;
             command.creation_flags(0x08000000);
         }
-        let mut child = ChildGuard(command.spawn()?);
+        let mut child = command.spawn()?;
         let input = child.stdin.take().unwrap();
-        let mut stdout = child.stdout.take().unwrap();
+        let stdout = child.stdout.take().unwrap();
         let mut stderr = child.stderr.take().unwrap();
+        thread::spawn(move || {
+            let _ = std::io::copy(&mut stderr, &mut std::io::sink());
+        });
+        Self::start(stdout, Box::new(input), Some(child), None)
+    }
+
+    fn start(
+        mut reader: impl Read + Send + 'static,
+        input: Box<dyn Write>,
+        child: Option<Child>,
+        socket: Option<TcpStream>,
+    ) -> Result<Self> {
         let (sender, output) = mpsc::sync_channel(32);
         thread::spawn(move || {
             let mut bytes = [0; 8192];
             loop {
-                match stdout.read(&mut bytes) {
+                match reader.read(&mut bytes) {
                     Ok(0) => break,
                     Ok(count) => {
                         if sender.send(Ok(bytes[..count].to_vec())).is_err() {
@@ -81,11 +151,9 @@ impl Connection {
                 }
             }
         });
-        thread::spawn(move || {
-            let _ = std::io::copy(&mut stderr, &mut std::io::sink());
-        });
         let mut connection = Self {
-            _child: child,
+            child,
+            socket,
             input,
             output,
             buffer: Vec::new(),
@@ -208,142 +276,34 @@ impl Connection {
     }
 }
 
-impl Adb {
-    pub(crate) fn qnx_navigation_fonts(
-        &self,
-        script: &[u8],
-        action: &str,
-        model: &str,
-    ) -> Result<String> {
-        if !["inspect", "apply", "restore"].contains(&action) || !["H97X", "H97Y"].contains(&model)
-        {
-            return Err(failure("Unsupported font operation or vehicle model"));
+impl Drop for Connection {
+    fn drop(&mut self) {
+        if let Some(child) = self.child.as_mut() {
+            let _ = child.kill();
+            let _ = child.wait();
         }
-        let nonce = tempfile::Builder::new().prefix("qnx-font-").tempdir()?;
-        let token = nonce.path().file_name().unwrap().to_string_lossy();
-        let remote = format!("/var/data/voyahtune-{token}.py");
-        Connection::open(self)?.upload(&remote, script)?;
-        let hash = hex::encode(Sha256::digest(script));
-        let bootstrap = format!(
+        if let Some(socket) = self.socket.as_ref() {
+            let _ = socket.shutdown(Shutdown::Both);
+        }
+    }
+}
+
+fn run_script(endpoint: &Endpoint<'_>, script: &[u8], action: &str, model: &str) -> Result<String> {
+    if !["inspect", "apply", "restore"].contains(&action) || !["H97X", "H97Y"].contains(&model) {
+        return Err(failure("Unsupported font operation or vehicle model"));
+    }
+    let nonce = tempfile::Builder::new().prefix("qnx-font-").tempdir()?;
+    let token = nonce.path().file_name().unwrap().to_string_lossy();
+    let remote = format!("/var/data/voyahtune-{token}.py");
+    Connection::open(endpoint)?.upload(&remote, script)?;
+    let hash = hex::encode(Sha256::digest(script));
+    let bootstrap = format!(
             "import hashlib,os,sys; p='{remote}'; d=open(p,'rb').read(); assert hashlib.sha256(d).hexdigest()=='{hash}'; os.unlink(p); sys.argv=[p,'{action}','--model','{model}']; exec(compile(d,p,'exec'))"
         );
-        Connection::open(self)?.launch(&format!(
-            "/usr/bin/python3 python3 -u -B -c \"{bootstrap}\""
-        ))
-    }
+    Connection::open(endpoint)?.launch(&format!(
+        "/usr/bin/python3 python3 -u -B -c \"{bootstrap}\""
+    ))
 }
 
 #[cfg(all(test, unix))]
-mod tests {
-    use super::*;
-    use crate::events::Events;
-    use std::{fs, os::unix::fs::PermissionsExt};
-
-    #[test]
-    fn qconn_upload_checks_bytes_and_waits_for_launcher_completion() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("adb");
-        fs::write(
-            &path,
-            r#"#!/usr/bin/env python3
-import hashlib, pathlib, re, sys
-root = pathlib.Path(__file__).parent
-source = sys.stdin.buffer
-target = sys.stdout.buffer
-def send(value):
-    target.write(value); target.flush()
-def line():
-    return source.readline().decode().strip()
-send(b'QCONN\r\n\xff\xfd\x22')
-assert source.read(6) == b'\xff\xfc\x22\xff\xfe\x01'
-send(b'OK\r\n<qconn-broker>')
-service = line()
-if service == 'service file':
-    send(b'OK\r\n<qconn-file>')
-    request = line()
-    assert request.endswith(':501:180')
-    name = pathlib.Path(request.split('"')[1]).name
-    send(b'o:7:8180:0:"file"\r\n<qconn-file>')
-    data = bytearray()
-    while True:
-        request = line()
-        if request == 'c:7':
-            (root / name).write_bytes(data)
-            send(b'o\r\n<qconn-file>')
-            source.read()
-            break
-        operation, descriptor, offset, count = request.split(':')
-        assert operation == 'w' and descriptor == '7' and int(offset, 16) == len(data)
-        chunk = source.read(int(count, 16)); data.extend(chunk)
-        send(('o:%x:0:0\r\n<qconn-file>' % len(chunk)).encode())
-elif service == 'service launcher':
-    send(b'OK\r\n<qconn-launcher>')
-    request = line()
-    name = pathlib.Path(re.search("p='([^']+)'", request)[1]).name
-    expected = re.search("hexdigest\(\)=='([^']+)'", request)[1]
-    assert hashlib.sha256((root / name).read_bytes()).hexdigest() == expected
-    assert "'inspect','--model','H97X'" in request
-    send(b'OK 42\r\n<qconn-launcher>')
-    assert line() == 'continue'
-    send(b'OK\r\nVOYAHTUNE_NAVIGATION_FONT_RESULT {"ok":true}\n')
-else:
-    raise AssertionError(service)
-"#,
-        )
-        .unwrap();
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
-        let adb = Adb::new(&path, Events::quiet())
-            .unwrap()
-            .with_device("test")
-            .unwrap();
-        let script = vec![b'x'; 7000];
-        let output = adb
-            .qnx_navigation_fonts(&script, "inspect", "H97X")
-            .unwrap();
-        assert!(output.contains("VOYAHTUNE_NAVIGATION_FONT_RESULT {\"ok\":true}"));
-        assert!(adb
-            .qnx_navigation_fonts(&script, "inspect", "H97C")
-            .is_err());
-        assert!(adb
-            .qnx_navigation_fonts(&script, "arbitrary", "H97X")
-            .is_err());
-    }
-
-    #[test]
-    #[ignore = "Read-only check on an explicitly selected connected H97X/H97Y"]
-    fn qconn_live_navigation_font_inspection() {
-        let adb = Adb::new(
-            std::env::var("VOYAHTUNE_TEST_ADB").unwrap(),
-            Events::quiet(),
-        )
-        .unwrap()
-        .with_device(&std::env::var("VOYAHTUNE_TEST_SERIAL").unwrap())
-        .unwrap();
-        let properties = adb
-            .read(release_core::vehicle_model::PROPERTIES_COMMAND)
-            .unwrap();
-        let model = match release_core::vehicle_model::VehicleModel::detect(&properties) {
-            release_core::vehicle_model::VehicleModel::H97X => "H97X",
-            release_core::vehicle_model::VehicleModel::H97Y => "H97Y",
-            _ => panic!("Unsupported test vehicle"),
-        };
-        let output = adb
-            .qnx_navigation_fonts(
-                include_bytes!("../../../../../Packaging/new/install/navigation_fonts.py"),
-                "inspect",
-                model,
-            )
-            .unwrap();
-        let line = output
-            .lines()
-            .find_map(|line| {
-                line.trim()
-                    .strip_prefix("VOYAHTUNE_NAVIGATION_FONT_RESULT ")
-            })
-            .expect(&output);
-        let report: serde_json::Value = serde_json::from_str(line).unwrap();
-        assert_eq!(report["ok"], true, "{output}");
-        assert_eq!(report["themes"].as_array().unwrap().len(), 3);
-        println!("{report}");
-    }
-}
+mod tests;

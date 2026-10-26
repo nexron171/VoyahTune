@@ -700,6 +700,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "qnx-fonts"
+version = "1.8.3"
+dependencies = [
+ "hex",
+ "release-core",
+ "serde_json",
+ "sha2",
+ "tempfile",
+]
+
+[[package]]
 name = "quick-xml"
 version = "0.42.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1157,6 +1168,7 @@ dependencies = [
  "fs2",
  "hex",
  "libc",
+ "qnx-fonts",
  "quick-xml",
  "release-core",
  "semver",

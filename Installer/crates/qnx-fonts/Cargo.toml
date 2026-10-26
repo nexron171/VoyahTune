@@ -1,0 +1,12 @@
+[package]
+name = "qnx-fonts"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+release-core = { path = "../release-core" }
+serde_json.workspace = true
+sha2.workspace = true
+hex.workspace = true
+tempfile.workspace = true

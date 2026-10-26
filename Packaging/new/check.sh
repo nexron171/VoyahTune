@@ -3,6 +3,7 @@ set -eu
 SOURCE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 mkdir -p "$SOURCE/cache/go-build" "$SOURCE/cache/go-mod"
 for test_file in "$SOURCE"/tests/*.test.js; do node "$test_file"; done
+python3 "$SOURCE/tests/test_navigation_fonts.py"
 python3 "$SOURCE/../tests/test_acc_preferences.py"
 python3 "$SOURCE/../tests/test_stop_loader.py"
 sh "$SOURCE/../tests/test_apollo_safe_device.sh"

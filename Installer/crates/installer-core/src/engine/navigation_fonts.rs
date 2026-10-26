@@ -1,8 +1,10 @@
 use super::*;
 use release_core::vehicle_model::{VehicleModel, PROPERTIES_COMMAND};
 
-const SCRIPT: &[u8] = include_bytes!("../../../../../Packaging/new/install/navigation_fonts.py");
+#[cfg(test)]
 const RESULT_PREFIX: &str = "VOYAHTUNE_NAVIGATION_FONT_RESULT ";
+#[cfg(test)]
+use qnx_fonts::parse_result;
 
 fn supported_model(properties: &str) -> Option<&'static str> {
     match VehicleModel::detect(properties) {
@@ -10,33 +12,6 @@ fn supported_model(properties: &str) -> Option<&'static str> {
         VehicleModel::H97Y => Some("H97Y"),
         VehicleModel::Other => None,
     }
-}
-
-fn parse_result(output: &str, action: &str, model: &str) -> Result<serde_json::Value> {
-    let results: Vec<_> = output
-        .lines()
-        .filter_map(|line| line.trim().strip_prefix(RESULT_PREFIX))
-        .collect();
-    if results.len() != 1 {
-        return Err(
-            Error::new("QNX_FONT_RESULT", "Приборка не подтвердила обработку тем").detail(output),
-        );
-    }
-    let result: serde_json::Value = serde_json::from_str(results[0])?;
-    if result["ok"] != true
-        || result["action"] != action
-        || result["model"] != model
-        || !result["themes"]
-            .as_array()
-            .is_some_and(|themes| themes.len() == 3)
-    {
-        return Err(Error::new(
-            "QNX_FONT_FAILED",
-            "Не удалось обработать шрифты навигации приборки",
-        )
-        .detail(result));
-    }
-    Ok(result)
 }
 
 impl Engine {
@@ -57,8 +32,7 @@ impl Engine {
             )?;
             return Ok(());
         };
-        let output = self.adb.qnx_navigation_fonts(SCRIPT, action, model)?;
-        let result = parse_result(&output, action, model)?;
+        let result = self.adb.qnx_navigation_fonts(action, model)?;
         recovery::write_json(
             &self
                 .operation
