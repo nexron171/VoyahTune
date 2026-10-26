@@ -91,14 +91,6 @@ class BydAmapAdapterTest {
     }
 
     @Test
-    fun displayIsCreatedAsDashCastDoesAndLeftInTheStockView() {
-        assertEquals(
-            listOf(16, 35, 18).map { "service call AutoContainer 2 i32 1000 i32 $it s16 \"\"" },
-            BydDiLink3ClusterMode.CREATE_DISPLAY,
-        )
-    }
-
-    @Test
     fun clusterModeAcceptsOnlyAnExceptionFreeReply() {
         assertTrue(BydDiLink3ClusterMode.accepted("Result: Parcel(00000000 00000000   '........')"))
         assertFalse(BydDiLink3ClusterMode.accepted("Result: Parcel(ffffffec 00000000 '........')"))

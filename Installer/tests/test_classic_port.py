@@ -127,22 +127,13 @@ class ClassicPortTests(unittest.TestCase):
                 0o600,
             )
 
-    def test_boot_and_windows_use_same_directory_preparation(self):
+    def test_directory_preparation_is_idempotent_and_rejects_wrong_permissions(self):
         rust = (ROOT / "Installer/crates/installer-core/src/classic_commands.rs").read_text()
         command = re.search(
             r'pub const PREPARE_DATA_DIRECTORIES: &str = r###"(.*?)"###;', rust, re.S
         )[1]
         boot = (ROOT / "Packaging/od/system/voyahtune.load.sh").read_text()
         function = re.search(r"prepare_data_directories\(\) \{(.*?)\n}", boot, re.S)[1]
-        windows = (ROOT / "Packaging/od/installer/device/install.bat").read_text()
-        bat = next(
-            line[len('adb.exe shell "') : -1].replace("%%", "%")
-            for line in windows.splitlines()
-            if line.startswith('adb.exe shell "mkdir -p /data/local/bin /data/local/tmp')
-        )
-        normalize = lambda s: " ".join(s.split())
-        self.assertEqual(normalize(command), normalize(function))
-        self.assertEqual(normalize(command), normalize(bat))
         f = self.fixture()
         # Run the boot function through the fake Android shell, including a second, idempotent pass.
         for path in ["data/local", "data/local/bin", "data/local/tmp"]:

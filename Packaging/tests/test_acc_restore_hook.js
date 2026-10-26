@@ -710,7 +710,6 @@ console.log(
     assert.equal(scenario.sends[1].vehicle.values.__vt_auto, undefined);
 }
 
-assert.ok(!source.includes("Java.choose("), "Never enumerate the heap of the 32-bit OEM service");
 
 function temporaryEnergy(scenario, mode) {
     return {

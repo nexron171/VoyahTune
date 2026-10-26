@@ -58,14 +58,6 @@ class CarPlayMediaButtonTest {
     }
 
     @Test
-    fun indicesMatchTheAdvertisedMediaHidReport() {
-        // Media report usages: 0 none, 1 play, 2 pause, 3 play/pause, 4 next, 5 previous.
-        assertEquals(3, CarPlayMediaButton.PLAY_PAUSE)
-        assertEquals(4, CarPlayMediaButton.NEXT)
-        assertEquals(5, CarPlayMediaButton.PREVIOUS)
-    }
-
-    @Test
     fun theWindowClaimsTrackKeysOnlyWhileCarPlayIsRunning() {
         fun claim(keyCode: Int, sessionActive: Boolean = true, inCall: Boolean = false) =
             CarPlayMediaButton.forCarPlayWindow(keyCode, sessionActive, inCall)

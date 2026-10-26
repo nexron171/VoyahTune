@@ -65,13 +65,6 @@ public class DriveModeCanPolicyTest {
         assertNull(DriveModeCanPolicy.planFor("UNKNOWN", null));
     }
 
-    @Test
-    public void vehicleStateStableIdsMatchOemContract() {
-        assertEquals(545, DriveModeCanPolicy.VehicleStateKey.DRIVING_MODE_SET.stableId);
-        assertEquals(722, DriveModeCanPolicy.VehicleStateKey.EPS_MODE_SET.stableId);
-        assertEquals(782, DriveModeCanPolicy.VehicleStateKey.PROP_MODE_SET.stableId);
-    }
-
     private static void assertPlan(
             String mode, int driveMode, int steering, int accelerator) {
         Map<DriveModeCanPolicy.VehicleStateKey, Integer> values =

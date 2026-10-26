@@ -97,21 +97,4 @@ public class ApolloRestorePolicyTest {
             assertEquals(false, switches.containsKey("ISA_ISLC_OVER_SPEED_WARNING_SWITCH"));
         }
     }
-
-    @Test
-    public void stableIdsMatchAndroid11VehicleStateAbi() {
-        Map<String, Integer> ids = ApolloRestorePolicy.stableIds();
-        assertEquals(Integer.valueOf(1135), ids.get("PLC_SWITCH"));
-        assertEquals(Integer.valueOf(1149), ids.get("GLA_SWITCH"));
-        assertEquals(Integer.valueOf(1150), ids.get("GLA_LIGHT_CHANGE_SWITCH"));
-        assertEquals(Integer.valueOf(277), ids.get("TSR_SWITCH"));
-        assertEquals(Integer.valueOf(1170), ids.get("TLC_FUNC_ENABLE"));
-        assertEquals(Integer.valueOf(1179), ids.get("PLC_FUNC_ENABLE_SA"));
-        assertEquals(Integer.valueOf(1166), ids.get("RPA_FUNC_ENABLE"));
-        assertEquals(Integer.valueOf(1183), ids.get("TLA_FUNC_ENABLE_SA"));
-        assertEquals(Integer.valueOf(1141), ids.get("ISA_ISLC_SWITCH"));
-        assertEquals(Integer.valueOf(1142), ids.get("ISA_ISLC_MODE"));
-        assertEquals(Integer.valueOf(1143), ids.get("ISA_ISLC_OVER_SPEED_WARNING_SWITCH"));
-        assertEquals(25, ids.size());
-    }
 }

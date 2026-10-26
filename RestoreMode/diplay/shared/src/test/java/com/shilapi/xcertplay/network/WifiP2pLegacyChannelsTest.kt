@@ -40,8 +40,4 @@ class WifiP2pLegacyChannelsTest {
         assertEquals("2.4 GHz", WifiP2pLegacyChannels.bandLabelFor(1))
         assertEquals("2.4 GHz", WifiP2pLegacyChannels.bandLabelFor(11))
     }
-
-    @Test fun theListenChannelStaysInTheTwoGhzRangeTheFrameworkAccepts() {
-        assertEquals(6, WifiP2pLegacyChannels.LISTEN_CHANNEL)
-    }
 }

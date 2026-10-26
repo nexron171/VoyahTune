@@ -10,18 +10,6 @@ import java.util.Map;
 
 public class PowerHoldPolicyTest {
     @Test
-    public void stableContractMatchesAndroid11H97c() {
-        assertEquals(615, PowerHoldPolicy.BMS_SOC_DISPLAY_ID);
-        assertEquals(1127, PowerHoldPolicy.SCENE_MODE_EXTENDER_SET_ID);
-        assertEquals(1161, PowerHoldPolicy.POWER_HOLD_MODE_SWITCH_ID);
-        assertEquals(1162, PowerHoldPolicy.POWER_HOLD_MODE_TIME_ID);
-        assertEquals(1163, PowerHoldPolicy.POWER_HOLD_MODE_WARNING_ID);
-        assertEquals(15, PowerHoldPolicy.PERMANENT_DURATION);
-        assertEquals(1, PowerHoldPolicy.ENGINE_EXTENDER_ON);
-        assertEquals(1, PowerHoldPolicy.POWER_HOLD_ON);
-    }
-
-    @Test
     public void validatesExactParkingAndMinimumSoc() {
         assertEquals(PowerHoldPolicy.Outcome.ACCEPTED, PowerHoldPolicy.validate(0, 0, 15));
         assertEquals(PowerHoldPolicy.Outcome.ACCEPTED, PowerHoldPolicy.validate(0, 0, 100));

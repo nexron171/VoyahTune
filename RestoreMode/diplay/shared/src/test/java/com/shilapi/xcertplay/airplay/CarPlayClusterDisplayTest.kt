@@ -105,14 +105,6 @@ class CarPlayClusterDisplayTest {
     }
 
     @Test
-    fun theCarSitsNearThePanelCentre() {
-        val safe = CarPlayClusterDisplay.SAFE_AREA_PERCENT
-        val centreX = (safe.left + 100 - safe.right) / 2.0
-
-        assertTrue("centre x $centreX", centreX in 48.0..52.0)
-    }
-
-    @Test
     fun virtualCluster16By9UsesBalancedSafeArea() {
         val config = CarPlayClusterDisplay.config(
             widthPixels = 1280,

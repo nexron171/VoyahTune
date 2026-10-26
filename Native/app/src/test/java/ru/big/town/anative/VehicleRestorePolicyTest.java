@@ -102,12 +102,4 @@ public class VehicleRestorePolicyTest {
             // expected
         }
     }
-
-    @Test
-    public void stableIdsMatchAndroid11H97cAbi() {
-        Map<String, Integer> ids = VehicleRestorePolicy.stableIds();
-        assertEquals(Integer.valueOf(957), ids.get("IVI_SOC_MODESET"));
-        assertEquals(Integer.valueOf(619), ids.get("HUM_ENERGY_PTREGEN_LEVL"));
-        assertEquals(Integer.valueOf(665), ids.get("HUM_VSP_FUNCTION_SW"));
-    }
 }

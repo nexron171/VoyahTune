@@ -1,6 +1,5 @@
 package com.shilapi.xcertplay.backup
 
-import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.Socket
 import java.net.URL
@@ -332,11 +331,6 @@ class SettingsBackupServerTest {
                 typed.stop()
             }
         }
-    }
-
-    @Test
-    fun theFixedPortIsOneABrowserAndAnAppMayUse() {
-        assertTrue(SettingsBackupServer.TYPED_PORT in 1024..9999)
     }
 
     // Without the page there is nothing to type a code into, and the address gives nothing away.

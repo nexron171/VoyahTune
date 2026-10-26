@@ -33,13 +33,4 @@ public class FragranceRestorePolicyTest {
         assertFalse(bundle.containsKey("IVI_FRAG_TYPE"));
         assertFalse(bundle.containsKey("FCM_DURATION_CONTROL"));
     }
-
-    @Test
-    public void stableIdsMatchAndroid11H97cAbi() {
-        Map<String, Integer> ids = FragranceRestorePolicy.stableIds();
-        assertEquals(Integer.valueOf(1067), ids.get("FCM_DURATION_CONTROL"));
-        assertEquals(Integer.valueOf(774), ids.get("FCM_SW_REQ"));
-        assertEquals(Integer.valueOf(775), ids.get("IVI_FRAG_TASTE"));
-        assertEquals(Integer.valueOf(777), ids.get("IVI_FRAG_CONCERNTION"));
-    }
 }

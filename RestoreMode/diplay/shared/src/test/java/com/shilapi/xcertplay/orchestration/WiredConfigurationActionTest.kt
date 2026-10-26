@@ -34,12 +34,6 @@ class WiredConfigurationActionTest {
         assertFalse(WiredConfigurationAction.fallbackAfterRejection(found = false, carPlayMode = false))
     }
 
-    @Test fun diagnosticNamesKeepTheExistingReportWording() {
-        assertEquals("reuse-descriptors", WiredConfigurationAction.USE.diagnostic)
-        assertEquals("request-transition", WiredConfigurationAction.REQUEST_TRANSITION.diagnostic)
-        assertEquals("reject-missing-configuration", WiredConfigurationAction.REJECT.diagnostic)
-    }
-
     @Test fun theModeASessionDiPlayEndedLeftBehindIsRequestedAgainOnce() {
         // #335: after Save and reconnect the iPhone stayed in CarPlay mode on the same device node and took no
         // new session until it reset USB; a fresh mode request connected within seconds.

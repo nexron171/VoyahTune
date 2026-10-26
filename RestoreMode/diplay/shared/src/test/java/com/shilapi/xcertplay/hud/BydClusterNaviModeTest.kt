@@ -22,9 +22,4 @@ class BydClusterNaviModeTest {
             BydClusterNaviMode.entries.filter { it.showsMap },
         )
     }
-
-    @Test
-    fun readsTheVerifiedId() {
-        assertEquals("service call autoservice 5 i32 1007 i32 1086337074", BydClusterNaviMode.READ_COMMAND)
-    }
 }

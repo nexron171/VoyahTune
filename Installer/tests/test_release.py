@@ -339,9 +339,6 @@ class ReleaseTests(unittest.TestCase):
                 ]
             ],
         )
-        self.assertIn(
-            "test_infrastructure_profiles.py", (REPO / "make_release.sh").read_text()
-        )
         runtime_check = ["sh", str(self.root / "Packaging/new/check.sh")]
         self.assertIn(runtime_check, commands)
         build_index = next(

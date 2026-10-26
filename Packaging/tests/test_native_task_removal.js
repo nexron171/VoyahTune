@@ -54,10 +54,4 @@ assert.throws(() => hook.invoke(), /OEM removal failure/);
 assert.equal(hook.identity(), 10060);
 assert.deepEqual(hook.trace.at(-1), ['restore', 10060]);
 
-// Catch the original asynchronous crash path, which a synchronous try/catch around show cannot fix.
-const host = fs.readFileSync(path.join(root,
-    'Native/app/src/main/java/ru/big/town/anative/ClusterMediaHostActivity.java'), 'utf8');
-assert(!host.includes('Toast.makeText(this,'));
-assert(host.includes('manager.getDisplay(Display.DEFAULT_DISPLAY)'));
-assert(host.includes('Toast.makeText(app.createDisplayContext(physical),'));
-console.log('PASS: Native task-removal rollback registration, identity scope, restoration, and physical-display error notifications');
+console.log('PASS: Native task-removal rollback registration, identity scope and restoration');

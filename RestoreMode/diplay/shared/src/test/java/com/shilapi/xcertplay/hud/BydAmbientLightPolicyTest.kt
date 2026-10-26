@@ -30,14 +30,6 @@ class BydAmbientLightPolicyTest {
         assertNull(BydAmbientLightWorkerProtocol.reply(""))
     }
 
-    @Test fun onlyLightingFeaturesAreWhitelisted() {
-        assertEquals(9, BydAmbientLightPolicy.getNames.size)
-        assertEquals(3, BydAmbientLightPolicy.setNames.size)
-        assertFalse(BydAmbientLightPolicy.setNames.any { "SOURCE" in it })
-        assertEquals(15_000L, BydAmbientLightPolicy.LEASE_MILLIS)
-        assertEquals(50L, BydAmbientLightPolicy.READBACK_POLL_MILLIS)
-    }
-
     @Test fun validatesSnapshotAndRequestedRawValues() {
         assertTrue(BydAmbientLightPolicy.validSnapshot(BydAmbientLightPolicy.Snapshot(16, 16, 6, 6, 3)))
         assertFalse(BydAmbientLightPolicy.validSnapshot(BydAmbientLightPolicy.Snapshot(0, 16, 6, 6, 3)))

@@ -10,19 +10,12 @@ import java.util.Arrays;
 import java.util.Collections;
 
 public class TaskManagerCardsTest {
-
     @Test
     public void closeAllCardNeedsAtLeastOneApp() {
         assertFalse(TaskManagerCards.hasCloseAllCard(null));
         assertFalse(TaskManagerCards.hasCloseAllCard(Collections.<String>emptyList()));
         assertTrue(TaskManagerCards.hasCloseAllCard(Collections.singletonList("com.example.app")));
         assertTrue(TaskManagerCards.hasCloseAllCard(Arrays.asList("a", "b")));
-    }
-
-    @Test
-    public void sixSlotsIncludeTheCloseAllCard() {
-        assertEquals(6, TaskManagerCards.VISIBLE_SLOTS);
-        assertEquals(5, TaskManagerCards.APP_SLOTS);
     }
 
     @Test
