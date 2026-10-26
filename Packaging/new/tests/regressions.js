@@ -55,7 +55,10 @@ for (const fixture of fixtures) {
         testModule._compile(source, filename);
         return testModule.exports;
     }
-    evaluate(path.join(fixtureDirectory, fixture));
+    const checks = evaluate(path.join(fixtureDirectory, fixture));
+    if (fixture === "test_cluster_navigation.js") {
+        checks.runClusterNavigationTests({meters: "м", kilometers: "км"});
+    }
     assert.ok(reads.size > 0, "fixture did not evaluate a new production source: " + fixture);
     console.log("PASS unified fixture: " + fixture);
 }

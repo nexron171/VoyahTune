@@ -7,9 +7,6 @@ const vm = require('node:vm');
 
 const entry = 'function installClusterNavigation() {';
 const profiles = ['od/inject/app_client.js', 'pi/inject/clusternavi.js'];
-const scripts = profiles.map(file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8'));
-const hooks = scripts.map(source => source.slice(source.indexOf(entry)));
-assert.equal(hooks[0], hooks[1], 'OD and PI must apply the same maneuver policy');
 
 function loadHook(source, {setting = null, late = false, formatter = true, writer = true} = {}) {
     const calls = [];
@@ -147,51 +144,63 @@ function assertStopped(info) {
     assert.equal(info.DestName, '');
 }
 
-for (const source of hooks) {
-    const active = {GuideState: 'GUIDING', TbtIconId: 7, NextDistance: 250, TurnRoadName: 'Road'};
-    const runtime = loadHook(source);
-    runtime.send(active);
-    assert.equal(runtime.calls[0], active, 'default-enabled must preserve the complete OEM record');
-    runtime.change('0');
-    assertStopped(runtime.calls[1]);
-    runtime.send(active);
-    assertStopped(runtime.calls[2]);
-    assert.equal(active.GuideState, 'GUIDING', 'the source record must not be mutated');
-    runtime.change('1');
-    assert.equal(runtime.calls.length, 3, 'enabling must not replay an old turn');
-    runtime.send(active);
-    assert.equal(runtime.calls[3], active);
-    runtime.unrelatedTransaction();
-    runtime.unrelatedTransaction();
-    assert.equal(runtime.retained(), 1, 'Binder calls must reuse the captured service');
-    runtime.change('0', false);
-    runtime.change('1', false);
-    runtime.flush();
-    assert.equal(runtime.calls.length, 4, 'a queued clear must not erase newly enabled guidance');
+function runClusterNavigationTests(units) {
+    const scripts = profiles.map(file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8'));
+    const hooks = scripts.map(source => source.slice(source.indexOf(entry)));
+    assert.equal(hooks[0], hooks[1], 'OD and PI must apply the same maneuver policy');
 
-    const disabled = loadHook(source, {setting: '0'});
-    assertStopped(disabled.calls[0]);
-    disabled.send(active);
-    assertStopped(disabled.calls[1]);
+    for (const source of hooks) {
+        const active = {GuideState: 'GUIDING', TbtIconId: 7, NextDistance: 250, TurnRoadName: 'Road'};
+        const runtime = loadHook(source);
+        runtime.send(active);
+        assert.equal(runtime.calls[0], active, 'default-enabled must preserve the complete OEM record');
+        runtime.change('0');
+        assertStopped(runtime.calls[1]);
+        runtime.send(active);
+        assertStopped(runtime.calls[2]);
+        assert.equal(active.GuideState, 'GUIDING', 'the source record must not be mutated');
+        runtime.change('1');
+        assert.equal(runtime.calls.length, 3, 'enabling must not replay an old turn');
+        runtime.send(active);
+        assert.equal(runtime.calls[3], active);
+        runtime.unrelatedTransaction();
+        runtime.unrelatedTransaction();
+        assert.equal(runtime.retained(), 1, 'Binder calls must reuse the captured service');
+        runtime.change('0', false);
+        runtime.change('1', false);
+        runtime.flush();
+        assert.equal(runtime.calls.length, 4, 'a queued clear must not erase newly enabled guidance');
 
-    const late = loadHook(source, {setting: '0', late: true});
-    late.transact(active);
-    assert.equal(late.calls.length, 2);
-    late.calls.forEach(assertStopped);
-    late.change('1');
-    late.transact(active);
-    assert.equal(late.calls[2], active);
+        const disabled = loadHook(source, {setting: '0'});
+        assertStopped(disabled.calls[0]);
+        disabled.send(active);
+        assertStopped(disabled.calls[1]);
 
-    for (const [meters, units] of [[0, 'm'], [999, 'm'], [1000, 'km'], [1500, 'km']]) {
-        assert.equal(runtime.distanceUnit.implementation(null, meters), units);
+        const late = loadHook(source, {setting: '0', late: true});
+        late.transact(active);
+        assert.equal(late.calls.length, 2);
+        late.calls.forEach(assertStopped);
+        late.change('1');
+        late.transact(active);
+        assert.equal(late.calls[2], active);
+
+        for (const [meters, unit] of [[0, units.meters], [999, units.meters], [1000, units.kilometers], [1500, units.kilometers]]) {
+            assert.equal(runtime.distanceUnit.implementation(null, meters), unit);
+        }
+        const noFormatter = loadHook(source, {formatter: false, setting: '0'});
+        noFormatter.send(active);
+        noFormatter.calls.forEach(assertStopped);
+        assert(noFormatter.messages.includes('[cluster-navigation] hook ready v1'));
+        const noWriter = loadHook(source, {writer: false});
+        assert.equal(noWriter.distanceUnit.implementation(null, 1000), units.kilometers);
+        assert(noWriter.messages.some(message => message.includes('[cluster-navigation] hook unavailable')));
     }
-    const noFormatter = loadHook(source, {formatter: false, setting: '0'});
-    noFormatter.send(active);
-    noFormatter.calls.forEach(assertStopped);
-    assert(noFormatter.messages.includes('[cluster-navigation] hook ready v1'));
-    const noWriter = loadHook(source, {writer: false});
-    assert.equal(noWriter.distanceUnit.implementation(null, 1000), 'km');
-    assert(noWriter.messages.some(message => message.includes('[cluster-navigation] hook unavailable')));
+
+    console.log('Cluster maneuvers: defaults, disable/clear, fresh enable, late Binder, units and missing APIs passed');
 }
 
-console.log('OD/PI cluster maneuvers: defaults, disable/clear, fresh enable, late Binder, units and missing APIs passed');
+module.exports = {runClusterNavigationTests};
+
+if (require.main === module) {
+    runClusterNavigationTests({meters: 'm', kilometers: 'km'});
+}
