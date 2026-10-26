@@ -81,5 +81,5 @@ object CarPlaySettingsAccess {
     }
 
     @JvmStatic
-    fun disconnect(completion: Runnable) = CarPlayBackgroundSession.stop { completion.run() }
+    fun disconnect(completion: Runnable) = CarPlaySessionHosts.disconnect { completion.run() }
 }

@@ -2,8 +2,10 @@ package com.shilapi.xcertplay
 
 import android.app.Activity
 import android.app.ActivityManager
+import android.app.ActivityOptions
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.view.View
 
 /** Lets the host own home styling while DiPlay owns connection and session behavior. */
@@ -34,6 +36,19 @@ object CarPlayHomeUi {
     @JvmStatic
     fun install(factory: Factory) {
         this.factory = factory
+    }
+
+    @JvmStatic
+    fun exitToHome(activity: Activity) {
+        val displayId = activity.window.decorView.display?.displayId
+            ?: activity.windowManager.defaultDisplay.displayId
+        val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val options = ActivityOptions.makeBasic().apply {
+            launchDisplayId = VoyahCarPlayIntegration.physicalDisplayId(displayId)
+        }
+        runCatching { activity.startActivity(home, options.toBundle()) }
+        finishActivities(activity)
     }
 
     @JvmStatic

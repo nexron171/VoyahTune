@@ -138,6 +138,9 @@ public class SetModesService extends Service {
                 case ru.big.town.common.CarPlayVehicleProtocol.OPEN_PROJECTION:
                     openCarPlayProjection(msg);
                     break;
+                case ru.big.town.common.CarPlayVehicleProtocol.CLOSE_PROJECTION:
+                    closeCarPlayProjection(msg);
+                    break;
                 case ru.big.town.common.CarPlayVehicleProtocol.WATCH:
                 case ru.big.town.common.CarPlayVehicleProtocol.UNWATCH:
                 case ru.big.town.common.CarPlayVehicleProtocol.NAVIGATION:
@@ -1047,6 +1050,18 @@ public class SetModesService extends Service {
         } catch (RuntimeException denied) {
             Log.e(TAG, "CarPlay projection launch failed display=" + displayId, denied);
         }
+        replyCarPlayProjection(request, displayId, launched);
+    }
+
+    private void closeCarPlayProjection(Message request) {
+        int displayId =
+                request.getData().getInt(ru.big.town.common.CarPlayVehicleProtocol.DISPLAY_ID, -1);
+        boolean closed = ownsCarPlayDisplay(displayId);
+        if (closed) stopCarPlayHosts(this);
+        replyCarPlayProjection(request, displayId, closed);
+    }
+
+    private void replyCarPlayProjection(Message request, int displayId, boolean launched) {
         if (request.replyTo == null) return;
         Message reply =
                 Message.obtain(null, ru.big.town.common.CarPlayVehicleProtocol.PROJECTION_RESULT);
@@ -1875,7 +1890,7 @@ public class SetModesService extends Service {
 
     static void stopCarPlayHosts(Context context) {
         notifyEmbeddedTaskLeft(context, CarPlayTarget.ID, true);
-        SplitHostActivity.closeFullscreenCarPlayHostExcept(-1);
+        SplitHostActivity.refreshCarPlayWindowMode();
     }
 
     static void notifyEmbeddedTaskLeft(Context context, String pkg, boolean closed) {

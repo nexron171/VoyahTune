@@ -165,6 +165,20 @@ class CarPlayHostActivity : ComponentActivity() {
     private var connectionPanel: View? = null
     private var connectionInstructionsView: TextView? = null
     private var connectionHelpView: TextView? = null
+    private var phoneCountdownView: TextView? = null
+    private var phoneSelectionButton: View? = null
+    private var phoneSelectionDialog: AlertDialog? = null
+    internal var connectionPhones: () -> List<CarPlayPhone> = { pairedCarPlayPhones(this) }
+    private val phoneSelection by lazy {
+        CarPlayPhoneSelection(
+            mainHandler,
+            { connectionPhones() },
+            { DiPlayPreferences.phoneAddress(this) },
+            { DiPlayPreferences.savePhone(this, it.address, it.name) },
+            ::showPhoneSelection,
+            ::maybeStartCarPlay,
+        )
+    }
     private var wifiRecoveryButton: View? = null
     private var reconnectAttempts = 0
     private val siriKey = WheelSiriKey()
@@ -825,6 +839,7 @@ class CarPlayHostActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        CarPlaySessionHosts.register(this)
         if (!CarPlaySettingsAccess.isEnabled(this)) {
             finish()
             return
@@ -842,6 +857,8 @@ class CarPlayHostActivity : ComponentActivity() {
         MapMirrors.onChanged = mirrorsChanged
         languagePreferenceAtCreate = AppLocale.preference(this)
         if (isIphoneUsbAttachment(intent)) {
+            phoneSelection.bypass()
+            phoneSelectionDialog?.dismiss()
             AirPlayPersistence.saveWirelessEnabled(this, false)
         }
         if (runCatching { DiPlayBootstrap.ensure(this, AirPlayPersistence.loadMfiTarget(this)) }.isFailure) {
@@ -1136,6 +1153,8 @@ class CarPlayHostActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         if (isIphoneUsbAttachment(intent)) {
+            phoneSelection.bypass()
+            phoneSelectionDialog?.dismiss()
             if (wirelessEnabled) {
                 if (menuOpen) cancelSettingsEdits()
                 AirPlayPersistence.saveWirelessEnabled(this, false)
@@ -1183,6 +1202,7 @@ class CarPlayHostActivity : ComponentActivity() {
             finish()
             return
         }
+        phoneSelection.resume()
         WheelKeyService.restoreIfNeeded(this)
         hostAppearanceResumed = true
         reloadCarPlayNightSettings()
@@ -1829,6 +1849,7 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     override fun onPause() {
+        phoneSelection.pause()
         cancelTemporarySystemBars()
         hostAppearanceResumed = false
         updateCallPopupGuard()
@@ -1937,6 +1958,10 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        CarPlaySessionHosts.unregister(this)
+        phoneSelection.close()
+        phoneSelectionDialog?.dismiss()
+        phoneSelectionDialog = null
         nightModeObserverRemoval?.invoke()
         nightModeObserverRemoval = null
         runCatching { unregisterReceiver(bluetoothOnReceiver) }
@@ -2050,6 +2075,22 @@ class CarPlayHostActivity : ComponentActivity() {
             visibility = View.GONE
         }
         panel.addView(help)
+        val phoneCountdown = TextView(this).apply {
+            gravity = Gravity.CENTER
+            visibility = View.GONE
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+            phoneCountdownView = this
+        }
+        panel.addView(phoneCountdown)
+        val choosePhone = DiPlayButton(this).apply {
+            text = getString(R.string.choose_your_iphone)
+            visibility = View.GONE
+            setOnClickListener { chooseConnectionPhone() }
+            phoneSelectionButton = this
+        }
+        panel.addView(choosePhone, LinearLayout.LayoutParams(dp(300), dp(64)).apply {
+            bottomMargin = dp(12)
+        })
         val recovery = DiPlayButton(this).apply {
             text = getString(R.string.reset_carplay_wi_fi)
             visibility = View.GONE
@@ -2085,7 +2126,7 @@ class CarPlayHostActivity : ComponentActivity() {
                 back.isEnabled = false
                 startupRetryStopped = true
                 startupRetryButton?.isEnabled = false
-                shutdown(false, "connection cancelled")
+                CarPlaySessionHosts.disconnect(this@CarPlayHostActivity)
                 CarPlayHomeUi.finishActivities(this@CarPlayHostActivity)
             }
         }
@@ -2111,12 +2152,14 @@ class CarPlayHostActivity : ComponentActivity() {
             stage.setTextColor(colors.text)
             instructions.setTextColor(colors.secondary)
             help.setTextColor(colors.secondary)
+            phoneCountdown.setTextColor(colors.text)
             gestureHint.setTextColor(colors.secondary)
             val buttonPalette = DiPlayPalette.of(waitingNight)
             back.style(DiPlayButtonKind.PRIMARY, buttonPalette, overlay = false)
             retry.style(DiPlayButtonKind.SECONDARY, buttonPalette, overlay = false)
             recovery.style(DiPlayButtonKind.SECONDARY, buttonPalette, overlay = false)
             cancel.style(DiPlayButtonKind.PRIMARY, buttonPalette, overlay = false)
+            choosePhone.style(DiPlayButtonKind.SECONDARY, buttonPalette, overlay = false)
         }
         paintWaitingScreen()
         viewport.addView(panel, FrameLayout.LayoutParams(-1, -2, Gravity.CENTER))
@@ -2141,7 +2184,7 @@ class CarPlayHostActivity : ComponentActivity() {
             actions.layoutParams = actions.layoutParams.apply {
                 width = minOf(dp(612), availableWidth.coerceAtLeast(dp(48)))
             }
-            for (button in listOf(recovery, retry)) {
+            for (button in listOf(recovery, retry, choosePhone)) {
                 if (button.layoutParams.width != buttonWidth) {
                     button.layoutParams = button.layoutParams.apply { width = buttonWidth }
                 }
@@ -2158,7 +2201,9 @@ class CarPlayHostActivity : ComponentActivity() {
             instructions.setPadding(0, spacing(8f, 14f), 0, spacing(12f, 24f))
             help.textSize = size(15f, 17f)
             help.setPadding(0, spacing(8f, 14f), 0, spacing(12f, 24f))
-            for (button in listOf(back, cancel, recovery, retry)) {
+            phoneCountdown.textSize = size(17f, 20f)
+            phoneCountdown.setPadding(0, 0, 0, spacing(8f, 12f))
+            for (button in listOf(back, cancel, recovery, retry, choosePhone)) {
                 button.textSize = size(17f, 18f)
                 button.layoutParams = button.layoutParams.apply { this.height = spacing(50f, 64f) }
             }
@@ -5514,7 +5559,7 @@ class CarPlayHostActivity : ComponentActivity() {
             this, snapshot.display) { completion ->
             runOnUiThread {
                 shutdown(false, "DiPlay disconnect", completion)
-                finish()
+                finishAndRemoveTask()
             }
         }
         callPopupSessionReady = CarPlayBackgroundSession.callPopupReady
@@ -5683,7 +5728,7 @@ class CarPlayHostActivity : ComponentActivity() {
         CarPlayBackgroundSession.store(next, renderer, size.width, size.height, this, display) { completion ->
             runOnUiThread {
                 shutdown(terminateProcess = false, reason = "DiPlay disconnect", completion = completion)
-                finish()
+                finishAndRemoveTask()
             }
         }
         try {
@@ -5973,6 +6018,40 @@ class CarPlayHostActivity : ComponentActivity() {
         AirPlayPersistence.saveMaximumDetectedDisplay(this, width, height)
     }
 
+    private fun showPhoneSelection(state: CarPlayPhoneSelection.State?) {
+        phoneCountdownView?.visibility = if (state == null) View.GONE else View.VISIBLE
+        phoneSelectionButton?.visibility = if (state == null) View.GONE else View.VISIBLE
+        phoneSelectionButton?.isEnabled = state?.phones?.isNotEmpty() == true
+        phoneCountdownView?.text = when {
+            state?.selected == null -> getString(R.string.voyah_carplay_no_paired_phones)
+            state.seconds == null -> getString(R.string.voyah_carplay_selected_phone, state.selected.name)
+            else -> getString(R.string.voyah_carplay_phone_countdown, state.selected.name, state.seconds)
+        }
+    }
+
+    private fun chooseConnectionPhone() {
+        val state = phoneSelection.beginChoice() ?: return
+        val devices = state.phones
+        val labels = devices.map { phone ->
+            if (devices.count { it.name == phone.name } > 1) "${phone.name} · ${phone.address.takeLast(5)}"
+            else phone.name
+        }.toTypedArray()
+        phoneSelectionDialog = AlertDialog.Builder(this, R.style.Theme_Xcertplay_Dialog_Dark)
+            .setTitle(R.string.choose_your_iphone)
+            .setSingleChoiceItems(labels, devices.indexOfFirst { it.address == state.selected?.address }) { dialog, index ->
+                phoneSelection.choose(devices[index].address)
+                dialog.dismiss()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .create().also { dialog ->
+                dialog.setOnDismissListener {
+                    phoneSelectionDialog = null
+                    phoneSelection.endChoice()
+                }
+                dialog.show()
+            }
+    }
+
     private fun maybeStartCarPlay() {
         if (shuttingDown.get() || isFinishing || isDestroyed) return
         if (CarPlayBackgroundSession.hasSession() && !CarPlayBackgroundSession.isOwner(this)) {
@@ -6006,6 +6085,8 @@ class CarPlayHostActivity : ComponentActivity() {
         ) {
             return
         }
+        if (wirelessEnabled && phoneSelection.holdsConnection()) return
+        if (!wirelessEnabled) phoneSelection.bypass()
         // The first session must already carry the cluster stream; a later route reconnects CarPlay.
         if (clusterLaunchGate.holdsCarPlayStart(SystemClock.uptimeMillis(), ClusterActivityOutput.routeSettling())) {
             carPlayStartHeldForCluster = true
@@ -6302,8 +6383,21 @@ class CarPlayHostActivity : ComponentActivity() {
         shutdown(terminateProcess = true, reason = "settings exit application")
     }
 
+    internal fun finishDisconnectedSession() {
+        if (!shuttingDown.get() && !CarPlayBackgroundSession.isOwner(this)) {
+            // An adopted controller belongs to another host, which performs its teardown.
+            controller = null
+            sink = null
+        }
+        shutdown(false, "explicit disconnect")
+        finishAndRemoveTask()
+    }
+
     private fun shutdown(terminateProcess: Boolean, reason: String, completion: () -> Unit = {}) {
         if (!shuttingDown.compareAndSet(false, true)) { completion(); return }
+        phoneSelection.close()
+        phoneSelectionDialog?.dismiss()
+        phoneSelectionDialog = null
         callPopupSessionReady = false
         updateCallPopupGuard()
         resetSidePanel()
@@ -6315,7 +6409,7 @@ class CarPlayHostActivity : ComponentActivity() {
         val oldController = controller
         val oldSink = sink
         CarPlayMediaKeys.detach(oldController)
-        CarPlayBackgroundSession.clear(oldController)
+        if (CarPlayBackgroundSession.isOwner(this)) CarPlayBackgroundSession.clear(oldController)
         controller = null
         oldSink?.let(retiringSinks::add)
         sink = null

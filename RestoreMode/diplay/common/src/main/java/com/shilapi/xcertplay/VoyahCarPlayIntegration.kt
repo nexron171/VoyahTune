@@ -13,6 +13,8 @@ object VoyahCarPlayIntegration {
         fun audioFocus(stream: Int) {}
         fun openProjection(activity: Activity, displayId: Int, result: ProjectionResult): Boolean = false
         fun openDashboard(displayId: Int): Boolean = false
+        fun physicalDisplayId(displayId: Int): Int = displayId
+        fun closeProjection(displayId: Int) {}
     }
 
     private var host: Host? = null
@@ -32,6 +34,9 @@ object VoyahCarPlayIntegration {
     internal fun openProjection(activity: Activity, displayId: Int, result: ProjectionResult): Boolean =
         host?.openProjection(activity, displayId, result) == true
     internal fun openDashboard(displayId: Int): Boolean = host?.openDashboard(displayId) == true
+    internal fun physicalDisplayId(displayId: Int): Int =
+        (host?.physicalDisplayId(displayId) ?: displayId).takeIf { it in 0..1 } ?: 0
+    internal fun closeProjection(displayId: Int) { host?.closeProjection(displayId) }
 
     @JvmStatic fun update(kmh: Int, gear: Int, elapsed: Long, reason: Int) {
         speed.update(kmh, gear, elapsed)

@@ -959,7 +959,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             override fun back() { onBackPressedDispatcher.onBackPressed() }
             override fun choosePhone() { this@DiPlayActivity.choosePhone() }
             override fun disconnect() {
-                CarPlayBackgroundSession.stop { runOnUiThread { refreshStatus() } }
+                CarPlaySettingsAccess.disconnect { refreshStatus() }
             }
             override fun setAutoConnect(enabled: Boolean) {
                 DiPlayPreferences.saveAutoConnect(this@DiPlayActivity, enabled)
@@ -1047,7 +1047,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         card.addView(homeButton(getString(R.string.choose_iphone), false) { choosePhone() }, matchButton(if (compact) CONTROL_GAP_DP else 16, if (compact) 46 else 56))
         disconnectButton = homeButton(getString(R.string.disconnect), false) {
             disconnectButton?.isEnabled = false
-            CarPlayBackgroundSession.stop { runOnUiThread { refreshStatus() } }
+            CarPlaySettingsAccess.disconnect { refreshStatus() }
         }.apply { visibility = View.GONE }
         card.addView(disconnectButton, matchButton(if (compact) CONTROL_GAP_DP else 16, if (compact) 46 else 56))
         val right = column().apply { gravity = Gravity.CENTER_HORIZONTAL }

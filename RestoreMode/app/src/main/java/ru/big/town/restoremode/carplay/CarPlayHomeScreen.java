@@ -124,7 +124,7 @@ public final class CarPlayHomeScreen implements CarPlayHomeUi.Screen {
         TextView exit =
                 secondary(
                         R.string.carplay_home_exit,
-                        () -> CarPlayHomeUi.finishActivities((Activity) context));
+                        () -> CarPlayHomeUi.exitToHome((Activity) context));
         LinearLayout.LayoutParams exitParams = new LinearLayout.LayoutParams(-2, -2);
         exitParams.setMarginStart(dp(gap));
         footer.addView(exit, exitParams);

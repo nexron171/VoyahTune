@@ -305,6 +305,16 @@ public final class CarPlayVehicleBridge
     }
 
     @Override
+    public int physicalDisplayId(int displayId) {
+        return CarPlayDashboardLauncher.targetDisplayId(displayId);
+    }
+
+    @Override
+    public void closeProjection(int displayId) {
+        CarPlayProjectionClient.close(context, displayId);
+    }
+
+    @Override
     public void start() {
         if (started) return;
         started = true;
