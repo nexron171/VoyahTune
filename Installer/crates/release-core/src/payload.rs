@@ -8,12 +8,6 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-pub(crate) mod validation;
-use validation::ValidationTarget;
-
-#[cfg(test)]
-mod ota_tests;
-
 pub const MANIFEST_SCHEMA: u32 = 4;
 
 pub fn validate_schema(schema: u32) -> Result<()> {
@@ -63,7 +57,6 @@ pub const RUNTIME_NAMES: &[&str] = &[
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BuildMetadata {
-    #[serde(default)]
     pub infrastructure: crate::infrastructure::Infrastructure,
     #[serde(default)]
     pub recipe_sha256: Option<String>,
@@ -88,7 +81,6 @@ pub struct Artifact {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Manifest {
-    #[serde(default)]
     pub infrastructure: crate::infrastructure::Infrastructure,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub removal_only: bool,
@@ -110,53 +102,13 @@ pub struct Payload {
 }
 
 impl Payload {
-    pub fn restoremode_ota(&self) -> bool {
-        self.manifest.infrastructure.uses_restore_ui()
-            && self
-                .manifest
-                .requirements
-                .as_ref()
-                .is_some_and(|requirements| {
-                    requirements
-                        .required_capabilities
-                        .iter()
-                        .any(|capability| capability == "restoremode-ota-ui-v1")
-                })
-    }
-
-    pub fn require_infrastructure(
-        &self,
-        expected: crate::infrastructure::Infrastructure,
-    ) -> Result<()> {
-        self.manifest.infrastructure.require(expected)
-    }
-
     pub fn open(root: &Path) -> Result<Self> {
         let payload = Self::load(root)?;
         payload.verify()?;
         Ok(payload)
     }
 
-    pub fn open_for_od_ota(root: &Path) -> Result<Self> {
-        Self::open_for_ota(root, crate::infrastructure::Infrastructure::Od)
-    }
-
-    pub fn open_for_ota(
-        root: &Path,
-        infrastructure: crate::infrastructure::Infrastructure,
-    ) -> Result<Self> {
-        let payload = Self::load_for_target(root, ValidationTarget::OdOta)?;
-        payload.require_infrastructure(infrastructure)?;
-        payload.verify()?;
-        Ok(payload)
-    }
-
-    /// Installation uses classic per-file checks; full integrity verification is explicit.
     pub fn load(root: &Path) -> Result<Self> {
-        Self::load_for_target(root, ValidationTarget::Installer)
-    }
-
-    fn load_for_target(root: &Path, target: ValidationTarget) -> Result<Self> {
         let root = root.canonicalize()?;
         let value: serde_json::Value =
             serde_json::from_reader(File::open(root.join("manifest.json"))?)?;
@@ -164,26 +116,13 @@ impl Payload {
             .as_u64()
             .and_then(|schema| u32::try_from(schema).ok())
             .ok_or_else(|| Error::new("PAYLOAD_SCHEMA", "Нет допустимой версии формата релиза"))?;
-        target.validate_schema(schema)?;
+        validate_schema(schema)?;
         if let Some(requirements) = value.get("requirements") {
-            target.validate_requirements(&serde_json::from_value(requirements.clone())?)?;
+            serde_json::from_value::<crate::compatibility::Requirements>(requirements.clone())?
+                .validate()?;
         }
-        let explicit_infrastructure = value.get("infrastructure").is_some();
         let manifest: Manifest = serde_json::from_value(value)?;
-        if !manifest.removal_only
-            && manifest.requirements.as_ref().is_some_and(|requirements| {
-                requirements
-                    .required_capabilities
-                    .iter()
-                    .any(|capability| capability == "infrastructure-v1")
-            })
-        {
-            if !explicit_infrastructure {
-                return Err(Error::new(
-                    "INFRASTRUCTURE_MISSING",
-                    "Нет инфраструктуры релиза",
-                ));
-            }
+        if !manifest.removal_only {
             manifest
                 .infrastructure
                 .require_version(&manifest.release_version)?;
@@ -204,7 +143,7 @@ impl Payload {
                     "Нет требований к версии установщика",
                 )
             })?;
-            target.validate_requirements(requirements)?;
+            requirements.validate()?;
             if manifest.recipe.schema != 3 {
                 return Err(Error::new(
                     "RECIPE_INVALID",
@@ -275,28 +214,23 @@ impl Payload {
 
     pub fn verify(&self) -> Result<()> {
         self.manifest.recipe.validate()?;
-        if self.manifest.infrastructure == crate::infrastructure::Infrastructure::Unified
-            && !self
-                .manifest
-                .requirements
-                .as_ref()
-                .is_some_and(|requirements| {
-                    requirements
-                        .required_capabilities
-                        .iter()
-                        .any(|capability| capability == "unified-runtime-v1")
-                })
+        if !self
+            .manifest
+            .requirements
+            .as_ref()
+            .is_some_and(|requirements| {
+                requirements
+                    .required_capabilities
+                    .iter()
+                    .any(|capability| capability == "unified-runtime-v1")
+            })
         {
             return Err(Error::new(
                 "REQUIREMENTS_INVALID",
                 "Общий payload требует unified-runtime-v1",
             ));
         }
-        let loader = match self.manifest.infrastructure {
-            crate::infrastructure::Infrastructure::Unified => "voyahtune-new-voyahtune-loader",
-            crate::infrastructure::Infrastructure::Pi => "loaderFrida",
-            crate::infrastructure::Infrastructure::Od => "load.bin",
-        };
+        let loader = "voyahtune-new-voyahtune-loader";
         if !self
             .manifest
             .recipe
@@ -379,15 +313,7 @@ impl Payload {
                 }
             }
             if metadata.schema != 3
-                || metadata.infrastructure
-                    != if self.manifest.infrastructure
-                        == crate::infrastructure::Infrastructure::Unified
-                    {
-                        // Shared APKs retain the existing acc-hooks contract; runtime identity is signed below.
-                        crate::infrastructure::Infrastructure::Od
-                    } else {
-                        self.manifest.infrastructure
-                    }
+                || metadata.infrastructure != self.manifest.infrastructure
                 || metadata.product != "VoyahTune"
                 || metadata.component != component
                 || metadata.release_version != self.manifest.release_version
@@ -411,9 +337,7 @@ impl Payload {
                         .detail(&package.artifact),
                 );
             }
-            if package.package == RUNYN
-                && self.manifest.infrastructure == crate::infrastructure::Infrastructure::Od
-            {
+            if package.package == RUNYN && false {
                 return Err(Error::new(
                     "INFRASTRUCTURE_RECIPE",
                     "RunYN не поддерживается прежним OD payload",
@@ -492,20 +416,10 @@ pub fn apk_metadata(path: &Path) -> Result<Option<BuildMetadata>> {
     let mut bytes = Vec::new();
     metadata_file.by_ref().take(65537).read_to_end(&mut bytes)?;
     let value: serde_json::Value = serde_json::from_slice(&bytes)?;
-    let explicit_infrastructure = value.get("infrastructure").is_some();
     let metadata: BuildMetadata = serde_json::from_value(value)?;
-    if crate::infrastructure::Infrastructure::explicit_version(&metadata.release_version)?.is_some()
-    {
-        if !explicit_infrastructure {
-            return Err(Error::new(
-                "APK_METADATA",
-                "Нет инфраструктуры в подписанных метаданных APK",
-            ));
-        }
-        metadata
-            .infrastructure
-            .require_version(&metadata.release_version)?;
-    }
+    metadata
+        .infrastructure
+        .require_version(&metadata.release_version)?;
     Ok(Some(metadata))
 }
 /// Verify v2 signatures AND the APK content digest. apksig::Apk::verify alone only
@@ -678,50 +592,37 @@ pub fn locate(bundle: &Path, executable: &Path, explicit: Option<&Path>) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
-    fn new_payload_requires_explicit_matching_profile_but_legacy_defaults_to_od() {
+    fn payload_requires_explicit_unified_metadata() {
         let root = tempfile::tempdir().unwrap();
-        let manifest = Manifest {
-            infrastructure: crate::infrastructure::Infrastructure::Od,
-            removal_only: false,
-            requirements: Some(crate::compatibility::Requirements::infrastructure()),
-            recipe: crate::recipe::Recipe::default(),
-            schema: 4,
-            product: "VoyahTune".into(),
-            release_version: "3.22.0-od".into(),
-            build_revision: "test".into(),
-            artifacts: vec![],
-        };
-        let mut value = serde_json::to_value(manifest).unwrap();
-        let write = |manifest_value: &serde_json::Value| {
+        let original = serde_json::json!({
+            "infrastructure": "unified", "requirements": crate::compatibility::Requirements::unified(),
+            "schema": 4, "product": "VoyahTune", "releaseVersion": "4.4.1", "buildRevision": "test",
+            "recipe": crate::recipe::Recipe::default(), "artifacts": []
+        });
+        let load = |value: &serde_json::Value| {
             std::fs::write(
                 root.path().join("manifest.json"),
-                serde_json::to_vec(manifest_value).unwrap(),
+                serde_json::to_vec(value).unwrap(),
             )
-            .unwrap()
+            .unwrap();
+            Payload::load(root.path())
         };
-        write(&value);
-        assert!(Payload::load(root.path()).is_ok());
-        value["infrastructure"] = serde_json::json!("pi");
-        write(&value);
-        assert_eq!(
-            Payload::load(root.path()).err().unwrap().code,
-            "INFRASTRUCTURE_VERSION"
-        );
-        value.as_object_mut().unwrap().remove("infrastructure");
-        write(&value);
-        assert_eq!(
-            Payload::load(root.path()).err().unwrap().code,
-            "INFRASTRUCTURE_MISSING"
-        );
-        value["releaseVersion"] = serde_json::json!("3.21.0");
-        value["requirements"] =
-            serde_json::to_value(crate::compatibility::Requirements::default()).unwrap();
-        write(&value);
-        assert_eq!(
-            Payload::load(root.path()).unwrap().manifest.infrastructure,
-            crate::infrastructure::Infrastructure::Od
-        );
+        assert!(load(&original).is_ok());
+        for identity in ["pi", "od", "unknown"] {
+            let mut value = original.clone();
+            value["infrastructure"] = serde_json::json!(identity);
+            assert!(load(&value).is_err());
+        }
+        let mut missing = original.clone();
+        missing.as_object_mut().unwrap().remove("infrastructure");
+        assert!(load(&missing).is_err());
+        for version in ["4.4.1-od", "4.4.1-pi", "invalid"] {
+            let mut value = original.clone();
+            value["releaseVersion"] = serde_json::json!(version);
+            assert!(load(&value).is_err());
+        }
     }
 
     #[test]

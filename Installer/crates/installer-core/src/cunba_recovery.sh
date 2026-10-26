@@ -22,7 +22,7 @@ digest() {
 
 __CUNBA_SYSTEM_ACCESS__
 
-__OD_STARTUP_BACKUP__
+__STARTUP_BACKUP__
 
 replace_startup() (
     replacement=$startup.voyahtune-cunba-new

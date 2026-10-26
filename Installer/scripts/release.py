@@ -96,7 +96,7 @@ def payload_entry(folder, archive, minimum_ota_version):
         "size": archive.stat().st_size,
         "sha256": sha(archive),
     }
-    if manifest.get("infrastructure") in ("od", "unified") and int(version.split(".")[0]) >= 4:
+    if manifest.get("infrastructure") == "unified":
         entry["minimumInstallerVersion"] = manifest["requirements"][
             "minInstallerVersion"
         ]
@@ -104,26 +104,17 @@ def payload_entry(folder, archive, minimum_ota_version):
     return entry
 
 
-def normalize_version(value, infrastructure):
+def normalize_version(value):
     version = value.removeprefix("v")
     if not re.fullmatch(
         r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?",
         version,
     ):
         raise ValueError("Нужна SemVer-версия, например 3.22.0")
-    base, plus, metadata = version.partition("+")
-    profile = next((p for p in ("pi", "od") if base.endswith("-" + p)), None)
-    if infrastructure == "unified":
-        if profile:
-            raise ValueError("Общий релиз не использует суффиксы -pi/-od")
-        return version
-    if profile and profile != infrastructure:
-        raise ValueError(
-            f"Суффикс версии {profile} не соответствует --{infrastructure}"
-        )
-    if not profile:
-        base += "-" + infrastructure
-    return base + (plus + metadata if plus else "")
+    base = version.partition("+")[0]
+    if any(base.endswith("-" + profile) for profile in ("pi", "od")):
+        raise ValueError("Общий релиз не использует суффиксы -pi/-od")
+    return version
 
 
 def main():
@@ -133,21 +124,13 @@ def main():
         description="Build a single VoyahTune payload; optionally build GUI installers separately."
     )
     parser.add_argument("version")
-    parser.set_defaults(infrastructure="unified")
-    profiles = parser.add_mutually_exclusive_group()
-    profiles.add_argument(
-        "--pi", dest="infrastructure", action="store_const", const="pi", help=argparse.SUPPRESS
-    )
-    profiles.add_argument(
-        "--od", dest="infrastructure", action="store_const", const="od", help=argparse.SUPPRESS
-    )
     parser.add_argument(
         "--catalog-url",
         help="Override the shared HTTPS release catalog embedded in the updater and optional GUI",
     )
     parser.add_argument(
         "--minimum-ota-version",
-        help="Required for common/OD payloads: minimum VoyahTune version with a compatible root service",
+        help="Required for unified payloads: minimum VoyahTune version with a compatible root service",
     )
     parser.add_argument(
         "--windows-arch",
@@ -189,8 +172,10 @@ def main():
         "--revision", help="Defaults to Git HEAD plus -dirty if modified"
     )
     args = parser.parse_args()
-    if args.infrastructure != "pi" and args.minimum_ota_version is None:
-        parser.error("Specify --minimum-ota-version from root-service compatibility; the first common release requires its own base version")
+    if args.minimum_ota_version is None:
+        parser.error(
+            "Specify --minimum-ota-version from root-service compatibility; the first common release requires its own base version"
+        )
     if args.minimum_ota_version is not None and not re.fullmatch(
         r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", args.minimum_ota_version
     ):
@@ -224,9 +209,8 @@ def main():
             else [name]
         )
     }
-    infrastructure = args.infrastructure
     try:
-        version = normalize_version(args.version, infrastructure)
+        version = normalize_version(args.version)
     except ValueError as error:
         parser.error(str(error))
     if args.catalog_url:
@@ -271,7 +255,6 @@ def main():
         else ""
     )
     env = os.environ.copy()
-    env["VOYAH_INFRASTRUCTURE"] = infrastructure
     env["VOYAH_CATALOG_URL"] = args.catalog_url or ""
     cached = ROOT / "Releases/cache/cargo"
     if not env.get("CARGO_HOME") and cached.exists():
@@ -294,16 +277,7 @@ def main():
     try:
         with tempfile.TemporaryDirectory(prefix=".release-", dir=build) as temporary:
             work = Path(temporary)
-            if infrastructure == "unified":
-                run(["sh", ROOT / "Packaging/new/check.sh"])
-            run(
-                [
-                    "python3",
-                    ROOT / "Packaging/tests/test_infrastructure_profiles.py",
-                    "--profile",
-                    "od" if infrastructure == "unified" else infrastructure,
-                ]
-            )
+            run(["sh", ROOT / "Packaging/new/check.sh"])
             run(
                 [
                     "cargo",
@@ -329,8 +303,6 @@ def main():
                     version,
                     "--revision",
                     revision,
-                    "--infrastructure",
-                    infrastructure,
                     "--output",
                     payload,
                     *(["--skip-android"] if args.no_build else []),

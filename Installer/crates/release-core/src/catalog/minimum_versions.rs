@@ -1,8 +1,5 @@
 use super::Release;
-use crate::{
-    infrastructure::{release_version, Infrastructure},
-    Error, Result,
-};
+use crate::{infrastructure::release_version, Error, Result};
 use semver::Version;
 
 fn minimum_version(value: &str) -> Result<Version> {
@@ -25,12 +22,11 @@ fn minimum_version(value: &str) -> Result<Version> {
 impl Release {
     pub(super) fn validate_minimum_versions(&self) -> Result<()> {
         if release_version(&self.version)?.major >= 4
-            && Infrastructure::from_version(&self.version)? == Infrastructure::Od
             && (self.minimum_installer_version.is_none() || self.minimum_ota_version.is_none())
         {
             return Err(Error::new(
                 "CATALOG_INVALID",
-                "Для релизов OD 4+ требуются minimumInstallerVersion и minimumOtaVersion",
+                "Для релизов 4+ требуются minimumInstallerVersion и minimumOtaVersion",
             ));
         }
         if self.minimum_installer_version.is_none() && self.minimum_ota_version.is_some() {
@@ -74,11 +70,9 @@ impl Release {
             return Ok(());
         };
         let mut current = release_version(installed)?;
-        if Infrastructure::from_version(installed)? == Infrastructure::Od {
-            // The service baseline is a base release number, including its beta builds.
-            current.pre = semver::Prerelease::EMPTY;
-            current.build = semver::BuildMetadata::EMPTY;
-        }
+        // The OTA baseline includes beta builds of the same base release.
+        current.pre = semver::Prerelease::EMPTY;
+        current.build = semver::BuildMetadata::EMPTY;
         if current < minimum_version(minimum)? {
             return Err(Error::new(
                 "OTA_USB_REQUIRED",

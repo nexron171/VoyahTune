@@ -18,10 +18,10 @@ while [[ $# -gt 0 ]]; do
       echo 'Usage: ./Installer/scripts/build-all-macos.sh [--catalog-url HTTPS_URL] [--payload DIRECTORY] [--output Releases/build/DIRECTORY] [--mac] [--windows] [--windows-arch x64|x86|arm64] [--linux]'
       echo 'Default: macOS Universal + Windows x64/x86/ARM64, GUI with ADB; optional offline payload.'
       echo '--windows builds all three architectures; --windows-arch selects one. Linux requires --linux.'
-      echo 'Use ./make_release.sh VERSION (--pi|--od) --installers for the complete release.'
+      echo 'Use ./make_release.sh VERSION --minimum-ota-version VERSION --installers for the complete release.'
       echo '--check: check the prepared build environment without building.'
       exit 0 ;;
-    --pi|--od) echo 'The GUI supports both infrastructures; select PI/OD when building the payload.' >&2; exit 2 ;;
+    --pi|--od) echo 'Only the unified runtime is supported; omit --pi/--od.' >&2; exit 2 ;;
     --catalog-url)
       [[ $# -ge 2 ]] || { echo 'Missing --catalog-url value' >&2; exit 2; }
       CATALOG_URL=$2; shift 2 ;;

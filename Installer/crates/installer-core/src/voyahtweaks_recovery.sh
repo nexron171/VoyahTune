@@ -26,7 +26,7 @@ state() {
 
 __VOYAHTWEAKS_SYSTEM_ACCESS__
 
-__OD_STARTUP_BACKUP__
+__STARTUP_BACKUP__
 
 require_lock() {
     [ ! -L "$lock" ] && [ -d "$lock" ] || fail 'Installation lock missing'

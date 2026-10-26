@@ -1,161 +1,111 @@
-//! Build-time selection of the Frida infrastructure; legacy metadata belongs to OD.
+//! Identity of the single runtime shipped by all VoyahTune builds.
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
+
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Infrastructure {
-    Unified,
-    Pi,
     #[default]
-    Od,
+    Unified,
 }
+
 impl Infrastructure {
-    /// Infrastructure is the final prerelease suffix; unlabelled legacy releases belong to OD.
-    pub fn from_version(version: &str) -> Result<Self> {
-        Ok(Self::explicit_version(version)?.unwrap_or(Self::Od))
-    }
-    pub fn explicit_version(version: &str) -> Result<Option<Self>> {
-        let version = semver::Version::parse(version)
-            .map_err(|e| Error::new("RELEASE_VERSION", "Некорректная версия релиза").detail(e))?;
-        Ok(match version.pre.as_str().rsplit('-').next() {
-            Some("pi") => Some(Self::Pi),
-            Some("od") => Some(Self::Od),
-            _ => None,
-        })
-    }
     pub fn require_version(self, version: &str) -> Result<()> {
-        match Self::explicit_version(version)? {
-            None if self == Self::Unified => Ok(()),
-            Some(actual) if actual == self => Ok(()),
-            _ => Err(Error::new(
+        let version = parse_version(version)?;
+        if legacy_suffix(&version) {
+            return Err(Error::new(
                 "INFRASTRUCTURE_VERSION",
-                "Суффикс версии не соответствует инфраструктуре релиза",
-            )),
+                "Общий релиз не содержит суффикс инфраструктуры",
+            ));
         }
+        Ok(())
     }
+
     pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Unified => "unified",
-            Self::Pi => "pi",
-            Self::Od => "od",
-        }
+        "unified"
     }
+
     pub fn compiled() -> Self {
-        env!("VOYAH_INFRASTRUCTURE")
-            .parse()
-            .expect("validated build infrastructure")
-    }
-    pub fn uses_restore_ui(self) -> bool {
-        self != Self::Pi
-    }
-    pub fn matches_version(self, version: &str) -> bool {
-        if self == Self::Unified {
-            Self::explicit_version(version).is_ok_and(|profile| profile.is_none())
-        } else {
-            Self::from_version(version).is_ok_and(|profile| profile == self)
-        }
-    }
-    pub fn require(self, expected: Self) -> Result<()> {
-        if self == expected {
-            return Ok(());
-        }
-        Err(Error::new(
-            "INFRASTRUCTURE_MISMATCH",
-            format!(
-                "Релиз содержит инфраструктуру {}, а установщик/служба предназначены для {}",
-                self.as_str(),
-                expected.as_str()
-            ),
-        ))
+        Self::Unified
     }
 }
-/// Compare release numbers without treating a profile-only suffix as a prerelease.
+
+fn parse_version(version: &str) -> Result<semver::Version> {
+    semver::Version::parse(version)
+        .map_err(|error| Error::new("RELEASE_VERSION", "Некорректная версия релиза").detail(error))
+}
+
+fn legacy_suffix(version: &semver::Version) -> bool {
+    matches!(version.pre.as_str().rsplit('-').next(), Some("pi" | "od"))
+}
+
+/// Old installed version labels are normalized only for upgrade comparisons.
 pub fn release_version(version: &str) -> Result<semver::Version> {
-    let mut parsed = semver::Version::parse(version)
-        .map_err(|e| Error::new("RELEASE_VERSION", "Некорректная версия релиза").detail(e))?;
-    if Infrastructure::explicit_version(version)?.is_some() {
+    let mut parsed = parse_version(version)?;
+    if legacy_suffix(&parsed) {
         let pre = parsed
             .pre
             .as_str()
             .rsplit_once('-')
             .map(|(pre, _)| pre)
             .unwrap_or("");
-        parsed.pre = semver::Prerelease::new(pre)
-            .map_err(|e| Error::new("RELEASE_VERSION", "Некорректная версия релиза").detail(e))?;
+        parsed.pre = semver::Prerelease::new(pre).map_err(|error| {
+            Error::new("RELEASE_VERSION", "Некорректная версия релиза").detail(error)
+        })?;
     }
     Ok(parsed)
 }
+
 impl std::str::FromStr for Infrastructure {
     type Err = String;
     fn from_str(value: &str) -> std::result::Result<Self, String> {
         match value {
             "unified" => Ok(Self::Unified),
-            "pi" => Ok(Self::Pi),
-            "od" => Ok(Self::Od),
-            _ => Err("Infrastructure must be unified, pi or od".into()),
+            _ => Err("Only the unified infrastructure is supported".into()),
         }
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
-    fn unified_release_has_no_pi_od_suffix() {
-        for version in ["4.4.1", "4.4.1-beta"] {
+    fn release_versions_accept_channels_and_reject_legacy_profiles() {
+        for version in ["4.4.1", "4.4.1-beta", "4.4.1-beta.2+build"] {
             Infrastructure::Unified.require_version(version).unwrap();
-            assert!(Infrastructure::Unified.matches_version(version));
         }
-        for version in ["4.4.1-od", "4.4.1-pi", "4.4.1-beta-od"] {
+        for version in ["4.4.1-od", "4.4.1-pi", "4.4.1-beta-od", "invalid"] {
             assert!(Infrastructure::Unified.require_version(version).is_err());
-            assert!(!Infrastructure::Unified.matches_version(version));
         }
     }
+
     #[test]
-    fn version_suffix_is_not_a_release_channel() {
-        for (version, profile, prerelease) in [
-            ("3.22.0-pi", Infrastructure::Pi, false),
-            ("3.22.0-od+build", Infrastructure::Od, false),
-            ("3.22.0-beta.1-pi+test", Infrastructure::Pi, true),
-            ("3.22.0-beta.1-od", Infrastructure::Od, true),
-            ("3.21.0", Infrastructure::Od, false),
-            ("3.21.0-beta.1", Infrastructure::Od, true),
+    fn legacy_installed_versions_keep_release_and_channel_precedence() {
+        for (installed, normalized) in [
+            ("3.22.0-pi", "3.22.0"),
+            ("3.22.0-od+build", "3.22.0+build"),
+            ("3.22.0-beta.1-pi", "3.22.0-beta.1"),
+            ("4.4.1-beta", "4.4.1-beta"),
         ] {
-            assert_eq!(Infrastructure::from_version(version).unwrap(), profile);
-            assert_eq!(
-                !release_version(version).unwrap().pre.is_empty(),
-                prerelease
-            );
+            assert_eq!(release_version(installed).unwrap().to_string(), normalized);
         }
-        assert!(Infrastructure::Pi.require_version("3.22.0-od").is_err());
-        assert!(Infrastructure::Od.require_version("3.22.0").is_err());
-        assert!(Infrastructure::Pi
-            .require_version("3.22.0-beta.1-pi+test")
-            .is_ok());
+        assert!(release_version("broken").is_err());
     }
+
     #[test]
-    fn selection_is_exact_and_mismatch_is_rejected() {
-        assert!("PI".parse::<Infrastructure>().is_err());
-        assert!(Infrastructure::Pi.require(Infrastructure::Od).is_err());
-        assert!(Infrastructure::Od.require(Infrastructure::Od).is_ok());
-    }
-    #[test]
-    fn legacy_metadata_defaults_to_od() {
-        assert_eq!(Infrastructure::default(), Infrastructure::Od);
-        let mut metadata = serde_json::json!({"schema":3,"product":"VoyahTune","component":"native","releaseVersion":"1.0.0","buildRevision":"test"});
+    fn metadata_has_only_one_runtime_identity() {
         assert_eq!(
-            serde_json::from_value::<crate::payload::BuildMetadata>(metadata.clone())
-                .unwrap()
-                .infrastructure,
-            Infrastructure::Od
+            "unified".parse::<Infrastructure>().unwrap(),
+            Infrastructure::Unified
         );
-        metadata["infrastructure"] = serde_json::json!("pi");
         assert_eq!(
-            serde_json::from_value::<crate::payload::BuildMetadata>(metadata.clone())
-                .unwrap()
-                .infrastructure,
-            Infrastructure::Pi
+            serde_json::to_string(&Infrastructure::Unified).unwrap(),
+            "\"unified\""
         );
-        metadata["infrastructure"] = serde_json::json!("wrong");
-        assert!(serde_json::from_value::<crate::payload::BuildMetadata>(metadata).is_err());
+        for value in ["pi", "od", "UNIFIED", "", "unknown"] {
+            assert!(value.parse::<Infrastructure>().is_err());
+            assert!(serde_json::from_value::<Infrastructure>(serde_json::json!(value)).is_err());
+        }
     }
 }

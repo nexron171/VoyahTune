@@ -1,9 +1,8 @@
-//! Reversible OD-only isolation of the inspected Cunba loader.
+//! Reversible isolation of the inspected Cunba loader.
 use crate::{
     adb::Adb,
     cunba,
     events::{EventCallback, Events},
-    infrastructure::Infrastructure,
     payload::Payload,
     recovery::{self, Operation},
     Error, Result,
@@ -17,10 +16,10 @@ use std::{
 };
 
 const SCRIPT: &str = include_str!("cunba_recovery.sh");
-const CLEAN_STARTUP: &str = include_str!("../../../../Packaging/od/system/init.logcat.original.sh");
+const CLEAN_STARTUP: &str = include_str!("../../../../Packaging/system/init.logcat.original.sh");
 const RESTORE_SCRIPT: &str = include_str!("cunba_restore.sh");
 const SYSTEM_ACCESS: &str = include_str!("cunba_system_access.sh");
-const STARTUP_BACKUP: &str = include_str!("od_startup_backup.sh");
+const STARTUP_BACKUP: &str = include_str!("startup_backup.sh");
 const JOURNAL: &str = "/data/local/voyahtune-cunba-recovery";
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(35);
 const BOOT_TIMEOUT: Duration = Duration::from_secs(180);
@@ -44,7 +43,7 @@ fn command_script(action: &str, template: &str) -> String {
         template
             .replace("__CUNBA_CLEAN_STARTUP__", CLEAN_STARTUP.trim_end())
             .replace("__CUNBA_SYSTEM_ACCESS__", SYSTEM_ACCESS.trim_end())
-            .replace("__OD_STARTUP_BACKUP__", STARTUP_BACKUP.trim_end())
+            .replace("__STARTUP_BACKUP__", STARTUP_BACKUP.trim_end())
     )
 }
 
@@ -202,13 +201,10 @@ pub fn disable(
     logs: &Path,
     callback: EventCallback,
 ) -> Result<Outcome> {
-    if !confirmed
-        || payload.manifest.infrastructure != Infrastructure::Od
-        || payload.manifest.removal_only
-    {
+    if !confirmed || payload.manifest.removal_only {
         return Err(Error::new(
             "CUNBA_CONSENT_REQUIRED",
-            "Подтвердите отключение Cunba перед установкой OD",
+            "Подтвердите отключение Cunba перед установкой VoyahTune",
         ));
     }
     payload.verify()?;
@@ -304,27 +300,14 @@ pub fn disable(
     })
 }
 
-pub fn restoration_available(adb: &Adb, infrastructure: Infrastructure) -> Result<bool> {
-    if infrastructure != Infrastructure::Od {
-        return Ok(false);
-    }
+pub fn restoration_available(adb: &Adb) -> Result<bool> {
     Ok(adb.shell(
         &command_script("available", RESTORE_SCRIPT),
         COMMAND_TIMEOUT,
     )? == "RESTORE_AVAILABLE")
 }
 
-pub fn restore_after_removal(
-    adb: &Adb,
-    infrastructure: Infrastructure,
-    removal_boot: &str,
-) -> Result<()> {
-    if infrastructure != Infrastructure::Od {
-        return Err(Error::new(
-            "CUNBA_RESTORE_UNAVAILABLE",
-            "Восстановление Cunba доступно только после удаления OD",
-        ));
-    }
+pub fn restore_after_removal(adb: &Adb, removal_boot: &str) -> Result<()> {
     let result = (|| {
         progress(adb, "Ожидаем загрузку Android после удаления VoyahTune")?;
         let deadline = Instant::now() + BOOT_TIMEOUT;
@@ -352,7 +335,7 @@ pub fn restore_after_removal(
             }
             thread::sleep(Duration::from_secs(3));
         }
-        if !restoration_available(adb, infrastructure)? {
+        if !restoration_available(adb)? {
             return Err(Error::new(
                 "CUNBA_RESTORE_UNAVAILABLE",
                 "Пригодная резервная копия Cunba не найдена",

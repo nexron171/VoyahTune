@@ -43,6 +43,7 @@ class ReleaseTests(unittest.TestCase):
         if Path(args[0]).name == "installer-build":
             if self.fail_build:
                 raise subprocess.CalledProcessError(1, args)
+            self.assertNotIn("--infrastructure", args)
             payload = Path(args[args.index("--output") + 1])
             payload.mkdir()
             version = args[args.index("--version") + 1]
@@ -56,7 +57,7 @@ class ReleaseTests(unittest.TestCase):
                         },
                         "releaseVersion": version,
                         "buildRevision": "fixture",
-                        "infrastructure": args[args.index("--infrastructure") + 1],
+                        "infrastructure": "unified",
                         "generation": self.generation,
                     }
                 )
@@ -149,7 +150,11 @@ class ReleaseTests(unittest.TestCase):
             "4.5.6",
             "--revision",
             "fixture",
-            *(["--minimum-ota-version", "4.5.6"] if "--minimum-ota-version" not in flags else []),
+            *(
+                ["--minimum-ota-version", "4.5.6"]
+                if "--minimum-ota-version" not in flags
+                else []
+            ),
             *flags,
         ]
         if through_shell:
@@ -227,14 +232,12 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(self.selected, [])
         self.assertFalse((archive.parent / "VoyahTune-Installer-1.0.0").exists())
 
-    def test_od_default_forwards_release_options(self):
+    def test_default_forwards_release_options(self):
         for arguments in [
-            ["4.3.3", "--od"],
-            ["--od", "4.3.3"],
-            ["4.3.3-od", "--od", "--no-build", "--no-zip"],
+            ["4.3.3"],
+            ["4.3.3", "--no-build", "--no-zip"],
             [
-                "4.3.3-beta-od",
-                "--od",
+                "4.3.3-beta",
                 "--minimum-ota-version",
                 "4.2.1",
                 "--catalog-url",
@@ -248,42 +251,16 @@ class ReleaseTests(unittest.TestCase):
                 self.assertEqual(command[1:], [*arguments, "--payload"])
 
     def test_explicit_build_modes_keep_their_arguments(self):
-        for profile in ("--od", "--pi"):
-            for flag in ("--payload", "--installers", "--mac", "--windows", "--linux"):
-                arguments = ["4.3.3", profile, flag]
-                with self.subTest(arguments=arguments):
-                    command = self.shell_arguments(*arguments)
-                    self.assertEqual(command[1:], arguments)
-
-    def test_classic_mode_requires_legacy_for_both_profiles(self):
-        for arguments in [
-            ["--legacy", "4.3.3", "--od"],
-            ["--legacy", "4.3.3", "--pi"],
-        ]:
+        for flag in ("--payload", "--installers", "--mac", "--windows", "--linux"):
+            arguments = ["4.3.3", flag]
             with self.subTest(arguments=arguments):
-                result = subprocess.run(
-                    ["sh", str(REPO / "make_release.sh"), *arguments, "--help"],
-                    text=True,
-                    capture_output=True,
-                    timeout=10,
-                )
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertIn("classic ZIP", result.stdout)
-                self.assertNotIn("release.py", result.stdout)
+                command = self.shell_arguments(*arguments)
+                self.assertEqual(command[1:], arguments)
 
     def test_ota_minimum_can_require_usb_for_a_root_service_update(self):
         self.run_release("--payload", "--minimum-ota-version", "4.1.0")
-        entry = json.loads(
-            (self.root / "Releases/dist/payload_4.5.6.json").read_text()
-        )
+        entry = json.loads((self.root / "Releases/dist/payload_4.5.6.json").read_text())
         self.assertEqual(entry["minimumOtaVersion"], "4.1.0")
-
-    def test_pi_catalog_entry_keeps_its_previous_format(self):
-        self.run_release("--payload", "--pi")
-        entry = json.loads(
-            (self.root / "Releases/dist/payload_4.5.6-pi.json").read_text()
-        )
-        self.assertEqual(set(entry), {"version", "url", "size", "sha256"})
 
     def test_failed_rebuild_preserves_previous_outputs(self):
         self.run_release("--mac")
@@ -327,22 +304,11 @@ class ReleaseTests(unittest.TestCase):
         with patch.object(self, "fake_run", wraps=self.fake_run) as fake:
             self.run_release("--mac")
             commands = [list(map(str, call.args[0])) for call in fake.call_args_list]
-        checks = [c for c in commands if c[0] == "python3"]
-        self.assertEqual(
-            checks,
-            [
-                [
-                    "python3",
-                    str(self.root / "Packaging/tests/test_infrastructure_profiles.py"),
-                    "--profile",
-                    "od",
-                ]
-            ],
-        )
         runtime_check = ["sh", str(self.root / "Packaging/new/check.sh")]
         self.assertIn(runtime_check, commands)
         build_index = next(
-            index for index, command in enumerate(commands)
+            index
+            for index, command in enumerate(commands)
             if command[:2] == ["cargo", "build"]
         )
         self.assertLess(commands.index(runtime_check), build_index)
@@ -364,28 +330,14 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(commands, [["sh", str(self.root / "Packaging/new/check.sh")]])
         self.assertFalse((self.root / "Releases/build/.release.lock").exists())
 
-    def test_profile_outputs_coexist(self):
-        self.run_release("--od", "--mac")
-        archive = self.root / "Releases/dist/payload_4.5.6-od.zip"
-        previous = archive.read_bytes()
-        self.run_release("--pi", "--mac", "--offline-bundle")
-        self.assertEqual(archive.read_bytes(), previous)
-        record = json.loads(
-            (
-                self.root / "Releases/dist/VoyahTune-Installer-1.0.0/release.json"
-            ).read_text()
-        )
-        self.assertTrue(record["embeddedPayload"])
-        self.assertTrue((self.root / "Releases/dist/payload_4.5.6-pi.zip").exists())
-
     def test_windows_architectures_do_not_overwrite_each_other(self):
-        self.run_release("--od", "--windows")
+        self.run_release("--windows")
         destination = self.root / "Releases/dist/VoyahTune-Installer-1.0.0"
         originals = {path: path.read_bytes() for path in destination.glob("*.zip")}
         self.assertEqual(len(originals), 3)
         for architecture in ("x64", "x86", "arm64"):
             with self.subTest(architecture=architecture):
-                self.run_release("--od", "--windows-arch", architecture)
+                self.run_release("--windows-arch", architecture)
                 for path, content in originals.items():
                     self.assertEqual(path.read_bytes(), content)
                 selected = destination.with_name(
@@ -396,29 +348,38 @@ class ReleaseTests(unittest.TestCase):
                     [f"VoyahTune-Installer-1.0.0-windows-{architecture}.zip"],
                 )
 
-    def test_release_version_carries_selected_infrastructure(self):
-        self.assertEqual(release.normalize_version("v4.5.6", "unified"), "4.5.6")
-        self.assertEqual(release.normalize_version("4.5.6-beta.1", "unified"), "4.5.6-beta.1")
-        for version in ["4.5.6-od", "4.5.6-beta-pi"]:
-            with self.assertRaises(ValueError):
-                release.normalize_version(version, "unified")
-        self.assertEqual(release.normalize_version("3.22.0", "od"), "3.22.0-od")
-        self.assertEqual(release.normalize_version("v3.22.0-pi", "pi"), "3.22.0-pi")
-        self.assertEqual(
-            release.normalize_version("3.22.0-beta.1+test", "pi"),
-            "3.22.0-beta.1-pi+test",
-        )
-        with self.assertRaises(ValueError):
-            release.normalize_version("3.22.0-od", "pi")
+    def test_release_version_is_shared(self):
+        for supplied, expected in [
+            ("v4.5.6", "4.5.6"),
+            ("4.5.6-beta.1", "4.5.6-beta.1"),
+            ("4.5.6-beta+test", "4.5.6-beta+test"),
+        ]:
+            self.assertEqual(release.normalize_version(supplied), expected)
+        for version in [
+            "4.5.6-od",
+            "4.5.6-beta-pi",
+            "4.5.6-od+test",
+            "4.5",
+            "../4.5.6",
+        ]:
+            with self.subTest(version=version), self.assertRaises(ValueError):
+                release.normalize_version(version)
 
-    def test_common_requires_ota_minimum_and_rejects_conflicting_legacy_profiles(self):
-        for flags in ([], ["--pi", "--od"]):
+    def test_common_requires_ota_minimum_and_rejects_legacy_flags(self):
+        for flags in (
+            [],
+            *[
+                [flag, "--minimum-ota-version", "4.5.6"]
+                for flag in ["--pi", "--od", "--legacy"]
+            ],
+        ):
             with self.subTest(flags=flags), patch(
                 "sys.argv", ["release.py", "4.5.6", "--payload", *flags]
-            ):
+            ), patch.object(release, "run") as build:
                 with self.assertRaises(SystemExit) as raised:
                     release.main()
                 self.assertEqual(raised.exception.code, 2)
+                build.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -1,10 +1,10 @@
 pub mod adb;
 pub mod canbus;
 pub mod catalog;
-mod classic_commands;
 pub mod compatibility;
 mod cunba;
 pub mod cunba_recovery;
+mod device_commands;
 pub mod engine;
 pub mod engineering_menu;
 pub mod error;

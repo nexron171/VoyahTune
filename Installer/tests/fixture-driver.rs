@@ -1,4 +1,4 @@
-// Test adapter for the fake ADB differential suite. Not a product CLI.
+// Test adapter for the fake ADB integration suite. Not a product CLI.
 use clap::{Parser, Subcommand, ValueEnum};
 use installer_core::{
     adb::Adb,

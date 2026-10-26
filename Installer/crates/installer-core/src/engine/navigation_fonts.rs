@@ -66,10 +66,19 @@ impl Engine {
                 .join(format!("navigation-fonts-{action}.json")),
             &result,
         )?;
+        let skipped = result["skipped"] == true;
         self.adb.events.emit(
-            "diagnostic",
+            if skipped {
+                "diagnostic-warning"
+            } else {
+                "diagnostic"
+            },
             self.adb.step.as_deref(),
-            "Проверены три темы приборки; цифровые поля сохранены",
+            if skipped {
+                "Версия тем приборки не поддерживается; шрифты оставлены без изменений"
+            } else {
+                "Проверены три темы приборки; цифровые поля сохранены"
+            },
             result,
         )?;
         Ok(())
@@ -108,5 +117,34 @@ mod tests {
         assert!(
             parse_result(&format!("{RESULT_PREFIX}{{\"ok\":false}}"), "apply", "H97X").is_err()
         );
+    }
+
+    #[test]
+    fn unsupported_theme_reports_allow_installation_and_removal_to_continue() {
+        for model in ["H97X", "H97Y"] {
+            for action in ["inspect", "apply", "restore"] {
+                let mut report = json!({
+                    "ok": true,
+                    "action": action,
+                    "model": model,
+                    "skipped": true,
+                    "reason": "unsupported_theme",
+                    "themes": [
+                        {"path": "gauge_normal.kzb", "supported": true},
+                        {"path": "gauge_classic.kzb", "supported": false,
+                         "error": "Unsupported theme size"},
+                        {"path": "gauge_elegant.kzb", "supported": true}
+                    ]
+                });
+                let output = format!("{RESULT_PREFIX}{report}\n");
+                let parsed = parse_result(&output, action, model).unwrap();
+                assert_eq!(parsed["skipped"], true);
+                assert_eq!(parsed["themes"][1]["supported"], false);
+
+                report["ok"] = json!(false);
+                let output = format!("{RESULT_PREFIX}{report}\n");
+                assert!(parse_result(&output, action, model).is_err());
+            }
+        }
     }
 }

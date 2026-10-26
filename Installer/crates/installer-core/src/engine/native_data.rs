@@ -2,16 +2,10 @@ use super::*;
 
 pub(super) const PROBE: &str = include_str!("native_data_probe.sh");
 const REPAIR: &str =
-    include_str!("../../../../../Packaging/od/installer/common/repair-native-data.sh");
+    include_str!("../../../../../Packaging/installer/common/repair-native-data.sh");
 
 impl Engine {
     pub(super) fn prepare_od_native_data(&self, deadline: Instant) -> Result<()> {
-        if !self.payload.manifest.infrastructure.uses_restore_ui() {
-            return Err(Error::new(
-                "NATIVE_DATA_REPAIR_NOT_ALLOWED",
-                "Восстановление доступно только для OD",
-            ));
-        }
         self.wait_boot(true)?;
         self.readiness_progress("Проверяем каталог DE Native", deadline)?;
         self.postflight_shell(REPAIR).map_err(|error| {

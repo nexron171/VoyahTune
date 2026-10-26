@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Run the actual OD detection and isolation scripts on a fake device filesystem."""
+
 import os
 from pathlib import Path
 import subprocess
@@ -14,13 +15,15 @@ STARTUP = (
     + "wait $logcat_pid\n"
 )
 CLEAN_STARTUP = (
-    SOURCE.parents[3] / "Packaging/od/system/init.logcat.original.sh"
+    SOURCE.parents[3] / "Packaging/system/init.logcat.original.sh"
 ).read_text()
 
 
 class VoyahTweaksRecoveryTests(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix="isolated-device-", dir="/tmp")
+        self.temporary = tempfile.TemporaryDirectory(
+            prefix="isolated-device-", dir="/tmp"
+        )
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.environment = dict(os.environ, FAKE_DEVICE=str(self.root))
@@ -28,7 +31,9 @@ class VoyahTweaksRecoveryTests(unittest.TestCase):
         self.write("proc/sys/kernel/random/boot_id", "boot-one\n")
         self.write("proc/mounts", "device / ext4 rw,seclabel 0 0\n")
         self.write("system/etc/init.logcat.sh", self.relocate(STARTUP))
-        self.write("data/local/tmp/load.bin", "# VoyahTweaksSH ru.kachalin.voyahtweaks\n")
+        self.write(
+            "data/local/tmp/load.bin", "# VoyahTweaksSH ru.kachalin.voyahtweaks\n"
+        )
         self.write("data/local/tmp/launcher.bin", "tweaks hook")
         self.write("data/local/tmp/frida-inject", "tweaks injector")
         self.write("data/local/bin/load.bin", "VoyahTune loader")
@@ -39,16 +44,21 @@ class VoyahTweaksRecoveryTests(unittest.TestCase):
         self.command("sync", ":")
         self.command("sha256sum", 'shasum -a 256 "$1"')
         self.command("ps", 'cat "$FAKE_DEVICE/processes"')
-        self.command("mount", '''echo "$*" >> "$FAKE_DEVICE/mount-calls"
+        self.command(
+            "mount",
+            '''echo "$*" >> "$FAKE_DEVICE/mount-calls"
 sed 's/ ro,/ rw,/' "$FAKE_DEVICE/proc/mounts" > "$FAKE_DEVICE/proc/mounts.new"
-mv "$FAKE_DEVICE/proc/mounts.new" "$FAKE_DEVICE/proc/mounts"''')
+mv "$FAKE_DEVICE/proc/mounts.new" "$FAKE_DEVICE/proc/mounts"''',
+        )
         self.command("date", 'echo "2026-10-18_14:25:10"')
         self.command("chcon", ":")
         self.command(
             "ls",
             'if [ "$1" = -Zd ]; then echo "u:object_r:system_file:s0 $2"; else /bin/ls "$@"; fi',
         )
-        self.command("pm", '''case "$1" in
+        self.command(
+            "pm",
+            """case "$1" in
  list)
    echo package:android
    [ "$(cat "$FAKE_DEVICE/package-state")" != absent ] || exit 0
@@ -61,7 +71,8 @@ mv "$FAKE_DEVICE/proc/mounts.new" "$FAKE_DEVICE/proc/mounts"''')
  disable) echo 2 > "$FAKE_DEVICE/package-state" ;;
  disable-until-used) echo 4 > "$FAKE_DEVICE/package-state" ;;
  *) exit 1 ;;
-esac''')
+esac""",
+        )
         self.command(
             "dumpsys",
             'echo "User 0: installed=true enabled=$(cat "$FAKE_DEVICE/package-state")"',
@@ -69,7 +80,15 @@ esac''')
 
     def relocate(self, script):
         script = script.replace("/system/bin/sh -n", "/bin/sh -n")
-        for name in ["data", "system", "proc", "vendor", "odm", "product", "system_ext"]:
+        for name in [
+            "data",
+            "system",
+            "proc",
+            "vendor",
+            "odm",
+            "product",
+            "system_ext",
+        ]:
             script = script.replace(f"/{name}/", f"{self.root}/{name}/")
             script = script.replace(
                 r"\/" + name + r"\/",
@@ -109,8 +128,8 @@ esac''')
             (SOURCE / "cunba_system_access.sh").read_text().rstrip(),
         )
         script = script.replace(
-            "__OD_STARTUP_BACKUP__",
-            (SOURCE / "od_startup_backup.sh").read_text().rstrip(),
+            "__STARTUP_BACKUP__",
+            (SOURCE / "startup_backup.sh").read_text().rstrip(),
         )
         return self.run_script(f"action={action}\n{self.relocate(script)}", success)
 
@@ -153,7 +172,9 @@ esac''')
             "VoyahTune injector",
         )
         self.assertTrue(
-            (self.root / "data/local/voyahtune-voyahtweaks-recovery/files/load.bin").exists()
+            (
+                self.root / "data/local/voyahtune-voyahtweaks-recovery/files/load.bin"
+            ).exists()
         )
         backup = self.root / "system/etc/init.logcat.sh_2026-10-18_14:25:10_backup"
         self.assertEqual(self.startup_backups(), [backup])
@@ -199,7 +220,9 @@ esac''')
         self.action("prepare")
         self.action("apply")
         self.assertEqual(self.probe(verifying=True).strip(), "VOYAHTWEAKS_CLEAR")
-        self.assertEqual((self.root / "system/etc/init.logcat.sh").read_text(), original)
+        self.assertEqual(
+            (self.root / "system/etc/init.logcat.sh").read_text(), original
+        )
         self.assertEqual(self.startup_backups(), [])
 
     def test_log_tag_alone_identifies_loader(self):
@@ -232,7 +255,9 @@ esac''')
         self.assertEqual(backup.read_text(), "previous backup")
         self.assertEqual(len(self.startup_backups()), 2)
         self.assertEqual(
-            (self.root / "system/etc/init.logcat.sh_2026-10-18_14:25:10_1_backup").read_text(),
+            (
+                self.root / "system/etc/init.logcat.sh_2026-10-18_14:25:10_1_backup"
+            ).read_text(),
             self.relocate(STARTUP),
         )
 
@@ -257,7 +282,8 @@ esac''')
         self.write("data/local/voyahtune-install.lock/owner", "ota:other")
         self.action("prepare", success=False)
         self.assertEqual(
-            (self.root / "data/local/voyahtune-install.lock/owner").read_text(), "ota:other"
+            (self.root / "data/local/voyahtune-install.lock/owner").read_text(),
+            "ota:other",
         )
         self.assert_original()
 
@@ -271,7 +297,8 @@ esac''')
             (self.root / "data/local/tmp/launcher.bin").read_text(), "changed hook"
         )
         self.assertEqual(
-            (self.root / "system/etc/init.logcat.sh").read_text(), self.relocate(STARTUP)
+            (self.root / "system/etc/init.logcat.sh").read_text(),
+            self.relocate(STARTUP),
         )
 
     def test_probe_detects_other_startup_and_process_after_isolation(self):
@@ -283,7 +310,9 @@ esac''')
         )
         self.assertIn("startup:", self.probe(verifying=True))
         (self.root / "vendor/etc/init/other.rc").unlink()
-        self.write("processes", self.relocate("PID ARGS\n42 sh /data/local/tmp/load.bin\n"))
+        self.write(
+            "processes", self.relocate("PID ARGS\n42 sh /data/local/tmp/load.bin\n")
+        )
         self.assertIn("process:", self.probe(verifying=True))
 
     def test_read_only_mount_is_prepared_for_following_installation(self):

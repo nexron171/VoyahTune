@@ -184,7 +184,7 @@ impl Engine {
                 Error::new("HEALTH_PENDING", "Несовместимый ответ OTA-службы").detail(response),
             );
         }
-        if self.payload.manifest.infrastructure == crate::infrastructure::Infrastructure::Unified {
+        {
             if !status["capabilities"]
                 .as_array()
                 .is_some_and(|capabilities| {
@@ -257,9 +257,6 @@ impl Engine {
     fn runtime_diagnostics(&self, deadline: Instant) {
         use std::io::Write;
 
-        if self.payload.manifest.infrastructure != crate::infrastructure::Infrastructure::Unified {
-            return;
-        }
         let command = r#"getprop init.svc.voyahtune_load
 pidof voyahtune-loader
 pidof com.qinggan.app.launcher
@@ -285,12 +282,12 @@ done
         }
     }
 
-    pub(super) fn verify_od_installation(&self) -> Result<()> {
+    pub(super) fn verify_installation(&self) -> Result<()> {
         let deadline = Instant::now() + DEADLINE;
         self.prepare_od_native_data(deadline)?;
         self.readiness_progress("Проверяем активный APK Native", deadline)?;
         self.verify_active_apk(NATIVE, "native.apk", Some(NATIVE_PATH))?;
-        self.verify_od_readiness()
+        self.verify_readiness()
     }
 
     fn confirmed_readiness_failure(&self) -> Option<Error> {
@@ -340,11 +337,11 @@ done
         None
     }
 
-    pub(super) fn verify_od_readiness(&self) -> Result<()> {
-        self.verify_od_readiness_until(Instant::now() + DEADLINE)
+    pub(super) fn verify_readiness(&self) -> Result<()> {
+        self.verify_readiness_until(Instant::now() + DEADLINE)
     }
 
-    fn verify_od_readiness_until(&self, deadline: Instant) -> Result<()> {
+    fn verify_readiness_until(&self, deadline: Instant) -> Result<()> {
         let mut stability = Stability::default();
         let mut start_sent = false;
         let mut verified_identity = String::new();
@@ -452,7 +449,6 @@ done
         if !request.confirmed
             || request.action != Action::Install
             || request.serial != self.adb.serial.as_deref().unwrap_or("")
-            || !self.payload.manifest.infrastructure.uses_restore_ui()
         {
             return Err(Error::new(
                 "VERIFICATION_NOT_ALLOWED",
@@ -463,7 +459,7 @@ done
         let result = self.step(
             "verify",
             "Проверка Native и готовности OTA",
-            |engine| engine.verify_od_readiness(),
+            |engine| engine.verify_readiness(),
         );
         self.finish_report(result)
     }
@@ -476,19 +472,19 @@ mod tests {
     #[test]
     fn health_requires_exact_fields_and_version() {
         assert!(require_health(
-            "Result: Bundle[{otaReady=true, version=4.1.1-od}]",
+            "Result: Bundle[{otaReady=true, version=4.1.1}]",
             "otaReady",
-            "4.1.1-od",
+            "4.1.1",
             "Native"
         )
         .is_ok());
         for output in [
             "",
-            "Result: Bundle[{otaReady=false, version=4.1.1-od}]",
-            "Result: Bundle[{otaReady=true, version=4.1.0-od}]",
-            "Result: Bundle[{otaReady=true, version=4.1.1-od, error=failed}]",
+            "Result: Bundle[{otaReady=false, version=4.1.1}]",
+            "Result: Bundle[{otaReady=true, version=4.1.0}]",
+            "Result: Bundle[{otaReady=true, version=4.1.1, error=failed}]",
         ] {
-            assert!(require_health(output, "otaReady", "4.1.1-od", "Native").is_err());
+            assert!(require_health(output, "otaReady", "4.1.1", "Native").is_err());
         }
     }
 
@@ -518,8 +514,7 @@ if [ "$1" = devices ]; then
 fi
 case "$1" in root|wait-for-device) exit 0 ;; esac
 root=$(dirname "$0")
-version=4.1.1-od
-if [ -e "$root/unified" ]; then version=4.1.1; fi
+version=4.1.1
 script=$(cat)
 printf '%s\n' "$script" >> "$root/commands"
 if [ -e "$root/disconnected" ]; then echo 'device not found' >&2; exit 1; fi
@@ -559,7 +554,7 @@ case "$script" in
     *'id -u'*) echo 0 ;;
     *'am broadcast'*) touch "$root/started"; echo sent >> "$root/broadcasts"; exit 124 ;;
     *'--method health'*)
-        if [ -e "$root/stale-native" ]; then version=4.1.0-od; fi
+        if [ -e "$root/stale-native" ]; then version=4.1.0; fi
         if [ -e "$root/started" ]; then
             echo "Result: Bundle[{otaReady=true, version=$version}]"
         else
@@ -568,11 +563,7 @@ case "$script" in
     *'--method otaHealth'*) echo "Result: Bundle[{ready=true, version=$version}]" ;;
     *'cat /proc/sys/kernel/random/boot_id'*) printf 'boot-1\n101\n102\n103\n' ;;
     *'voyahtune-updater --health'*)
-        if [ -e "$root/unified" ]; then
-            echo '{"schema":1,"ok":true,"uid":0,"pid":104,"infrastructure":"unified","capabilities":["restoremode-ota-ui-v1","unified-runtime-v1"]}'
-        else
-            echo '{"schema":1,"ok":true,"uid":0,"pid":104,"infrastructure":"od","capabilities":["restoremode-ota-ui-v1"]}'
-        fi ;;
+            echo '{"schema":1,"ok":true,"uid":0,"pid":104,"infrastructure":"unified","capabilities":["restoremode-ota-ui-v1","unified-runtime-v1"]}' ;;
     *'voyahtune-loader --check-hooks'*)
         if [ -e "$root/hooks-failed" ]; then echo 'hook acc: failed' >&2; exit 1; fi ;;
     *'getprop'*|*'voyahtune-install.lock'*|*'sha256sum'*|*'resolve-activity'*) exit 0 ;;
@@ -581,8 +572,8 @@ esac
 "#).unwrap();
         fs::set_permissions(&adb_path, fs::Permissions::from_mode(0o755)).unwrap();
         let manifest = json!({
-            "schema":1, "infrastructure":"od", "product":"VoyahTune",
-            "releaseVersion":"4.1.1-od", "buildRevision":"test",
+            "schema":1, "infrastructure":"unified", "product":"VoyahTune",
+            "releaseVersion":"4.1.1", "buildRevision":"test",
             "artifacts":[
                 {"name":"native.apk","path":"native.apk","sha256":"0".repeat(64),"size":1},
                 {"name":"restore_mode.apk","path":"restore_mode.apk","sha256":"0".repeat(64),"size":1}
@@ -638,9 +629,7 @@ esac
         fs::remove_file(directory.path().join("started")).unwrap();
         assert!(engine.readiness_sample(deadline, &mut sent).is_err());
         fs::write(directory.path().join("started"), "").unwrap();
-        let error = engine
-            .verify_od_readiness_until(Instant::now())
-            .unwrap_err();
+        let error = engine.verify_readiness_until(Instant::now()).unwrap_err();
         assert_eq!(error.code, "READINESS_UNCONFIRMED");
         assert!(error.retryable);
         assert_eq!(
@@ -716,9 +705,6 @@ esac
                 .unwrap();
         assert_eq!(report["success"], true);
 
-        engine.payload.manifest.infrastructure = crate::infrastructure::Infrastructure::Unified;
-        engine.payload.manifest.release_version = "4.1.1".into();
-        fs::write(directory.path().join("unified"), "").unwrap();
         fs::write(directory.path().join("hooks-failed"), "").unwrap();
         let deadline = Instant::now() + Duration::from_secs(60);
         let error = engine.readiness_sample(deadline, &mut sent).unwrap_err();
@@ -729,11 +715,11 @@ esac
 
         fs::write(directory.path().join("stale-native"), "").unwrap();
         let error = engine.readiness_sample(deadline, &mut sent).unwrap_err();
-        assert!(error.to_string().contains("4.1.0-od"));
+        assert!(error.to_string().contains("4.1.0"));
         assert!(!directory.path().join("native-replacements").exists());
         fs::write(directory.path().join("disconnect-after-diagnostics"), "").unwrap();
         let error = engine
-            .verify_od_readiness_until(Instant::now() + Duration::from_secs(4))
+            .verify_readiness_until(Instant::now() + Duration::from_secs(4))
             .unwrap_err();
         assert_eq!(error.code, "READINESS_UNCONFIRMED");
         assert!(!directory.path().join("native-replacements").exists());
@@ -745,7 +731,7 @@ esac
         fs::remove_file(directory.path().join("disconnected")).unwrap();
 
         fs::write(directory.path().join("commands"), "").unwrap();
-        engine.verify_od_installation().unwrap();
+        engine.verify_installation().unwrap();
         assert_eq!(
             fs::read_to_string(directory.path().join("native-replacements")).unwrap(),
             "replaced\n"

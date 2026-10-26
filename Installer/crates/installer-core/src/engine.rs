@@ -1,7 +1,6 @@
-//! Common Rust engine; classic commands are derived from Packaging/od/installer/device.
+//! Shared USB installation and removal engine.
 //! Each checked result below corresponds to a checked branch in those scripts.
-//! OD installation disables known third-party loaders before replacing runtime files.
-//! Known OD conflicts are handled automatically; PI retains its consent flow.
+//! Installation disables known third-party loaders before replacing runtime files.
 mod native_data;
 mod navigation_fonts;
 mod readiness;
@@ -13,7 +12,7 @@ mod recipe_files_tests;
 use crate::{
     adb::{quote, Adb},
     canbus::{self, RemovalConsent},
-    classic_commands as c,
+    device_commands as c,
     events::{EventCallback, Events},
     inventory,
     payload::{self, Payload, NATIVE, NATIVE_PATH, RESTORE},
@@ -35,7 +34,7 @@ use std::{
 };
 // pkill uses status 1 for an already absent process; other failures remain warnings.
 const STOP_LOADER: &str =
-    include_str!("../../../../Packaging/od/installer/common/stop-loader-device.sh");
+    include_str!("../../../../Packaging/installer/common/stop-loader-device.sh");
 const LEGACY_INIT: &str = "/system/etc/init.logcat.sh";
 const LEGACY_MARKER: &str = "# init.logcat.sh Open Voyah:";
 // Postflight commands may repair package registration. Keep each command exclusive,
@@ -92,34 +91,7 @@ active_matches || {{ echo 'Активный APK {package} не совпадае�
 }
 // A missing Android service is not evidence of damaged package registration.
 // Include the system_server generation so a restart invalidates both observations.
-const UPDATER_PROBE: &str = r#"
-android_generation() {
-    [ "$(getprop sys.boot_completed)" = 1 ] || return 1
-    generation=$(pidof system_server) || return 1
-    [ -n "$generation" ] || return 1
-    service check activity | grep -q ': found' || return 1
-    service check package | grep -q ': found' || return 1
-    printf '%s' "$generation"
-}
-probe_updater() {
-    before=$(android_generation) || { echo UNAVAILABLE; return; }
-    packages=$(pm list packages --user 0) || { echo UNAVAILABLE; return; }
-    # An empty/partial response from PackageManager must not trigger uninstall.
-    printf '%s\n' "$packages" | grep -qx 'package:android' || { echo UNAVAILABLE; return; }
-    state=BROKEN
-    if printf '%s\n' "$packages" | grep -qx 'package:ru.big.town.updater'; then
-        paths=$(pm path --user 0 ru.big.town.updater) || { echo UNAVAILABLE; return; }
-        if printf '%s\n' "$paths" | grep -q '^package:' \
-                && [ -d /data/user/0/ru.big.town.updater ] \
-                && [ -d /data/user_de/0/ru.big.town.updater ]; then
-            state=READY
-        fi
-    fi
-    after=$(android_generation) || { echo UNAVAILABLE; return; }
-    [ "$before" = "$after" ] || { echo UNAVAILABLE; return; }
-    echo "$state:$after"
-}
-"#;
+
 pub struct Engine {
     pub adb: Adb,
     pub payload: Payload,
@@ -194,9 +166,7 @@ impl Engine {
             Err(e) => json!({"success":false,"operationId":self.operation.id,"error":e,
                 "recovery":"Завершённые изменения могли сохраниться. Повторите установку или удаление после устранения указанной причины."}),
         };
-        if self.payload.manifest.infrastructure.uses_restore_ui()
-            && (self.adb.step.as_deref() == Some("verify") || result.is_err())
-        {
+        if self.adb.step.as_deref() == Some("verify") || result.is_err() {
             report["readinessConfirmed"] = json!(result.is_ok());
         }
         report["cunbaRestorationRequested"] = json!(self.restore_cunba);
@@ -288,53 +258,7 @@ impl Engine {
             Duration::from_secs(210),
         )
     }
-    fn native_broadcast(&self) -> Result<()> {
-        let before = self.shell("pidof system_server\n")?;
-        let owner = format!("desktop:{}:postflight", self.operation.id);
-        let command = postflight_script(c::NATIVE_BROADCAST, &owner, 15);
-        let first = self.adb.shell(&command, Duration::from_secs(25));
-        if let Err(error) = first {
-            let after = self.shell("pidof system_server\n").unwrap_or_default();
-            if before.is_empty() || after.is_empty() || before == after {
-                return Err(error);
-            }
-            if self
-                .shell("[ ! -e /data/local/voyahtune-install.lock ] && echo CLEAR\n")
-                .unwrap_or_default()
-                != "CLEAR"
-            {
-                return Err(error);
-            }
-            self.warning(&error);
-            let mut ready = false;
-            for _ in 0..15 {
-                if self
-                    .shell("getprop sys.boot_completed\n")
-                    .unwrap_or_default()
-                    == "1"
-                    && self.shell("pidof system_server\n").unwrap_or_default() == after
-                {
-                    ready = true;
-                    break;
-                }
-                thread::sleep(Duration::from_secs(3));
-            }
-            if !ready {
-                return Err(self.fail(
-                    "Android не восстановился после рестарта system_server",
-                    error,
-                ));
-            }
-            if self
-                .shell("pidof ru.big.town.anative\n")
-                .unwrap_or_default()
-                .is_empty()
-            {
-                self.adb.shell(&command, Duration::from_secs(25))?;
-            }
-        }
-        Ok(())
-    }
+
     fn ignore(&self, script: &str) {
         if let Err(e) = self.shell(script) {
             self.warning(&e);
@@ -363,13 +287,10 @@ impl Engine {
         Ok(())
     }
     fn execute(&mut self, r: Request) -> Result<()> {
-        if self.restore_cunba
-            && (r.action != Action::Remove
-                || !self.payload.manifest.infrastructure.uses_restore_ui())
-        {
+        if self.restore_cunba && r.action != Action::Remove {
             return Err(Error::new(
                 "CUNBA_RESTORE_UNAVAILABLE",
-                "Восстановление Cunba доступно только при удалении OD",
+                "Восстановление Cunba доступно только при удалении VoyahTune",
             ));
         }
 
@@ -395,7 +316,7 @@ impl Engine {
                 if r.action == Action::Install {
                     e.package_model()?;
                 }
-                if e.restore_cunba && !crate::cunba_recovery::restoration_available(&e.adb, e.payload.manifest.infrastructure)? {
+                if e.restore_cunba && !crate::cunba_recovery::restoration_available(&e.adb)? {
                     return Err(Error::new("CUNBA_RESTORE_UNAVAILABLE", "Резервные данные Cunba недоступны. Повторите проверку или удалите VoyahTune без восстановления Cunba."));
                 }
                 Ok(())
@@ -412,15 +333,6 @@ impl Engine {
             |e| e.navigation_fonts("inspect"),
         )?;
         self.ignore(&format!("rm -f {DEVICE_STATE}/lock/owner 2>/dev/null; rmdir {DEVICE_STATE}/lock 2>/dev/null; rmdir {DEVICE_STATE} 2>/dev/null; true\n"));
-        if r.action != Action::Remove
-            && self.payload.manifest.infrastructure == crate::infrastructure::Infrastructure::Pi
-        {
-            self.step(
-                "permission",
-                "Проверка владельца CAN-разрешения",
-                |e| e.permission_owner(),
-            )?;
-        }
         self.step(
             "system",
             "Подготовка системного раздела",
@@ -429,7 +341,7 @@ impl Engine {
         self.ota_lock()?; // remount may have rebooted; retain this desktop operation across boot.
         self.ignore("setprop ctl.stop voyahtune_updater 2>/dev/null || true\n");
         if r.action == Action::Install {
-            if self.payload.manifest.infrastructure.uses_restore_ui() {
+            {
                 self.step(
                     "third-party-loaders",
                     "Проверка и отключение сторонних решений",
@@ -442,7 +354,7 @@ impl Engine {
                             true,
                         )?;
                         e.shell(include_str!(
-                            "../../../../Packaging/od/installer/common/disable-third-party-loaders.sh"
+                            "../../../../Packaging/installer/common/disable-third-party-loaders.sh"
                         ))?;
                         e.permission_owner()?;
                         e.ota_lock()?;
@@ -468,7 +380,7 @@ impl Engine {
                 "Отключение старой активации Apollo",
                 |e| {
                     e.shell(include_str!(
-                        "../../../../Packaging/od/installer/common/apollo-safe-device.sh"
+                        "../../../../Packaging/installer/common/apollo-safe-device.sh"
                     ))
                     .map(|_| ())
                 },
@@ -486,22 +398,16 @@ impl Engine {
             })?;
 
             self.step("native", "Установка Native и разрешений", |e| e.native())?;
-            if !self.payload.restoremode_ota() {
-                self.step(
-                    "packages",
-                    "Установка RestoreMode и настроек",
-                    |e| e.packages(),
-                )?;
-            }
+
             self.step("dns", "Настройка DNS", |e| e.dns_choice(r.dns))?;
             self.step("updater-bootstrap", "Подготовка первого запуска OTA", |e| {
-                if e.payload.restoremode_ota() {
+                {
                     e.shell("am force-stop --user 0 ru.big.town.updater 2>/dev/null || true\npm uninstall --user 0 ru.big.town.updater 2>/dev/null || true\nrm -rf /system/priv-app/VoyahTuneUpdater\nrm -f /data/local/bin/voyahtune-ui-maintenance /data/local/bin/voyahtune-ui-next.apk /data/local/voyahtune-updater/ui-update.json\n")?;
                 }
                 e.shell("rm -f /data/local/voyahtune-updater/state.json /data/local/voyahtune-updater/.state.json.new /data/local/bin/voyahtune-update.block && sync\n")?;
                 Ok(())
             })?;
-            if self.payload.restoremode_ota() {
+            {
                 self.step(
                     "packages",
                     "Установка RestoreMode перед перезагрузкой",
@@ -528,34 +434,7 @@ impl Engine {
                 "verify",
                 "Проверка Native и готовности OTA",
                 |e| {
-                    if e.payload.manifest.infrastructure.uses_restore_ui() {
-                        return e.verify_od_installation();
-                    }
-                    e.wait_boot(true)?;
-                    e.native_ready()?;
-                    e.updater_ready()?;
-                    let service = e.shell("getprop init.svc.voyahtune_updater\n")?;
-                    if service != "running" {
-                        return Err(e.fail("Root-служба OTA не запустилась", service));
-                    }
-                    let version: serde_json::Value = serde_json::from_str(
-                        &e.shell("/data/local/bin/voyahtune-updater --version\n")?,
-                    )?;
-                    if version["ipcSchema"] != 1
-                        || version["infrastructure"] != e.payload.manifest.infrastructure.as_str()
-                        || (e.payload.restoremode_ota()
-                            && !version["capabilities"].as_array().is_some_and(|caps| {
-                                caps.iter().any(|c| c == "restoremode-ota-ui-v1")
-                            }))
-                    {
-                        return Err(e.fail("Несовместимый IPC или инфраструктура updater", version));
-                    }
-                    if e.payload.manifest.infrastructure
-                        == crate::infrastructure::Infrastructure::Pi
-                    {
-                        e.pi_loader_ready()?;
-                    }
-                    Ok(())
+                    return e.verify_installation();
                 },
             )?;
         } else {
@@ -620,13 +499,7 @@ impl Engine {
                 self.step(
                     "cunba-restore",
                     "Восстановление Cunba и проверка после перезагрузки",
-                    |e| {
-                        crate::cunba_recovery::restore_after_removal(
-                            &e.adb,
-                            e.payload.manifest.infrastructure,
-                            &removal_boot,
-                        )
-                    },
+                    |e| crate::cunba_recovery::restore_after_removal(&e.adb, &removal_boot),
                 )?;
             }
         }
@@ -761,12 +634,10 @@ fi
     }
     fn validate_permission_owner(&self, dump: &str) -> Result<()> {
         if let Some(owner) = canbus::owner(dump) {
-            if self.payload.manifest.infrastructure.uses_restore_ui()
-                && owner.is_some_and(|package| {
-                    let package = package.to_ascii_lowercase();
-                    package.contains("cunba") || package.contains("voyahtweaks")
-                })
-            {
+            if owner.is_some_and(|package| {
+                let package = package.to_ascii_lowercase();
+                package.contains("cunba") || package.contains("voyahtweaks")
+            }) {
                 return Ok(());
             }
             if owner != Some(NATIVE) && !(cfg!(windows) && owner.is_none()) {
@@ -779,35 +650,6 @@ fi
         Ok(())
     }
     fn resolve_canbus_conflict(&self) -> Result<()> {
-        let automatic = self.payload.manifest.infrastructure.uses_restore_ui();
-        if !automatic {
-            if let Some(consent) = &self.canbus_consent {
-                consent.begin();
-            }
-            if self.canbus_consent.as_ref().and_then(|c| c.decision()) != Some(true) {
-                self.adb.events.emit("canbus-conflict", self.adb.step.as_deref(), canbus::NOTICE,
-                json!({"package":canbus::PACKAGE,"awaitingConfirmation":self.canbus_consent.is_some()}))?;
-            }
-            let Some(consent) = &self.canbus_consent else {
-                return Err(Error::new("ACTION_REQUIRED", canbus::NOTICE)
-                    .retry("Подтвердите удаление com.voyah.hl.service в окне установщика."));
-            };
-            loop {
-                if self.cancel.load(Ordering::Relaxed) || consent.decision() == Some(false) {
-                    return Err(Error::new(
-                    "CANCELLED",
-                    "Удаление com.voyah.hl.service отменено. Установка не продолжена.",
-                )
-                .retry(
-                    "Повторите установку, когда будете готовы удалить конфликтующее приложение.",
-                ));
-                }
-                if consent.decision() == Some(true) {
-                    break;
-                }
-                thread::sleep(Duration::from_millis(100));
-            }
-        }
         self.adb.events.emit(
             "canbus-removal-started",
             self.adb.step.as_deref(),
@@ -846,11 +688,7 @@ fi
         self.ignore("am force-stop com.voyah.hl.service\n");
         // A system package may reject uninstall, or already be uninstalled for user 0.
         // Its system APK and stale permission registration still need removal.
-        self.ignore(if automatic {
-            "pm uninstall -k --user 0 com.voyah.hl.service\n"
-        } else {
-            "pm uninstall --user 0 com.voyah.hl.service\n"
-        });
+        self.ignore("pm uninstall -k --user 0 com.voyah.hl.service\n");
         self.shell("rm -rf /system/priv-app/VoyahHlCTRL && rm -rf /data/system/package_cache/*\n")?;
         self.adb.events.emit(
             "canbus-removal-reboot",
@@ -861,7 +699,7 @@ fi
         self.raw(&["reboot"])?
             .checked("ADB не принял перезагрузку после удаления VoyahHlCTRL")?;
         self.wait_boot(true)?;
-        if automatic {
+        {
             self.writable(false)?;
         }
         let dump = self.shell("dumpsys package permissions\n")?;
@@ -1042,12 +880,9 @@ fi
         self.restart_loader = true;
         // An absent init service is already stopped, not a failure.
         if let Err(error) = self.stop_runtime_for_update() {
-            if self.payload.manifest.infrastructure
-                == crate::infrastructure::Infrastructure::Unified
             {
                 return Err(error);
             }
-            self.warning(&error);
         }
         self.apollo_safe(true)?;
         self.ignore("am force-stop com.qinggan.app.vehiclesetting\n");
@@ -1130,11 +965,6 @@ fi
             self.shell(&format!("chown 0:0 {p} && chmod {:o} {p}\n", attr.mode))?;
         }
 
-        // The legacy migration requires OD's client outside the unified runtime directory.
-        if self.payload.manifest.infrastructure == crate::infrastructure::Infrastructure::Od {
-            self.shell(c::APP_CLIENT_MIGRATION)?;
-        }
-
         // Retired exact paths are cumulative. Never delete an active target.
         for path in &recipe.remove_files {
             if !recipe.files.iter().any(|f| f.destination == *path) {
@@ -1205,10 +1035,8 @@ fi
     }
 
     fn install_runyn(&self, path: &Path) -> Result<()> {
-        let unified =
-            self.payload.manifest.infrastructure == crate::infrastructure::Infrastructure::Unified;
         let mut arguments = vec!["install", "-r", "-g"];
-        if unified {
+        {
             arguments.push("-d");
         }
         arguments.push(
@@ -1217,13 +1045,11 @@ fi
         );
         let install = || require_package_success(self.raw(&arguments)?, "RunYN не установлен");
         let mut result = install();
-        if unified
-            && result.as_ref().is_err_and(|error| {
-                error
-                    .to_string()
-                    .contains("INSTALL_FAILED_UPDATE_INCOMPATIBLE")
-            })
-        {
+        if result.as_ref().is_err_and(|error| {
+            error
+                .to_string()
+                .contains("INSTALL_FAILED_UPDATE_INCOMPATIBLE")
+        }) {
             self.adb.events.emit(
                 "package-reset",
                 self.adb.step.as_deref(),
@@ -1265,205 +1091,7 @@ fi
         self.postflight_shell(&active_apk_script(package, expected, repair))?;
         Ok(())
     }
-    fn updater_ready(&self) -> Result<()> {
-        if self.payload.restoremode_ota() {
-            self.verify_active_apk("ru.big.town.restoremode", "restore_mode.apk", None)?;
-            let resolved = self.shell("cmd package resolve-activity --brief --user 0 -n ru.big.town.restoremode/.OtaActivity\n")?;
-            if !resolved.lines().any(|line| {
-                matches!(
-                    line.trim(),
-                    "ru.big.town.restoremode/.OtaActivity"
-                        | "ru.big.town.restoremode/ru.big.town.restoremode.OtaActivity"
-                )
-            }) {
-                return Err(self.fail("Встроенный экран OTA не зарегистрирован", resolved));
-            }
-            return Ok(());
-        }
-        if self.payload.manifest.infrastructure.uses_restore_ui() {
-            return self.updater_ready_od();
-        }
-        // ROM 650 can register a new system APK without its DE directory.
-        // PackageManager must create app data with the correct UID and context.
-        const READY: &str = r#"
-            if pm list packages --user 0 2>/dev/null | grep -qx 'package:ru.big.town.updater' \
-                    && pm path ru.big.town.updater 2>/dev/null | grep -q '^package:' \
-                    && [ -d /data/user/0/ru.big.town.updater ] \
-                    && [ -d /data/user_de/0/ru.big.town.updater ]; then
-                echo READY
-            else
-                echo BROKEN
-            fi
-        "#;
-        if self.shell(READY)? != "READY" {
-            self.postflight_shell("cmd package install-existing --user 0 ru.big.town.updater\n")?;
-        }
-        if self.shell(READY)? != "READY" {
-            self.postflight_shell("am force-stop ru.big.town.updater && pm uninstall -k --user 0 ru.big.town.updater\n")?;
-            self.postflight_shell("cmd package install-existing --user 0 ru.big.town.updater\n")?;
-        }
-        if self.shell(READY)? != "READY" {
-            return Err(self.fail(
-                "PackageManager не создал CE/DE Updater",
-                "ru.big.town.updater",
-            ));
-        }
-        self.verify_active_apk(
-            "ru.big.town.updater",
-            "voyahtune-updater.apk",
-            Some("/system/priv-app/VoyahTuneUpdater/VoyahTuneUpdater.apk"),
-        )?;
-        Ok(())
-    }
-    fn updater_ready_od(&self) -> Result<()> {
-        let probe = format!("{UPDATER_PROBE}\nprobe_updater\n");
-        let deadline = Instant::now() + Duration::from_secs(90);
-        let mut previous = String::new();
-        let mut repairs = 0;
-        let mut warned = false;
-        for _ in 0..30 {
-            if Instant::now() >= deadline {
-                break;
-            }
-            let state = self.shell(&probe)?;
-            if state == "UNAVAILABLE" {
-                previous.clear();
-                if !warned {
-                    self.warning(&self.fail(
-                        "Ожидание системных служб Android перед проверкой Updater",
-                        "PackageManager или ActivityManager недоступен; восстановление пакета отложено",
-                    ));
-                    warned = true;
-                }
-            } else if state != previous {
-                previous = state;
-            } else if state.starts_with("READY:") {
-                // Even a successful probe can race a later system_server restart.
-                match self.verify_active_apk(
-                    "ru.big.town.updater",
-                    "voyahtune-updater.apk",
-                    Some("/system/priv-app/VoyahTuneUpdater/VoyahTuneUpdater.apk"),
-                ) {
-                    Ok(()) => return Ok(()),
-                    Err(error) => {
-                        let after = self.shell(&probe)?;
-                        if after != "UNAVAILABLE" && after == state {
-                            return Err(error);
-                        }
-                        self.warning(&error);
-                        previous.clear();
-                    }
-                }
-            } else if state.starts_with("BROKEN:") {
-                let command = match repairs {
-                    0 => "cmd package install-existing --user 0 ru.big.town.updater",
-                    1 => "am force-stop ru.big.town.updater && pm uninstall -k --user 0 ru.big.town.updater && cmd package install-existing --user 0 ru.big.town.updater",
-                    _ => return Err(self.fail("PackageManager не создал CE/DE Updater", state)),
-                };
-                // Recheck inside the lock immediately before any mutation. On a
-                // service restart, return to diagnosis instead of blindly retrying it.
-                let guarded = format!(
-                    "{UPDATER_PROBE}\nexpected={}\n\
-                     [ \"$(probe_updater)\" = \"$expected\" ] || {{ echo RECHECK; exit 0; }}\n\
-                     {command}\nstatus=$?\n\
-                     if [ \"$status\" -ne 0 ]; then\n\
-                         after=$(probe_updater)\n\
-                         if [ \"$after\" = UNAVAILABLE ] || [ \"${{after##*:}}\" != \"${{expected##*:}}\" ]; then\n\
-                             echo RECHECK; exit 0\n\
-                         fi\n\
-                     fi\nexit \"$status\"\n",
-                    quote(&state),
-                );
-                if self.postflight_shell(&guarded)?.lines().last() != Some("RECHECK") {
-                    repairs += 1;
-                }
-                previous.clear();
-            } else {
-                return Err(self.fail("Неизвестный результат проверки Updater", state));
-            }
-            thread::sleep(Duration::from_secs(2));
-        }
-        Err(self.fail(
-            "Android не восстановился для проверки Updater",
-            "Системные службы или регистрация пакета нестабильны; повторите установку после загрузки ГУ",
-        ))
-    }
-    fn pi_loader_ready(&self) -> Result<()> {
-        let mut last = Error::new("PI_LOADER_NOT_READY", "PI watchdog ещё не запустился");
-        for _ in 0..20 {
-            let result = (|| -> Result<()> {
-                let data = self.shell("cat /data/local/tmp/voyahtune-pi-loader-status.json\n")?;
-                let status: release_core::pi_health::Status = serde_json::from_str(&data)?;
-                let stat = self.shell(&format!("cat /proc/{}/stat\n", status.loader_pid))?;
-                let start = stat
-                    .rsplit_once(") ")
-                    .and_then(|(_, rest)| rest.split_whitespace().nth(19))
-                    .ok_or_else(|| {
-                        Error::new("PI_LOADER_IDENTITY", "Нет времени старта PI loader")
-                    })?;
-                let uptime = self
-                    .shell("cat /proc/uptime\n")?
-                    .split_whitespace()
-                    .next()
-                    .and_then(|s| s.parse::<f64>().ok())
-                    .ok_or_else(|| Error::new("PI_LOADER_IDENTITY", "Нет uptime"))?
-                    as u64;
-                status.validate(
-                    &self.shell("cat /proc/sys/kernel/random/boot_id\n")?,
-                    uptime,
-                    start,
-                    self.shell(&format!("cat /proc/{}/cmdline\n", status.loader_pid))?
-                        .as_bytes(),
-                    &self.shell("getprop init.svc.voyahtune_load\n")?,
-                )
-            })();
-            match result {
-                Ok(()) => return Ok(()),
-                Err(error) => last = error,
-            }
-            thread::sleep(Duration::from_secs(1));
-        }
-        Err(last)
-    }
-    fn native_ready(&self) -> Result<()> {
-        let model = self.package_model()?;
-        if self.shell(c::NATIVE_READY).unwrap_or_default() != "READY" {
-            self.postflight_shell(
-                "pm uninstall -k --user 0 ru.big.town.anative >/dev/null 2>&1 || true\n",
-            )?;
-            self.postflight_shell("cmd package install-existing --user 0 ru.big.town.anative\n")?;
-        }
-        if self.shell(c::NATIVE_READY).unwrap_or_default() != "READY" {
-            return Err(self.fail("PackageManager не создал CE/DE Native", NATIVE));
-        }
-        self.verify_active_apk(NATIVE, "native.apk", Some(NATIVE_PATH))?;
-        self.verify_active_apk(RESTORE, "restore_mode.apk", None)?;
-        if self
-            .payload
-            .manifest
-            .recipe
-            .packages
-            .iter()
-            .any(|p| p.package == payload::RUNYN && p.applies_to(model))
-        {
-            self.verify_active_apk(payload::RUNYN, "runyn.apk", None)?;
-        }
-        self.native_broadcast()?;
-        for _ in 0..20 {
-            if !self
-                .shell("pidof ru.big.town.anative\n")
-                .unwrap_or_default()
-                .is_empty()
-            {
-                return Ok(());
-            }
-            thread::sleep(Duration::from_secs(1));
-        }
-        Err(self.fail(
-            "Native не запустился после восстановления package data",
-            NATIVE,
-        ))
-    }
+
     fn legacy_command(&self, s: &str) -> String {
         s.replace("$LEGACY_INIT_DEVICE", LEGACY_INIT)
             .replace("$LEGACY_INIT_MARKER", LEGACY_MARKER)
@@ -1579,7 +1207,7 @@ fi
         }
         result.map(|_| ())
     }
-    fn pi_boot_check(&self, staged: bool) -> Result<String> {
+    fn boot_hash_check(&self, staged: bool) -> Result<String> {
         let mut script = String::new();
         for (artifact, staged_path, installed_path) in [
             (
@@ -1603,21 +1231,16 @@ fi
         Ok(script)
     }
     fn boot_prepare(&self) -> Result<()> {
-        if self.payload.manifest.infrastructure == crate::infrastructure::Infrastructure::Od {
-            self.shell(c::BOOT_PREPARE)?;
-        } else {
-            let mut command = self.pi_boot_check(true)?;
+        {
+            let mut command = self.boot_hash_check(true)?;
             command.push_str("chown 0:0 /system/etc/.voyahtune.load.sh.new /system/etc/.voyahtune.load.rc.new && chmod 755 /system/etc/.voyahtune.load.sh.new && chmod 644 /system/etc/.voyahtune.load.rc.new && restorecon /system/etc/.voyahtune.load.sh.new /system/etc/.voyahtune.load.rc.new && sync\n");
             self.shell(&command)?;
         }
         Ok(())
     }
     fn boot_ready(&self) -> Result<String> {
-        if self.payload.manifest.infrastructure == crate::infrastructure::Infrastructure::Od {
-            return self.shell(c::BOOT_READY);
-        }
         self.shell(
-            &(self.pi_boot_check(false)?
+            &(self.boot_hash_check(false)?
                 + "test -x /system/etc/init.voyahtune.load.sh && echo READY\n"),
         )
     }
@@ -1927,7 +1550,6 @@ mod runtime_stop_tests {
             ("uninstall-no-success", false, 1, 1),
             ("retry-failure", false, 2, 1),
             ("repeat-signature", false, 2, 1),
-            ("legacy", false, 1, 0),
         ] {
             let directory = tempfile::tempdir().unwrap();
             let adb_path = directory.path().join("adb");
@@ -1940,7 +1562,6 @@ printf '%s\n' "$*" >> "$root/commands"
 case "$1" in
     install)
         expected="install -r -g -d $root/RunYN bundle.apk"
-        if [ "$mode" = legacy ]; then expected="install -r -g $root/RunYN bundle.apk"; fi
         [ "$*" = "$expected" ] || exit 91
         for argument do last=$argument; done
         [ "$last" = "$root/RunYN bundle.apk" ] || exit 92
@@ -1974,7 +1595,7 @@ esac
             let payload = Payload {
                 root: directory.path().into(),
                 manifest: serde_json::from_value(json!({
-                    "schema": 4, "infrastructure": if mode == "legacy" { "pi" } else { "unified" },
+                    "schema": 4, "infrastructure": "unified",
                     "product":"VoyahTune", "releaseVersion":"4.4.0",
                     "buildRevision":"test", "artifacts":[]
                 }))
@@ -2017,7 +1638,7 @@ esac
     }
 
     #[test]
-    fn od_resolves_known_canbus_conflict_without_requesting_consent() {
+    fn unified_resolves_known_canbus_conflict_without_requesting_consent() {
         let directory = tempfile::tempdir().unwrap();
         let adb_path = directory.path().join("adb");
         fs::write(
@@ -2050,8 +1671,8 @@ exit 0
         let payload = Payload {
             root: directory.path().into(),
             manifest: serde_json::from_value(json!({
-                "schema": 4, "infrastructure": "od", "product": "VoyahTune",
-                "releaseVersion": "4.3.3-od", "buildRevision": "test", "artifacts": []
+                "schema": 4, "infrastructure": "unified", "product": "VoyahTune",
+                "releaseVersion": "4.3.3", "buildRevision": "test", "artifacts": []
             }))
             .unwrap(),
         };
@@ -2074,13 +1695,8 @@ exit 0
             .iter()
             .any(|event| event.kind == "canbus-conflict"));
 
-        fs::remove_file(directory.path().join("disabled")).unwrap();
-        engine.payload.manifest.infrastructure = crate::infrastructure::Infrastructure::Pi;
-        assert_eq!(
-            engine.permission_owner().unwrap_err().code,
-            "ACTION_REQUIRED"
-        );
-        assert!(!directory.path().join("disabled").exists());
+        engine.permission_owner().unwrap();
+        assert!(directory.path().join("disabled").exists());
     }
 
     #[test]

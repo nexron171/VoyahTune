@@ -66,11 +66,10 @@ npm --prefix Installer/desktop run check
 npm --prefix Installer/desktop run build
 cargo build --release --manifest-path Installer/Cargo.toml -p installer-core --example fixture-driver
 VOYAH_TEST_PAYLOAD="$PWD/Releases/build/installer-payload-4.5.0" python3 Installer/tests/integration.py
-VOYAH_TEST_PAYLOAD="$PWD/Releases/build/installer-payload-4.5.0" python3 Installer/tests/test_classic_port.py
+VOYAH_TEST_PAYLOAD="$PWD/Releases/build/installer-payload-4.5.0" python3 Installer/tests/test_installation.py
 VOYAH_TEST_PAYLOAD="$PWD/Releases/build/installer-payload-4.5.0" python3 Installer/tests/test_modes.py
 VOYAH_TEST_PAYLOAD="$PWD/Releases/build/installer-payload-4.5.0" python3 Installer/tests/test_canbus.py
 python3 Installer/tests/test_release.py
-python3 Installer/tests/test_catalog_publish.py
 ```
 
 Готовые APK, payload и GUI хранятся в игнорируемом `Releases/`. Первая команда

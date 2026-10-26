@@ -16,7 +16,7 @@ const option = (name) => {
   return i < 0 ? undefined : args[i + 1];
 };
 if (flag('--pi') || flag('--od'))
-  throw Error('The GUI supports both infrastructures; use --pi/--od when building the payload.');
+  throw Error('Only the unified runtime is supported; omit --pi/--od.');
 const catalogUrl = option('--catalog-url') || '';
 if (catalogUrl) {
   const u = new URL(catalogUrl);
@@ -34,7 +34,6 @@ const toolingVersion = (await readFile(join(root, 'Installer/Cargo.toml'), 'utf8
 const packageVersion = toolingVersion;
 const env = {
   ...process.env,
-  VOYAH_INFRASTRUCTURE: 'od',
   VOYAH_CATALOG_URL: catalogUrl,
   VOYAH_DESKTOP_CATALOG_URL: catalogUrl || 'https://voyahtune.ru/api/v1/releases',
 };

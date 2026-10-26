@@ -93,15 +93,8 @@ pub fn plan(inventory: Inventory, payload: &Payload, action: Action, dns: Dns) -
     warnings.extend(inventory.problems.iter().cloned());
     let operation = if action == Action::Remove {
         "remove"
-    } else if payload.manifest.infrastructure.uses_restore_ui() || inventory.state == "absent" {
-        "install"
-    } else if inventory.state != "complete" {
-        warnings.push("Обнаружена старая или неполная установка. Сначала будут сохранены найденные файлы, затем установлены файлы выбранного релиза.".into());
-        "repair"
-    } else if inventory.version.as_deref() == Some(&payload.manifest.release_version) {
-        "repair"
     } else {
-        "update"
+        "install"
     };
     if action == Action::Remove {
         warnings.push("Будут удалены VoyahTune, его настройки и журналы; DNS будет восстановлен из сохранённого исходного состояния. Заводская прошивка и состояние загрузчика не восстанавливаются.".into());
@@ -113,7 +106,7 @@ pub fn plan(inventory: Inventory, payload: &Payload, action: Action, dns: Dns) -
     if !resets.is_empty() {
         warnings.push(format!("Другой ключ подписи: {}. Эти приложения будут автоматически удалены вместе с настройками и данными, затем установлены заново.", resets.join(", ")));
     }
-    let steps = operation_steps(action, payload.manifest.infrastructure);
+    let steps = operation_steps(action);
     use sha2::{Digest, Sha256};
     Ok(Plan {
         installer_version: crate::compatibility::INSTALLER_VERSION.into(),
@@ -148,10 +141,7 @@ pub fn plan(inventory: Inventory, payload: &Payload, action: Action, dns: Dns) -
 }
 
 /// Presentation boundaries must match every step emitted by Engine::execute.
-fn operation_steps(
-    action: Action,
-    infrastructure: crate::infrastructure::Infrastructure,
-) -> Vec<(&'static str, &'static str)> {
+fn operation_steps(action: Action) -> Vec<(&'static str, &'static str)> {
     let mut s = vec![
         ("preflight", "Подготовка файлов релиза"),
         ("root", "Получение системного доступа"),
@@ -161,11 +151,8 @@ fn operation_steps(
         ),
         ("navigation-fonts-check", "Проверка тем приборки"),
     ];
-    if action != Action::Remove && infrastructure == crate::infrastructure::Infrastructure::Pi {
-        s.push(("permission", "Проверка владельца CAN-разрешения"));
-    }
     s.push(("system", "Подготовка системного раздела"));
-    if action == Action::Install && infrastructure.uses_restore_ui() {
+    if action == Action::Install {
         s.push((
             "third-party-loaders",
             "Проверка и отключение сторонних решений",
@@ -212,9 +199,8 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn od_prepares_third_party_solutions_immediately_after_remount() {
-        use crate::infrastructure::Infrastructure;
-        let steps = operation_steps(Action::Install, Infrastructure::Od);
+    fn install_prepares_third_party_solutions_immediately_after_remount() {
+        let steps = operation_steps(Action::Install);
         let ids: Vec<_> = steps.iter().map(|(id, _)| *id).collect();
         assert_eq!(
             &ids[..7],
@@ -229,26 +215,18 @@ mod tests {
             ]
         );
         assert!(!ids.contains(&"permission"));
-        let pi = operation_steps(Action::Install, Infrastructure::Pi);
-        assert!(pi.iter().any(|(id, _)| *id == "permission"));
-        assert!(!pi.iter().any(|(id, _)| *id == "third-party-loaders"));
     }
 
     #[test]
     fn navigation_fonts_are_applied_before_reboot_and_restored_before_removal() {
-        use crate::infrastructure::Infrastructure;
-        for infrastructure in [
-            Infrastructure::Unified,
-            Infrastructure::Od,
-            Infrastructure::Pi,
-        ] {
-            let install = operation_steps(Action::Install, infrastructure);
+        {
+            let install = operation_steps(Action::Install);
             let font = install
                 .iter()
                 .position(|(id, _)| *id == "navigation-fonts")
                 .unwrap();
             assert_eq!(install[font + 1].0, "reboot");
-            let remove = operation_steps(Action::Remove, infrastructure);
+            let remove = operation_steps(Action::Remove);
             let font = remove
                 .iter()
                 .position(|(id, _)| *id == "navigation-fonts")
@@ -265,7 +243,7 @@ mod tests {
             "abi":"arm64-v8a", "problems":[], "baseNative":null,
             "packages":{"ru.big.town.anative":{
                 "path":"/system/priv-app/Native/Native.apk", "sha256":"verified", "signers":[],
-                "build":{"schema":1,"product":"VoyahTune","component":"native",
+                "build":{"schema":1,"infrastructure":"unified","product":"VoyahTune","component":"native",
                     "releaseVersion":"9.0.0","buildRevision":"future","runtimeHashes":{}}
             }},
             "files":{}, "foreignFiles":{}, "remnants":[], "state":"partial",

@@ -202,8 +202,7 @@ pub fn inspect_for_action(
     } else {
         None
     };
-    if action == crate::plans::Action::Install && payload.manifest.infrastructure.uses_restore_ui()
-    {
+    if action == crate::plans::Action::Install {
         // Only APK signatures are needed for replacement; runtime remnants do not
         // determine whether the selected release can be installed.
         return Ok(Inventory {
@@ -472,13 +471,12 @@ mod tests {
     use super::*;
     use crate::{
         events::Events,
-        infrastructure::Infrastructure,
         plans::{self, Action, Dns},
     };
     use std::{fs, os::unix::fs::PermissionsExt};
 
     #[test]
-    fn od_install_does_not_scan_runtime_files_or_remnants() {
+    fn installation_does_not_scan_runtime_files_or_remnants() {
         let directory = tempfile::tempdir().unwrap();
         let adb_path = directory.path().join("adb");
         fs::write(&adb_path, r#"#!/bin/sh
@@ -500,13 +498,13 @@ esac
             .unwrap()
             .with_device("CAR-001")
             .unwrap();
-        let mut payload = Payload {
+        let payload = Payload {
             root: directory.path().into(),
             manifest: serde_json::from_value(serde_json::json!({
                 "schema": 1,
-                "infrastructure": "od",
+                "infrastructure": "unified",
                 "product": "VoyahTune",
-                "releaseVersion": "4.1.0-od",
+                "releaseVersion": "4.1.0",
                 "buildRevision": "test",
                 "artifacts": []
             }))
@@ -520,9 +518,7 @@ esac
         assert_eq!(plan.operation, "install");
         assert_eq!(plan.warnings.len(), 1);
 
-        // Removal and PI retain their existing inventory requests.
+        // Removal still needs the actual files on the device.
         assert!(inspect_for_action(&adb, &payload, Action::Remove).is_err());
-        payload.manifest.infrastructure = Infrastructure::Pi;
-        assert!(inspect_for_action(&adb, &payload, Action::Install).is_err());
     }
 }

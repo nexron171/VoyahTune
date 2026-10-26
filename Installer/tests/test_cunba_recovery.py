@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Exercise the device transaction on an isolated fake filesystem, without ADB."""
+
 import os
 from pathlib import Path
 import subprocess
@@ -17,16 +18,20 @@ class CunbaRecoveryTests(unittest.TestCase):
         self.environment = dict(os.environ, FAKE_DEVICE=str(self.root))
         self.environment["PATH"] = f"{self.root}/bin:/usr/bin:/bin"
         self.clean_startup = (
-            SOURCE.parents[3] / "Packaging/od/system/init.logcat.original.sh"
+            SOURCE.parents[3] / "Packaging/system/init.logcat.original.sh"
         ).read_text().rstrip() + "\n"
-        self.script = (SOURCE / "cunba_recovery.sh").read_text().replace(
-            "__CUNBA_CLEAN_STARTUP__", self.clean_startup.rstrip()
+        self.script = (
+            (SOURCE / "cunba_recovery.sh")
+            .read_text()
+            .replace("__CUNBA_CLEAN_STARTUP__", self.clean_startup.rstrip())
         )
         self.script = self.expand_system_access(self.script)
         self.script = self.script.replace("/system/bin/sh -n", "/bin/sh -n")
         for name in ["data", "system", "proc", "sdcard", "storage"]:
             self.script = self.script.replace(f"/{name}/", f"{self.root}/{name}/")
-        self.script = self.script.replace(r"\/sdcard\/", str(self.root).replace("/", r"\/") + r"\/sdcard\/")
+        self.script = self.script.replace(
+            r"\/sdcard\/", str(self.root).replace("/", r"\/") + r"\/sdcard\/"
+        )
         self.write("proc/sys/kernel/random/boot_id", "boot-one\n")
         self.write("proc/mounts", "device / ext4 rw,seclabel 0 0\n")
         self.write("data/local/bin/.keep", "")
@@ -34,18 +39,23 @@ class CunbaRecoveryTests(unittest.TestCase):
         self.write("package-state", "1")
         self.command("id", "echo 0")
         self.command("sync", ":")
-        self.command("mount", '''echo "$*" >> "$FAKE_DEVICE/mount-calls"
+        self.command(
+            "mount",
+            '''echo "$*" >> "$FAKE_DEVICE/mount-calls"
 cat "$FAKE_DEVICE/package-state" >> "$FAKE_DEVICE/package-state-at-remount"
 [ "$1" = -o ] && [ "$2" = remount,rw ] || exit 1
 sed 's/ ro,/ rw,/' "$FAKE_DEVICE/proc/mounts" > "$FAKE_DEVICE/proc/mounts.new"
-mv "$FAKE_DEVICE/proc/mounts.new" "$FAKE_DEVICE/proc/mounts"''')
+mv "$FAKE_DEVICE/proc/mounts.new" "$FAKE_DEVICE/proc/mounts"''',
+        )
         self.command(
             "ls",
             'if [ "$1" = -Zd ]; then echo "u:object_r:system_file:s0 $2"; else /bin/ls "$@"; fi',
         )
         self.command("chcon", ":")
         self.command("sha256sum", 'shasum -a 256 "$1"')
-        self.command("pm", '''case "$1" in
+        self.command(
+            "pm",
+            """case "$1" in
  list)
    echo package:android
    if [ "$3" != -d ] || [ "$(cat "$FAKE_DEVICE/package-state")" = 3 ]; then
@@ -57,7 +67,8 @@ mv "$FAKE_DEVICE/proc/mounts.new" "$FAKE_DEVICE/proc/mounts"''')
  disable) echo 2 > "$FAKE_DEVICE/package-state" ;;
  disable-until-used) echo 4 > "$FAKE_DEVICE/package-state" ;;
  *) exit 1 ;;
-esac''')
+esac""",
+        )
         self.command(
             "dumpsys",
             'echo "User 0: installed=true enabled=$(cat "$FAKE_DEVICE/package-state")"',
@@ -73,8 +84,8 @@ esac''')
             "__CUNBA_SYSTEM_ACCESS__",
             (SOURCE / "cunba_system_access.sh").read_text().rstrip(),
         ).replace(
-            "__OD_STARTUP_BACKUP__",
-            (SOURCE / "od_startup_backup.sh").read_text().rstrip(),
+            "__STARTUP_BACKUP__",
+            (SOURCE / "startup_backup.sh").read_text().rstrip(),
         )
 
     def write(self, path, text):
@@ -103,7 +114,9 @@ esac''')
 
     def assert_original(self):
         self.assertEqual((self.root / "package-state").read_text().strip(), "1")
-        self.assertEqual((self.root / "data/local/bin/frida-inject2").read_text(), "injector")
+        self.assertEqual(
+            (self.root / "data/local/bin/frida-inject2").read_text(), "injector"
+        )
         self.assertEqual(
             (self.root / "data/media/0/Download/cunba/overlay/user.json").read_text(),
             "user data",
@@ -112,7 +125,9 @@ esac''')
             (self.root / "data/local/bin/frida-inject").read_text(),
             "VoyahTune injector",
         )
-        self.assertEqual((self.root / "data/local/bin/load.bin").read_text(), "VoyahTune loader")
+        self.assertEqual(
+            (self.root / "data/local/bin/load.bin").read_text(), "VoyahTune loader"
+        )
 
     def test_success_requires_new_boot_and_keeps_backups(self):
         self.run_action("prepare")
@@ -121,7 +136,9 @@ esac''')
         self.write("proc/sys/kernel/random/boot_id", "boot-two\n")
         self.run_action("commit")
         self.assertFalse((self.root / "data/local/bin/frida-inject2").exists())
-        self.assertTrue((self.root / "data/local/voyahtune-cunba-recovery/injector").exists())
+        self.assertTrue(
+            (self.root / "data/local/voyahtune-cunba-recovery/injector").exists()
+        )
         self.assertFalse((self.root / "data/local/voyahtune-install.lock").exists())
 
     def test_rollback_restores_state_and_preserves_regenerated_files(self):
@@ -131,13 +148,20 @@ esac''')
         self.run_action("rollback")
         self.assert_original()
         self.assertEqual(
-            (self.root / "data/local/voyahtune-cunba-recovery/regenerated-directory/new.txt").read_text(),
+            (
+                self.root
+                / "data/local/voyahtune-cunba-recovery/regenerated-directory/new.txt"
+            ).read_text(),
             "regenerated",
         )
 
     def test_different_loader_and_injector_contents_are_restored(self):
-        loader = self.write("data/media/0/Download/cunba/patch/load.bin", "another loader version")
-        injector = self.write("data/local/bin/frida-inject2", "another injector version")
+        loader = self.write(
+            "data/media/0/Download/cunba/patch/load.bin", "another loader version"
+        )
+        injector = self.write(
+            "data/local/bin/frida-inject2", "another injector version"
+        )
         self.run_action("prepare")
         self.run_action("apply")
         self.assertFalse(loader.exists())
@@ -184,7 +208,7 @@ esac''')
         startup = self.root / "system/etc/init.logcat.sh"
         original = startup.read_text()
         self.run_action("prepare")
-        self.command("chcon", 'exit 1')
+        self.command("chcon", "exit 1")
         self.run_action("apply", success=False)
         self.assertEqual(startup.read_text(), original)
         self.assertFalse(Path(str(startup) + ".voyahtune-cunba-new").exists())
@@ -196,9 +220,13 @@ esac''')
         self.run_action("prepare")
         self.run_action("apply")
         self.assertEqual((self.root / "mount-calls").read_text(), "-o remount,rw /\n")
-        self.assertEqual((self.root / "package-state-at-remount").read_text().strip(), "1")
+        self.assertEqual(
+            (self.root / "package-state-at-remount").read_text().strip(), "1"
+        )
         self.assertIn("rw,seclabel", (self.root / "proc/mounts").read_text())
-        self.assertFalse(list((self.root / "system/etc").glob("*.voyahtune-write-test.*")))
+        self.assertFalse(
+            list((self.root / "system/etc").glob("*.voyahtune-write-test.*"))
+        )
         self.run_action("rollback")
         self.assertEqual((self.root / "mount-calls").read_text(), "-o remount,rw /\n")
         self.assert_original()
@@ -211,7 +239,9 @@ esac''')
         )
         self.run_action("prepare")
         self.run_action("apply")
-        self.assertEqual((self.root / "mount-calls").read_text(), f"-o remount,rw {target}\n")
+        self.assertEqual(
+            (self.root / "mount-calls").read_text(), f"-o remount,rw {target}\n"
+        )
 
     def test_failed_remount_does_not_disable_components(self):
         self.write("proc/mounts", "device / ext4 ro,seclabel 0 0\n")
@@ -225,7 +255,9 @@ esac''')
             "#!/system/bin/sh\necho OEM\n",
         )
         self.assertEqual(
-            (self.root / "data/local/voyahtune-cunba-recovery/state").read_text().strip(),
+            (self.root / "data/local/voyahtune-cunba-recovery/state")
+            .read_text()
+            .strip(),
             "prepared",
         )
         self.run_action("rollback")
@@ -238,7 +270,9 @@ esac''')
         self.run_action("apply", success=False)
         self.assert_original()
         self.assertFalse(
-            (self.root / "data/local/voyahtune-cunba-recovery/startup-write-started").exists(),
+            (
+                self.root / "data/local/voyahtune-cunba-recovery/startup-write-started"
+            ).exists(),
         )
         self.run_action("rollback")
 
@@ -263,7 +297,9 @@ esac''')
         self.command("mount", "exit 1")
         self.run_action("rollback", success=False)
         self.assertEqual(
-            (self.root / "data/local/voyahtune-cunba-recovery/state").read_text().strip(),
+            (self.root / "data/local/voyahtune-cunba-recovery/state")
+            .read_text()
+            .strip(),
             "restoring",
         )
         self.assertTrue((self.root / "data/local/voyahtune-install.lock").exists())
@@ -273,18 +309,25 @@ esac''')
 
     def test_read_only_failure_can_retry_with_archived_journal(self):
         self.run_action("prepare")
-        self.command("cp", '''case "$2" in
+        self.command(
+            "cp",
+            '''case "$2" in
  "$FAKE_DEVICE/data/local/voyahtune-cunba-recovery/startup")
    echo 'Read-only file system' >&2; exit 1 ;;
 esac
-exec /bin/cp "$@"''')
+exec /bin/cp "$@"''',
+        )
         self.run_action("apply", success=False)
         self.run_action("rollback")
         self.run_action("archive-rollback")
-        archives = list((self.root / "data/local/voyahtune-cunba-history").glob("attempt.*/journal"))
+        archives = list(
+            (self.root / "data/local/voyahtune-cunba-history").glob("attempt.*/journal")
+        )
         self.assertEqual(len(archives), 1)
         self.assertEqual((archives[0] / "state").read_text().strip(), "rolled-back")
-        self.assertEqual((archives[0] / "startup").read_text(), "#!/system/bin/sh\necho OEM\n")
+        self.assertEqual(
+            (archives[0] / "startup").read_text(), "#!/system/bin/sh\necho OEM\n"
+        )
         self.assertFalse((self.root / "data/local/voyahtune-cunba-recovery").exists())
         self.assertFalse((self.root / "data/local/voyahtune-install.lock").exists())
         self.command("cp", 'exec /bin/cp "$@"')
@@ -299,7 +342,9 @@ exec /bin/cp "$@"''')
             self.run_action("prepare")
             self.run_action("rollback")
             self.run_action("archive-rollback")
-        archives = list((self.root / "data/local/voyahtune-cunba-history").glob("attempt.*/journal"))
+        archives = list(
+            (self.root / "data/local/voyahtune-cunba-history").glob("attempt.*/journal")
+        )
         self.assertEqual(len(archives), 2)
 
     def test_startup_only_failure_can_retry_without_a_cunba_package(self):
@@ -317,7 +362,9 @@ exec /bin/cp "$@"''')
         self.run_action("archive-rollback")
         self.run_action("prepare")
         self.assertEqual(
-            (self.root / "data/local/voyahtune-cunba-recovery/package-state").read_text().strip(),
+            (self.root / "data/local/voyahtune-cunba-recovery/package-state")
+            .read_text()
+            .strip(),
             "absent",
         )
 
@@ -338,8 +385,12 @@ exec /bin/cp "$@"''')
                 original = path.read_text()
                 path.write_text(content)
                 self.run_action("archive-rollback", success=False)
-                self.assertTrue((self.root / "data/local/voyahtune-cunba-recovery").exists())
-                self.assertFalse((self.root / "data/local/voyahtune-install.lock").exists())
+                self.assertTrue(
+                    (self.root / "data/local/voyahtune-cunba-recovery").exists()
+                )
+                self.assertFalse(
+                    (self.root / "data/local/voyahtune-install.lock").exists()
+                )
                 path.write_text(original)
 
     def test_retry_keeps_foreign_lock_and_quarantined_data(self):
@@ -362,7 +413,9 @@ exec /bin/cp "$@"''')
         self.run_action("apply")
         self.write("data/local/voyahtune-cunba-recovery/startup", "corrupt")
         self.run_action("rollback", success=False)
-        self.assertIn("start_logcat", (self.root / "system/etc/init.logcat.sh").read_text())
+        self.assertIn(
+            "start_logcat", (self.root / "system/etc/init.logcat.sh").read_text()
+        )
 
     def test_foreign_lock_is_not_removed(self):
         self.write("data/local/voyahtune-install.lock/owner", "ota:other")
@@ -396,7 +449,7 @@ exec /bin/cp "$@"''')
 
     def test_package_not_disabled_aborts_and_can_restore(self):
         self.run_action("prepare")
-        self.command("pm", 'echo package:android')
+        self.command("pm", "echo package:android")
         self.run_action("apply", success=False)
         self.assertTrue((self.root / "data/local/bin/frida-inject2").exists())
         self.run_action("rollback")
@@ -409,11 +462,29 @@ exec /bin/cp "$@"''')
         self.run_action("commit")
         self.command("ps", 'echo "PID ARGS"; echo "1 init"')
         probe = (SOURCE / "cunba_probe.sh").read_text()
-        for name in ["data", "system", "proc", "sdcard", "storage", "vendor", "odm", "product", "system_ext"]:
+        for name in [
+            "data",
+            "system",
+            "proc",
+            "sdcard",
+            "storage",
+            "vendor",
+            "odm",
+            "product",
+            "system_ext",
+        ]:
             probe = probe.replace(f"/{name}/", f"{self.root}/{name}/")
+
         def check():
-            return subprocess.run(["/bin/sh"], input=probe, env=self.environment,
-                                  text=True, capture_output=True, timeout=10).stdout
+            return subprocess.run(
+                ["/bin/sh"],
+                input=probe,
+                env=self.environment,
+                text=True,
+                capture_output=True,
+                timeout=10,
+            ).stdout
+
         self.assertEqual(check().strip(), "CUNBA_CLEAR")
         self.write("package-state", "1")
         self.assertIn("CUNBA_FOUND", check())
@@ -427,15 +498,21 @@ exec /bin/cp "$@"''')
         self.write("data/local/bin/frida-inject2", "unexpected")
         self.command("sha256sum", 'shasum -a 256 "$1"')
         self.run_action("rollback", success=False)
-        self.assertEqual((self.root / "data/local/bin/frida-inject2").read_text(), "unexpected")
-        self.assertTrue((self.root / "data/local/voyahtune-cunba-recovery/injector").exists())
+        self.assertEqual(
+            (self.root / "data/local/bin/frida-inject2").read_text(), "unexpected"
+        )
+        self.assertTrue(
+            (self.root / "data/local/voyahtune-cunba-recovery/injector").exists()
+        )
 
     def run_restore(self, action, success=True):
         script = self.expand_system_access((SOURCE / "cunba_restore.sh").read_text())
         script = script.replace("/system/bin/sh -n", "/bin/sh -n")
         for name in ["data", "system", "proc", "sdcard", "storage"]:
             script = script.replace(f"/{name}/", f"{self.root}/{name}/")
-        script = script.replace(r"\/sdcard\/", str(self.root).replace("/", r"\/") + r"\/sdcard\/")
+        script = script.replace(
+            r"\/sdcard\/", str(self.root).replace("/", r"\/") + r"\/sdcard\/"
+        )
         result = subprocess.run(
             ["/bin/sh"],
             input=f"action={action}\n{script}",
@@ -458,11 +535,17 @@ exec /bin/cp "$@"''')
         self.run_action("commit")
 
     def test_restore_availability_requires_verified_backup(self):
-        self.assertEqual(self.run_restore("available").stdout.strip(), "RESTORE_UNAVAILABLE")
+        self.assertEqual(
+            self.run_restore("available").stdout.strip(), "RESTORE_UNAVAILABLE"
+        )
         self.disable_for_restore()
-        self.assertEqual(self.run_restore("available").stdout.strip(), "RESTORE_AVAILABLE")
+        self.assertEqual(
+            self.run_restore("available").stdout.strip(), "RESTORE_AVAILABLE"
+        )
         self.write("data/local/voyahtune-cunba-recovery/injector", "corrupt")
-        self.assertEqual(self.run_restore("available").stdout.strip(), "RESTORE_UNAVAILABLE")
+        self.assertEqual(
+            self.run_restore("available").stdout.strip(), "RESTORE_UNAVAILABLE"
+        )
 
     def test_restore_after_removal_requires_new_boot(self):
         self.disable_for_restore()
@@ -472,7 +555,9 @@ exec /bin/cp "$@"''')
         self.write("proc/sys/kernel/random/boot_id", "restored-boot")
         self.run_restore("verify")
         self.run_restore("finish")
-        self.assertEqual(self.run_restore("available").stdout.strip(), "RESTORE_UNAVAILABLE")
+        self.assertEqual(
+            self.run_restore("available").stdout.strip(), "RESTORE_UNAVAILABLE"
+        )
 
     def test_restore_after_removal_prepares_read_only_system(self):
         self.disable_for_restore()
@@ -513,7 +598,9 @@ exec /bin/cp "$@"''')
         current = self.write("data/media/0/Download/cunba/new.txt", "new data")
         self.run_restore("restore", success=False)
         self.assertEqual(current.read_text(), "new data")
-        self.assertTrue((self.root / "data/local/voyahtune-cunba-recovery/directory").exists())
+        self.assertTrue(
+            (self.root / "data/local/voyahtune-cunba-recovery/directory").exists()
+        )
 
     def test_restore_replaces_unrecognized_current_startup(self):
         self.disable_for_restore()
@@ -531,7 +618,9 @@ exec /bin/cp "$@"''')
     def test_restore_retries_after_package_manager_failure(self):
         self.disable_for_restore()
         package_manager = (self.root / "bin/pm").read_text()
-        self.command("pm", 'if [ "$1" = enable ]; then exit 1; fi\necho package:android')
+        self.command(
+            "pm", 'if [ "$1" = enable ]; then exit 1; fi\necho package:android'
+        )
         self.run_restore("restore", success=False)
         self.assertFalse((self.root / "data/local/voyahtune-install.lock").exists())
         (self.root / "bin/pm").write_text(package_manager)

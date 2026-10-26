@@ -1,8 +1,7 @@
-//! Reversible OD-only isolation of the inspected VoyahTweaks loader.
+//! Reversible isolation of the inspected VoyahTweaks loader.
 use crate::{
     adb::Adb,
     events::{EventCallback, Events},
-    infrastructure::Infrastructure,
     payload::Payload,
     recovery::{self, Operation},
     voyahtweaks, Error, Result,
@@ -16,9 +15,9 @@ use std::{
 };
 
 const SCRIPT: &str = include_str!("voyahtweaks_recovery.sh");
-const CLEAN_STARTUP: &str = include_str!("../../../../Packaging/od/system/init.logcat.original.sh");
+const CLEAN_STARTUP: &str = include_str!("../../../../Packaging/system/init.logcat.original.sh");
 const SYSTEM_ACCESS: &str = include_str!("cunba_system_access.sh");
-const STARTUP_BACKUP: &str = include_str!("od_startup_backup.sh");
+const STARTUP_BACKUP: &str = include_str!("startup_backup.sh");
 const JOURNAL: &str = "/data/local/voyahtune-voyahtweaks-recovery";
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(35);
 const BOOT_TIMEOUT: Duration = Duration::from_secs(180);
@@ -47,7 +46,7 @@ fn execute(adb: &Adb, action: &str) -> Result<()> {
             SCRIPT
                 .replace("__VOYAHTWEAKS_CLEAN_STARTUP__", CLEAN_STARTUP.trim_end())
                 .replace("__VOYAHTWEAKS_SYSTEM_ACCESS__", SYSTEM_ACCESS.trim_end())
-                .replace("__OD_STARTUP_BACKUP__", STARTUP_BACKUP.trim_end())
+                .replace("__STARTUP_BACKUP__", STARTUP_BACKUP.trim_end())
         ),
         Duration::from_secs(90),
     )?;
@@ -153,13 +152,10 @@ pub fn disable(
     logs: &Path,
     callback: EventCallback,
 ) -> Result<Outcome> {
-    if !confirmed
-        || payload.manifest.infrastructure != Infrastructure::Od
-        || payload.manifest.removal_only
-    {
+    if !confirmed || payload.manifest.removal_only {
         return Err(Error::new(
             "VOYAHTWEAKS_CONSENT_REQUIRED",
-            "Подтвердите отключение VoyahTweaks перед установкой OD",
+            "Подтвердите отключение VoyahTweaks перед установкой VoyahTune",
         ));
     }
     payload.verify()?;

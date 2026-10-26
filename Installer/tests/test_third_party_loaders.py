@@ -8,9 +8,8 @@ import subprocess
 import tempfile
 import unittest
 
-
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "Packaging/od/installer/common/disable-third-party-loaders.sh"
+SCRIPT = ROOT / "Packaging/installer/common/disable-third-party-loaders.sh"
 
 
 class ThirdPartyLoaderTests(unittest.TestCase):
@@ -23,7 +22,7 @@ class ThirdPartyLoaderTests(unittest.TestCase):
             lambda match: str(self.root) + match.group(),
             SCRIPT.read_text(),
         )
-        self.script = r'''
+        self.script = r"""
 pm() {
     printf 'pm %s\n' "$*" >> "$TEST_ROOT/commands"
     case "$1" in
@@ -36,7 +35,7 @@ setprop() { printf 'setprop %s\n' "$*" >> "$TEST_ROOT/commands"; }
 restorecon() { :; }
 mount() { :; }
 sync() { :; }
-''' + script
+""" + script
 
     def write(self, path, content):
         destination = self.root / path.lstrip("/")
@@ -60,13 +59,18 @@ sync() { :; }
         self.write("/data/media/0/Download/cunba/patch/load.bin", "watchdog")
         self.run_cleanup()
         self.assertFalse(loader.exists())
-        self.assertEqual(Path(str(loader) + ".voyahtune-disabled").read_text(), "unknown old loader bytes")
+        self.assertEqual(
+            Path(str(loader) + ".voyahtune-disabled").read_text(),
+            "unknown old loader bytes",
+        )
         self.assertFalse(injector.exists())
         self.assertFalse((self.root / "data/media/0/Download/cunba").exists())
         self.assertEqual(owned.read_text(), "VoyahTune")
         commands = (self.root / "commands").read_text()
         self.assertIn("pm disable-user --user 0 ru.kachalin.voyahtweaks", commands)
-        self.assertIn("pm disable-user --user 0 com.cunba.lantu.otan.motorstore", commands)
+        self.assertIn(
+            "pm disable-user --user 0 com.cunba.lantu.otan.motorstore", commands
+        )
         self.run_cleanup()
         self.assertEqual(owned.read_text(), "VoyahTune")
 
@@ -76,18 +80,27 @@ sync() { :; }
             "service cunba /system/bin/frida-inject2\n    class main\n"
             "service oem /system/bin/oem\n    class main\n",
         )
-        boot_script = self.write("/data/adb/service.d/launch.sh", "#!/system/bin/sh\nstart_voyahtweaks\n")
-        dedicated = self.write("/vendor/etc/init/cunba.rc", "service helper /vendor/bin/helper\n    class main\n")
+        boot_script = self.write(
+            "/data/adb/service.d/launch.sh", "#!/system/bin/sh\nstart_voyahtweaks\n"
+        )
+        dedicated = self.write(
+            "/vendor/etc/init/cunba.rc",
+            "service helper /vendor/bin/helper\n    class main\n",
+        )
         self.write("/proc/1234/cmdline", "/system/bin/frida-inject2\0--foreground\0")
         self.run_cleanup()
         self.assertNotIn("cunba", startup.read_text())
         self.assertFalse(dedicated.exists())
-        self.assertIn("service oem /system/bin/oem\n    class main", startup.read_text())
+        self.assertIn(
+            "service oem /system/bin/oem\n    class main", startup.read_text()
+        )
         self.assertEqual(boot_script.read_text(), f"#!{self.root}/system/bin/sh\n:\n")
         self.assertEqual(list(boot_script.parent.iterdir()), [boot_script])
         self.assertIn("kill 1234", (self.root / "commands").read_text())
         self.run_cleanup()
-        saved = list((self.root / "data/local/voyahtune-disabled-loaders").rglob("launch.sh"))
+        saved = list(
+            (self.root / "data/local/voyahtune-disabled-loaders").rglob("launch.sh")
+        )
         self.assertEqual(len(saved), 1)
         self.assertIn("start_voyahtweaks", saved[0].read_text())
 

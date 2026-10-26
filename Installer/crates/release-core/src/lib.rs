@@ -5,7 +5,6 @@ pub mod error;
 pub mod infrastructure;
 pub mod paths;
 pub mod payload;
-pub mod pi_health;
 pub mod recipe;
 mod storage;
 pub use error::{Error, Result};

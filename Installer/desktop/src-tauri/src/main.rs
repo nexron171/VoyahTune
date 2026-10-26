@@ -507,11 +507,7 @@ async fn plan(app: tauri::AppHandle, serial: String, action: Action, dns: Dns) -
         let restoration_available = if action == Action::Remove {
             let adb =
                 Adb::new(default_adb(&bundle(&handle)?), Events::quiet())?.with_device(&serial)?;
-            installer_core::cunba_recovery::restoration_available(
-                &adb,
-                payload.manifest.infrastructure,
-            )
-            .unwrap_or(false)
+            installer_core::cunba_recovery::restoration_available(&adb).unwrap_or(false)
         } else {
             false
         };

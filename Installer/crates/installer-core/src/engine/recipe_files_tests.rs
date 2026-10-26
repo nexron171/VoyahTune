@@ -1,16 +1,9 @@
 use super::*;
-use crate::infrastructure::Infrastructure;
 use std::os::unix::fs::PermissionsExt;
 
 #[test]
-fn client_files_follow_the_payload_layout_and_preserve_legacy_validation() {
-    for (infrastructure, legacy_present, publish_client, success) in [
-        (Infrastructure::Unified, false, true, true),
-        (Infrastructure::Unified, true, true, true),
-        (Infrastructure::Od, true, true, true),
-        (Infrastructure::Od, false, false, false),
-        (Infrastructure::Pi, false, true, true),
-    ] {
+fn client_files_are_installed_and_retired_files_are_removed() {
+    for legacy_present in [false, true] {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().canonicalize().unwrap();
         let adb_path = root.join("adb");
@@ -56,18 +49,14 @@ esac
             }
         }
 
-        let destination = if infrastructure == Infrastructure::Unified {
-            "/data/local/bin/voyahtune-new/app-client.js"
-        } else {
-            "/data/local/bin/app_client.js"
-        };
+        let destination = "/data/local/bin/voyahtune-new/app-client.js";
         let client = b"current app client";
         fs::write(root.join("client.js"), client).unwrap();
         let mut payload = Payload {
             root: root.clone(),
             manifest: serde_json::from_value(json!({
                 "schema": 4,
-                "infrastructure": infrastructure,
+                "infrastructure": "unified",
                 "product": "VoyahTune",
                 "releaseVersion": "4.4.0",
                 "buildRevision": "test",
@@ -76,7 +65,7 @@ esac
                     "sha256": payload::sha256(&root.join("client.js")).unwrap()
                 }],
                 "recipe": {
-                    "schema": 1, "engine": "classic-v1",
+                    "schema": 3, "engine": "qinggan-v3",
                     "directories": [{"path": "/data/local/bin/voyahtune-new", "mode": 493}],
                     "files": [], "packages": [], "removeFiles": retired,
                     "removeDirectories": [], "removePrefixes": [], "removePackages": []
@@ -84,7 +73,7 @@ esac
             }))
             .unwrap(),
         };
-        if publish_client {
+        {
             payload.manifest.recipe.files.push(crate::recipe::CopyFile {
                 artifact: "client.js".into(),
                 destination: destination.into(),
@@ -102,17 +91,8 @@ esac
         )
         .unwrap();
         let result = engine.recipe_files();
-        assert_eq!(
-            result.is_ok(),
-            success,
-            "{infrastructure:?}, legacy={legacy_present}, publish={publish_client}: {result:?}"
-        );
-        let commands = fs::read_to_string(root.join("commands")).unwrap();
-        assert_eq!(
-            commands.contains("[ -s /data/local/bin/app_client.js ]"),
-            infrastructure == Infrastructure::Od
-        );
-        if success {
+        result.unwrap();
+        {
             assert_eq!(
                 fs::read(
                     root.join("device")

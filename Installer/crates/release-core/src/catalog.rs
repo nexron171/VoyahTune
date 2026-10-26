@@ -202,9 +202,9 @@ impl UpdateCatalog {
 mod update_tests {
     use super::*;
     #[test]
-    fn shared_catalog_keeps_both_profiles_and_profile_only_versions_are_stable() {
+    fn catalog_orders_versions_and_preserves_release_channels() {
         let catalog = UpdateCatalog {
-            releases: ["3.22.0-pi", "3.22.0-od", "3.23.0-beta.1-pi", "3.21.0"]
+            releases: ["3.22.0", "3.23.0", "3.24.0-beta.1", "3.21.0"]
                 .into_iter()
                 .map(|version| UpdateRelease {
                     minimum_installer_version: None,
@@ -227,16 +227,8 @@ mod update_tests {
                 .count(),
             3
         );
-        let pi: Vec<_> = catalog
-            .ota_releases()
-            .filter(|r| {
-                crate::infrastructure::Infrastructure::from_version(&r.version).unwrap()
-                    == crate::infrastructure::Infrastructure::Pi
-                    && r.channel == "stable"
-            })
-            .collect();
-        assert_eq!(pi.len(), 1);
-        assert_eq!(pi[0].version, "3.22.0-pi");
+        assert_eq!(catalog.releases[0].version, "3.24.0-beta.1");
+        assert_eq!(catalog.releases[1].version, "3.23.0");
     }
     #[test]
     fn simple_catalog_validates_identity_urls_and_duplicates() {
