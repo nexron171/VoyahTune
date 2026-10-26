@@ -97,7 +97,7 @@ public class SettingsContentProvider extends ContentProvider {
     public boolean onCreate() {
         sharedPreferences =
                 getContext().getSharedPreferences("DrivePreferences", Context.MODE_PRIVATE);
-        if (ru.big.town.common.InfrastructureProfile.read(getContext()).usesAccHooks()) {
+        if (ru.big.town.common.VehiclePlatform.current().isH97XY()) {
             sharedPreferences.registerOnSharedPreferenceChangeListener(smartSaveListener);
         }
         // Retired option: keep older installations from republishing the Apollo UI hook.
@@ -141,15 +141,12 @@ public class SettingsContentProvider extends ContentProvider {
         if ("stockEnergyStatistics".equals(method)) {
             Bundle result = new Bundle();
             result.putBoolean(
-                    "enabled",
-                    ru.big.town.common.InfrastructureProfile.read(getContext()).usesAccHooks()
-                            && sharedPreferences.getBoolean("showStockEnergyStatistics", false));
+                    "enabled", sharedPreferences.getBoolean("showStockEnergyStatistics", false));
             return result;
         }
         if ("driveHookV2".equals(method)) {
-            boolean accHooks =
-                    ru.big.town.common.InfrastructureProfile.read(getContext()).usesAccHooks();
-            if ("nativeRestore".equals(arg) && accHooks) {
+            boolean accRestore = ru.big.town.common.VehiclePlatform.current().isH97XY();
+            if ("nativeRestore".equals(arg) && accRestore) {
                 throw new IllegalArgumentException(
                         "Native restore boundary is unavailable with ACC hooks");
             }
@@ -173,8 +170,8 @@ public class SettingsContentProvider extends ContentProvider {
                             "dispatchSettings".equals(arg) ? "snapshot" : arg,
                             extras,
                             boot,
-                            accHooks);
-            if (accHooks
+                            accRestore);
+            if (accRestore
                     && "acc".equals(arg)
                     && result.getInt("acc", -1) == 2
                     && (previousAcc != 2 || previousCycle != result.getLong("cycle", 0))) {
@@ -215,7 +212,7 @@ public class SettingsContentProvider extends ContentProvider {
                             "driveMode",
                             DriveSelectionPreferences.read(sharedPreferences).configured);
                 }
-                if (accHooks && extras.containsKey("recycle")) {
+                if (accRestore && extras.containsKey("recycle")) {
                     notifySavedMode("recycle", sharedPreferences.getString("recycle", "LOW"));
                 }
                 if (extras.containsKey("energy")) {
@@ -284,8 +281,7 @@ public class SettingsContentProvider extends ContentProvider {
         energy = DriveSelectionPreferences.energy(sharedPreferences);
         recycle =
                 DriveSelectionPreferences.recycle(
-                        sharedPreferences,
-                        ru.big.town.common.InfrastructureProfile.read(getContext()).usesAccHooks());
+                        sharedPreferences, ru.big.town.common.VehiclePlatform.current().isH97XY());
         customCommand = sharedPreferences.getString("customCommand", "");
         customCommandCount = sharedPreferences.getInt("customCommandCount", 1);
         autoLight = sharedPreferences.getBoolean("autoLight", false);
@@ -306,8 +302,7 @@ public class SettingsContentProvider extends ContentProvider {
         customCommandStarButton2 = sharedPreferences.getString("customCommandStarButton2", "");
         autoLaunchOnWake = sharedPreferences.getBoolean("autoLaunchOnWake", false);
         passengerAutoStart = sharedPreferences.getBoolean("passengerAutoStart", false);
-        mediaAutoStartLastPlayer =
-                sharedPreferences.getBoolean("mediaAutoStartLastPlayer", false);
+        mediaAutoStartLastPlayer = sharedPreferences.getBoolean("mediaAutoStartLastPlayer", false);
         batteryHeatAuto = sharedPreferences.getBoolean("batteryHeatAuto", false);
         pauseMediaOnDoor = sharedPreferences.getBoolean("pauseMediaOnDoor", false);
         fragranceEnabled =
@@ -391,8 +386,8 @@ public class SettingsContentProvider extends ContentProvider {
                             ApolloSettings.SPEED_SIGNS, // 37 — распознавание ограничений скорости
                             ApolloSettings
                                     .CRUISE_SPEED_ADJUSTMENT, // 38 — совместимость со старым Native
-                            ApolloSettings.SPEED_MODE, // 39 — режим ISA/ISLC (OD)
-                            ApolloSettings.SPEED_WARNING, // 40 — предупреждение о превышении (OD)
+                            ApolloSettings.SPEED_MODE, // 39 — режим ISA/ISLC
+                            ApolloSettings.SPEED_WARNING, // 40 — предупреждение о превышении
                             "passengerAutoStart", // 41 — автозапуск сетки пассажира
                             "mediaAutoStartLastPlayer", // 42 — автозапуск последнего плеера
                             ru.big.town.common.DoorMediaSettings.PLAY_ON_DOOR, // 43
@@ -445,7 +440,7 @@ public class SettingsContentProvider extends ContentProvider {
                     apolloSpeedWarningEnabled ? 1 : 0,
                     passengerAutoStart ? 1 : 0,
                     mediaAutoStartLastPlayer ? 1 : 0,
-                    ru.big.town.common.InfrastructureProfile.read(getContext()).usesAccHooks()
+                    ru.big.town.common.VehiclePlatform.current().isH97XY()
                                     && sharedPreferences.getBoolean(
                                             ru.big.town.common.DoorMediaSettings.PLAY_ON_DOOR,
                                             false)
@@ -494,7 +489,7 @@ public class SettingsContentProvider extends ContentProvider {
                     ? 1
                     : 0;
         }
-        if (ru.big.town.common.InfrastructureProfile.read(getContext()).usesAccHooks()
+        if (ru.big.town.common.VehiclePlatform.current().isH97XY()
                 && values.containsKey("recycleSelection")) {
             if (Binder.getCallingUid() != 0) {
                 getContext()

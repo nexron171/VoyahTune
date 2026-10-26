@@ -45,6 +45,35 @@ public class DriveSelectionPreferencesTest {
     }
 
     @Test
+    public void nativeBoundaryRestoresConfiguredTargetsAndPreservesWidgetOverride() {
+        for (String override : new String[] {"", "SPORT"}) {
+            Map<String, Object> data = new HashMap<>();
+            data.put("driveMode", "COMFORT");
+            data.put("energy", "SREV");
+            data.put(DriveSelectionPolicy.CURRENT, "ECO");
+            data.put(DriveSelectionPolicy.OVERRIDE, override);
+            data.put("currentTripEnergy", "EV");
+            data.put("driveRevision", 4L);
+            SharedPreferences preferences = prefs(data);
+            assertTrue(DriveSelectionPreferences.beginNativeRestore(preferences));
+            assertEquals(
+                    override.isEmpty() ? "COMFORT" : "SPORT",
+                    DriveSelectionPreferences.read(preferences).effective());
+            assertEquals("SREV", DriveSelectionPreferences.energy(preferences));
+            assertEquals(5L, data.get("driveRevision"));
+        }
+    }
+
+    @Test
+    public void firmwareWithoutAccCyclesUsesConfiguredRecuperation() {
+        Map<String, Object> data = new HashMap<>();
+        data.put("recycle", "LOW");
+        data.put("currentTripRecycle", "HIGH");
+        assertEquals("LOW", DriveSelectionPreferences.recycle(prefs(data), false));
+        assertEquals("HIGH", DriveSelectionPreferences.recycle(prefs(data), true));
+    }
+
+    @Test
     public void recuperationRemembersExplicitSelectionButHonorsOptOut() {
         for (boolean remember : new boolean[] {true, false}) {
             Map<String, Object> data = new HashMap<>();
@@ -55,17 +84,6 @@ public class DriveSelectionPreferencesTest {
             assertEquals(remember ? "HIGH" : "LOW", data.get("recycle"));
             assertFalse(DriveSelectionPreferences.selectRecycle(prefs(data), "invalid"));
         }
-    }
-
-    @Test
-    public void piRecuperationKeepsConfiguredTargetAndNativeRestoreDoesNotClearOdTripState() {
-        Map<String, Object> data = new HashMap<>();
-        data.put("recycle", "LOW");
-        data.put("currentTripRecycle", "HIGH");
-        assertEquals("LOW", DriveSelectionPreferences.recycle(prefs(data), false));
-        assertTrue(DriveSelectionPreferences.beginNativeRestore(prefs(data)));
-        assertEquals("LOW", DriveSelectionPreferences.recycle(prefs(data), false));
-        assertEquals("HIGH", data.get("currentTripRecycle"));
     }
 
     @Test
@@ -139,23 +157,5 @@ public class DriveSelectionPreferencesTest {
         DriveSelectionPreferences.selectEnergy(prefs(data), "EV", false);
         assertEquals(false, data.get("forcedEv"));
         assertEquals("EV", data.get("energy"));
-    }
-
-    @Test
-    public void nativeRestoreClearsOnlyCurrentTripAndRetainsPinnedWidgetTargets() {
-        Map<String, Object> data = new HashMap<>();
-        data.put("driveMode", "COMFORT");
-        data.put("energy", "SREV");
-        data.put("driveRememberLast", false);
-        data.put("energyRememberLast", false);
-        DriveSelectionPreferences.select(prefs(data), "SPORT", DriveSelectionPolicy.WIDGET);
-        DriveSelectionPreferences.selectEnergy(prefs(data), "EV", false);
-        long revision = (long) data.get("driveRevision");
-        assertTrue(DriveSelectionPreferences.beginNativeRestore(prefs(data)));
-        assertEquals(revision + 1, data.get("driveRevision"));
-        assertEquals("SPORT", DriveSelectionPreferences.read(prefs(data)).effective());
-        assertEquals("COMFORT", DriveSelectionPreferences.read(prefs(data)).configured);
-        assertEquals("SREV", DriveSelectionPreferences.energy(prefs(data)));
-        assertEquals("", data.get(DriveSelectionPolicy.CURRENT));
     }
 }

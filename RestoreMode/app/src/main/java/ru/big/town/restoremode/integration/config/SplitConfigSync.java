@@ -60,8 +60,7 @@ public final class SplitConfigSync {
     }
 
     public static void pushScreenBrightness(Context context, SharedPreferences prefs) {
-        if (ru.big.town.common.InfrastructureProfile.read(context)
-                != ru.big.town.common.InfrastructureProfile.OD) return;
+
         Intent intent = new Intent(ScreenBrightnessSettings.ACTION_CONFIG);
         intent.setClassName(NATIVE_PKG, "ru.big.town.anative.ScreenBrightnessConfigReceiver");
         intent.putExtra(
@@ -114,15 +113,14 @@ public final class SplitConfigSync {
                             prefs.getString(DockIconStyle.preferenceKey(slot), "default"));
             i.putExtra(DockIconStyle.configKey(slot), style.value);
         }
-        if (ru.big.town.common.InfrastructureProfile.read(context)
-                == ru.big.town.common.InfrastructureProfile.OD) {
-            i.putExtra(ru.big.town.common.CarPlayTarget.FULLSCREEN,
-                    com.shilapi.xcertplay.CarPlaySettingsAccess.fullscreen(context));
-            i.putExtra("dockHomeShortVoyahTune", prefs.getBoolean("dockHomeShortVoyahTune", false));
-            i.putExtra(
-                    "dockAllAppsShortVoyahTune",
-                    prefs.getBoolean("dockAllAppsShortVoyahTune", false));
-        }
+
+        i.putExtra(
+                ru.big.town.common.CarPlayTarget.FULLSCREEN,
+                com.shilapi.xcertplay.CarPlaySettingsAccess.fullscreen(context));
+        i.putExtra("dockHomeShortVoyahTune", prefs.getBoolean("dockHomeShortVoyahTune", false));
+        i.putExtra(
+                "dockAllAppsShortVoyahTune", prefs.getBoolean("dockAllAppsShortVoyahTune", false));
+
         addDockSplitExtras(i, 1, p1, prefs);
         addDockSplitExtras(i, 2, p2, prefs);
         context.sendBroadcast(i);

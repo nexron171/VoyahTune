@@ -14,21 +14,20 @@ import com.shilapi.xcertplay.CarPlaySettingsAccess;
 import com.shilapi.xcertplay.DiPlayActivity;
 import com.shilapi.xcertplay.media.CarPlayAudioSettings;
 
-import java.util.List;
-
 import ru.big.town.common.CarPlayAudioProtocol;
-import ru.big.town.common.InfrastructureProfile;
 import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.carplay.CarPlayAudioClient;
 import ru.big.town.restoremode.carplay.CarPlayFeature;
 import ru.big.town.restoremode.settings.core.SettingsSection;
 import ru.big.town.restoremode.settings.core.SettingsSectionFragment;
 
+import java.util.List;
+
 public final class CarPlaySettingsFragment extends SettingsSectionFragment {
     private static final List<Integer> UI_SCALE_PRESETS = CarPlaySettingsAccess.uiScalePresets();
     private static final int[] UI_SCALE_LABELS = {
-            R.id.carPlayUiScalePreset75, R.id.carPlayUiScalePreset85,
-            R.id.carPlayUiScalePreset100, R.id.carPlayUiScalePreset115
+        R.id.carPlayUiScalePreset75, R.id.carPlayUiScalePreset85,
+        R.id.carPlayUiScalePreset100, R.id.carPlayUiScalePreset115
     };
     private final Handler handler = new Handler(Looper.getMainLooper());
     private boolean updating;
@@ -39,12 +38,24 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
     private final boolean[] dragging = new boolean[4];
     private final boolean[] pending = new boolean[4];
     private final Runnable[] volumeWrites = new Runnable[4];
-    private static final int[] SLIDERS = {R.id.carPlayMediaVolume, R.id.carPlayNavigationVolume,
-            R.id.carPlayPhoneVolume, R.id.carPlaySiriVolume};
-    private static final int[] LABELS = {R.id.carPlayMediaVolumeLabel, R.id.carPlayNavigationVolumeLabel,
-            R.id.carPlayPhoneVolumeLabel, R.id.carPlaySiriVolumeLabel};
-    private static final int[] TITLES = {R.string.carplay_volume_media, R.string.carplay_volume_navigation,
-            R.string.carplay_volume_phone, R.string.carplay_volume_siri};
+    private static final int[] SLIDERS = {
+        R.id.carPlayMediaVolume,
+        R.id.carPlayNavigationVolume,
+        R.id.carPlayPhoneVolume,
+        R.id.carPlaySiriVolume
+    };
+    private static final int[] LABELS = {
+        R.id.carPlayMediaVolumeLabel,
+        R.id.carPlayNavigationVolumeLabel,
+        R.id.carPlayPhoneVolumeLabel,
+        R.id.carPlaySiriVolumeLabel
+    };
+    private static final int[] TITLES = {
+        R.string.carplay_volume_media,
+        R.string.carplay_volume_navigation,
+        R.string.carplay_volume_phone,
+        R.string.carplay_volume_siri
+    };
     private final Runnable refresh =
             new Runnable() {
                 @Override
@@ -73,32 +84,41 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
         cancelVolumeWrites();
         Switch carPlayEnabled = settingView(R.id.carPlayEnabled);
         carPlayEnabled.setSaveEnabled(false);
-        carPlayEnabled.setOnCheckedChangeListener((button, checked) -> {
-            if (updating) {
-                return;
-            }
-            if (!checked) {
-                cancelVolumeWrites();
-            }
-            CarPlayFeature.setEnabled(requireContext(), checked);
-            if (audio != null) {
-                if (checked && isResumed()) {
-                    audio.start();
-                } else {
-                    audio.stop();
-                }
-            }
-            updateState();
-        });
+        carPlayEnabled.setOnCheckedChangeListener(
+                (button, checked) -> {
+                    if (updating) {
+                        return;
+                    }
+                    if (!checked) {
+                        cancelVolumeWrites();
+                    }
+                    CarPlayFeature.setEnabled(requireContext(), checked);
+                    if (audio != null) {
+                        if (checked && isResumed()) {
+                            audio.start();
+                        } else {
+                            audio.stop();
+                        }
+                    }
+                    updateState();
+                });
         Switch fullscreen = settingView(R.id.carPlayFullscreen);
         fullscreen.setSaveEnabled(false);
-        fullscreen.setOnCheckedChangeListener((button, checked) -> {
-            if (updating || !CarPlayFeature.isEnabled(requireContext())
-                    || InfrastructureProfile.read(requireContext()) != InfrastructureProfile.OD) {
-                return;
-            }
-            CarPlayFeature.setFullscreen(requireContext(), checked);
-        });
+        fullscreen.setOnCheckedChangeListener(
+                (button, checked) -> {
+                    if (updating || !CarPlayFeature.isEnabled(requireContext())) {
+                        return;
+                    }
+                    CarPlayFeature.setFullscreen(requireContext(), checked);
+                });
+        Switch ultra = settingView(R.id.carPlayUltra);
+        ultra.setSaveEnabled(false);
+        ultra.setOnCheckedChangeListener(
+                (button, checked) -> {
+                    if (!updating) {
+                        CarPlaySettingsAccess.setUltra(requireContext(), checked);
+                    }
+                });
         bindUiScale();
         for (int i = 0; i < SLIDERS.length; i++) {
             bindVolume(i);
@@ -107,11 +127,12 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
         Switch duckMusic = settingView(R.id.carPlayDuckMusic);
         duckMusic.setSaveEnabled(false);
         duckMusic.setChecked(CarPlayAudioSettings.duckMusic(requireContext()));
-        duckMusic.setOnCheckedChangeListener((button, enabled) -> {
-            if (!updating) {
-                CarPlayAudioSettings.setDuckMusic(requireContext(), enabled);
-            }
-        });
+        duckMusic.setOnCheckedChangeListener(
+                (button, enabled) -> {
+                    if (!updating) {
+                        CarPlayAudioSettings.setDuckMusic(requireContext(), enabled);
+                    }
+                });
         Switch theme = settingView(R.id.carPlayThemeByLight);
         theme.setSaveEnabled(false);
         theme.setOnCheckedChangeListener(
@@ -154,31 +175,35 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
         slider.setKeyProgressIncrement(1);
         for (int index = 0; index < UI_SCALE_LABELS.length; index++) {
             TextView label = settingView(UI_SCALE_LABELS[index]);
-            label.setText(getString(R.string.carplay_ui_scale_percent, UI_SCALE_PRESETS.get(index)));
+            label.setText(
+                    getString(R.string.carplay_ui_scale_percent, UI_SCALE_PRESETS.get(index)));
         }
-        slider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override
-            public void onProgressChanged(SeekBar view, int progress, boolean fromUser) {
-                if (!fromUser || updating || !view.isEnabled()
-                        || !CarPlayFeature.isEnabled(requireContext())) {
-                    return;
-                }
-                int percent = UI_SCALE_PRESETS.get(progress);
-                CarPlaySettingsAccess.setUiScalePercent(requireContext(), percent);
-                showUiScale(percent);
-            }
+        slider.setOnSeekBarChangeListener(
+                new SeekBar.OnSeekBarChangeListener() {
+                    @Override
+                    public void onProgressChanged(SeekBar view, int progress, boolean fromUser) {
+                        if (!fromUser
+                                || updating
+                                || !view.isEnabled()
+                                || !CarPlayFeature.isEnabled(requireContext())) {
+                            return;
+                        }
+                        int percent = UI_SCALE_PRESETS.get(progress);
+                        CarPlaySettingsAccess.setUiScalePercent(requireContext(), percent);
+                        showUiScale(percent);
+                    }
 
-            @Override
-            public void onStartTrackingTouch(SeekBar view) {
-                uiScaleDragging = true;
-            }
+                    @Override
+                    public void onStartTrackingTouch(SeekBar view) {
+                        uiScaleDragging = true;
+                    }
 
-            @Override
-            public void onStopTrackingTouch(SeekBar view) {
-                uiScaleDragging = false;
-                updateState();
-            }
-        });
+                    @Override
+                    public void onStopTrackingTouch(SeekBar view) {
+                        uiScaleDragging = false;
+                        updateState();
+                    }
+                });
     }
 
     private void showUiScale(int percent) {
@@ -200,40 +225,45 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
     private void bindVolume(int index) {
         SeekBar slider = settingView(SLIDERS[index]);
         slider.setSaveEnabled(false);
-        volumeWrites[index] = () -> {
-            if (!pending[index]) {
-                return;
-            }
-            pending[index] = false;
-            if (audio != null && getView() != null && slider.isEnabled()
-                    && CarPlayFeature.isEnabled(requireContext())) {
-                audio.setVolume(CarPlayAudioProtocol.streams()[index], slider.getProgress());
-            }
-        };
-        slider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override
-            public void onProgressChanged(SeekBar view, int value, boolean fromUser) {
-                if (!fromUser) {
-                    return;
-                }
-                showVolume(index, value, view.getMax());
-                pending[index] = true;
-                handler.removeCallbacks(volumeWrites[index]);
-                handler.postDelayed(volumeWrites[index], 120);
-            }
+        volumeWrites[index] =
+                () -> {
+                    if (!pending[index]) {
+                        return;
+                    }
+                    pending[index] = false;
+                    if (audio != null
+                            && getView() != null
+                            && slider.isEnabled()
+                            && CarPlayFeature.isEnabled(requireContext())) {
+                        audio.setVolume(
+                                CarPlayAudioProtocol.streams()[index], slider.getProgress());
+                    }
+                };
+        slider.setOnSeekBarChangeListener(
+                new SeekBar.OnSeekBarChangeListener() {
+                    @Override
+                    public void onProgressChanged(SeekBar view, int value, boolean fromUser) {
+                        if (!fromUser) {
+                            return;
+                        }
+                        showVolume(index, value, view.getMax());
+                        pending[index] = true;
+                        handler.removeCallbacks(volumeWrites[index]);
+                        handler.postDelayed(volumeWrites[index], 120);
+                    }
 
-            @Override
-            public void onStartTrackingTouch(SeekBar view) {
-                dragging[index] = true;
-            }
+                    @Override
+                    public void onStartTrackingTouch(SeekBar view) {
+                        dragging[index] = true;
+                    }
 
-            @Override
-            public void onStopTrackingTouch(SeekBar view) {
-                handler.removeCallbacks(volumeWrites[index]);
-                volumeWrites[index].run();
-                dragging[index] = false;
-            }
-        });
+                    @Override
+                    public void onStopTrackingTouch(SeekBar view) {
+                        handler.removeCallbacks(volumeWrites[index]);
+                        volumeWrites[index].run();
+                        dragging[index] = false;
+                    }
+                });
     }
 
     private void updateVolumes(CarPlayAudioClient.Volumes values) {
@@ -261,8 +291,14 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
         if (label == null) {
             return;
         }
-        label.setText(maximum > 0 ? getString(R.string.carplay_volume_value, getString(TITLES[index]), level, maximum)
-                : getString(R.string.carplay_volume_unavailable, getString(TITLES[index])));
+        label.setText(
+                maximum > 0
+                        ? getString(
+                                R.string.carplay_volume_value,
+                                getString(TITLES[index]),
+                                level,
+                                maximum)
+                        : getString(R.string.carplay_volume_unavailable, getString(TITLES[index])));
     }
 
     private void updateState() {
@@ -275,17 +311,17 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
         boolean enabled = CarPlayFeature.isEnabled(requireContext());
         ((Switch) settingView(R.id.carPlayEnabled)).setChecked(enabled);
         settingView(R.id.carPlayEnabledContent).setVisibility(enabled ? View.VISIBLE : View.GONE);
-        settingView(R.id.carPlayFullscreenCard).setVisibility(
-                InfrastructureProfile.read(requireContext()) == InfrastructureProfile.OD
-                        ? View.VISIBLE : View.GONE);
-        ((Switch) settingView(R.id.carPlayFullscreen)).setChecked(
-                CarPlaySettingsAccess.fullscreen(requireContext()));
+        settingView(R.id.carPlayFullscreenCard).setVisibility(View.VISIBLE);
+        ((Switch) settingView(R.id.carPlayFullscreen))
+                .setChecked(CarPlaySettingsAccess.fullscreen(requireContext()));
         updateUiScale(enabled);
         Switch duckMusic = settingView(R.id.carPlayDuckMusic);
         if (duckMusic != null) {
             duckMusic.setChecked(CarPlayAudioSettings.duckMusic(requireContext()));
         }
         theme.setChecked(CarPlaySettingsAccess.themeByLight(requireContext()));
+        ((Switch) settingView(R.id.carPlayUltra))
+                .setChecked(CarPlaySettingsAccess.ultra(requireContext()));
         updating = false;
         TextView phone = settingView(R.id.carPlayPhone);
         phone.setText(

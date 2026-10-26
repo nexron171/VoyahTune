@@ -47,12 +47,13 @@ public final class ApolloSettingsFragment extends SettingsSectionFragment {
         if (settingView(R.id.switchApolloSpeedSigns) != null) {
             switchApolloSpeedSigns = settingView(R.id.switchApolloSpeedSigns);
         }
-        boolean od = ru.big.town.common.InfrastructureProfile.read(requireContext()).usesAccHooks();
+        boolean speedControlsSupported = ru.big.town.common.VehiclePlatform.current().isH97XY();
         if (settingView(R.id.apolloSpeedOptionsContainer) != null) {
             apolloSpeedOptionsContainer = settingView(R.id.apolloSpeedOptionsContainer);
         }
         if (apolloSpeedOptionsContainer != null) {
-            apolloSpeedOptionsContainer.setVisibility(od ? View.VISIBLE : View.GONE);
+            apolloSpeedOptionsContainer.setVisibility(
+                    speedControlsSupported ? View.VISIBLE : View.GONE);
         }
         if (settingView(R.id.apolloSpeedModeGroup) != null) {
             apolloSpeedModeGroup = settingView(R.id.apolloSpeedModeGroup);
@@ -60,7 +61,7 @@ public final class ApolloSettingsFragment extends SettingsSectionFragment {
         if (settingView(R.id.switchApolloSpeedWarning) != null) {
             switchApolloSpeedWarning = settingView(R.id.switchApolloSpeedWarning);
         }
-        if (od && settingView(R.id.apolloSpeedModeGroup) != null) {
+        if (speedControlsSupported && settingView(R.id.apolloSpeedModeGroup) != null) {
             int mode = ApolloSettings.speedMode(preferences);
             apolloSpeedModeGroup.check(
                     mode == ApolloSettings.AUTO_CORRECTION
@@ -148,7 +149,7 @@ public final class ApolloSettingsFragment extends SettingsSectionFragment {
     }
 
     private void applyApolloTargets() {
-        if (!ru.big.town.common.InfrastructureProfile.read(requireContext()).usesAccHooks()) {
+        if (!ru.big.town.common.VehiclePlatform.current().isH97XY()) {
             return;
         }
         try {
@@ -193,11 +194,11 @@ public final class ApolloSettingsFragment extends SettingsSectionFragment {
 
         if (textApolloStatus != null) {
             textApolloStatus.setText(
-                    ru.big.town.common.InfrastructureProfile.read(requireContext()).usesAccHooks()
+                    ru.big.town.common.VehiclePlatform.current().isH97XY()
                             ? "Применение при изменении, кнопкой «Применить» и при пробуждении "
                                     + "автомобиля."
-                            : "Применение кнопкой «Применить» и через 10 секунд после "
-                                    + "пробуждения.");
+                            : "Применение кнопкой «Применить», при открытии водительской двери "
+                                    + "и первом включении D после неё.");
         }
     }
 

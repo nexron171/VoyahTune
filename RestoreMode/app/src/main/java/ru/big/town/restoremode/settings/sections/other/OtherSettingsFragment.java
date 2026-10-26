@@ -187,19 +187,11 @@ public final class OtherSettingsFragment extends SettingsSectionFragment {
         settingView(R.id.buttonOpenUpdates)
                 .setOnClickListener(
                         v -> {
-                            boolean embedded =
-                                    ru.big.town.common.InfrastructureProfile.read(requireContext())
-                                            == ru.big.town.common.InfrastructureProfile.OD;
                             Intent updates =
                                     new Intent(Intent.ACTION_MAIN)
                                             .setComponent(
-                                                    embedded
-                                                            ? new android.content.ComponentName(
-                                                                    requireContext(),
-                                                                    OtaActivity.class)
-                                                            : new android.content.ComponentName(
-                                                                    "ru.big.town.updater",
-                                                                    "ru.big.town.updater.MainActivity"))
+                                                    new android.content.ComponentName(
+                                                            requireContext(), OtaActivity.class))
                                             .addFlags(
                                                     Intent.FLAG_ACTIVITY_NEW_TASK
                                                             | Intent.FLAG_ACTIVITY_CLEAR_TASK)
@@ -319,16 +311,14 @@ public final class OtherSettingsFragment extends SettingsSectionFragment {
     private void bindDockNavigation(int rowId, int switchId, String preference) {
         View row = settingView(rowId);
         if (row == null) return;
-        boolean supported = ru.big.town.common.InfrastructureProfile.read(requireContext())
-                == ru.big.town.common.InfrastructureProfile.OD;
-        row.setVisibility(supported ? View.VISIBLE : View.GONE);
-        if (!supported) return;
+        row.setVisibility(View.VISIBLE);
         Switch toggle = settingView(switchId);
         toggle.setChecked(preferences.getBoolean(preference, false));
-        toggle.setOnCheckedChangeListener((button, checked) -> {
-            preferences.edit().putBoolean(preference, checked).apply();
-            SplitConfigSync.pushDock(requireContext(), preferences);
-        });
+        toggle.setOnCheckedChangeListener(
+                (button, checked) -> {
+                    preferences.edit().putBoolean(preference, checked).apply();
+                    SplitConfigSync.pushDock(requireContext(), preferences);
+                });
     }
 
     private void bindFloatingBack() {
@@ -784,9 +774,11 @@ public final class OtherSettingsFragment extends SettingsSectionFragment {
         bindCustomCommandsVisibility();
         bindAutoLaunch();
         bindFloatingBack();
-        bindDockNavigation(R.id.dockHomePressRow, R.id.switchDockHomeShortVoyahTune,
-                "dockHomeShortVoyahTune");
-        bindDockNavigation(R.id.dockAllAppsPressRow, R.id.switchDockAllAppsShortVoyahTune,
+        bindDockNavigation(
+                R.id.dockHomePressRow, R.id.switchDockHomeShortVoyahTune, "dockHomeShortVoyahTune");
+        bindDockNavigation(
+                R.id.dockAllAppsPressRow,
+                R.id.switchDockAllAppsShortVoyahTune,
                 "dockAllAppsShortVoyahTune");
         bindTheme();
         bindLocationPermission();

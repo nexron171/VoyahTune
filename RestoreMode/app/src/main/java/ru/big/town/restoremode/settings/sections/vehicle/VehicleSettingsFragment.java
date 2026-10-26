@@ -49,8 +49,7 @@ public final class VehicleSettingsFragment extends SettingsSectionFragment {
             super.addDynamicRows(rows, kind);
             return;
         }
-        if (ru.big.town.common.InfrastructureProfile.read(requireContext())
-                != ru.big.town.common.InfrastructureProfile.OD) return;
+
         if (brightnessPage == null) {
             brightnessPage =
                     new ScreenBrightnessSettingsPage(
@@ -211,12 +210,7 @@ public final class VehicleSettingsFragment extends SettingsSectionFragment {
         if (row == null) {
             return;
         }
-        boolean supported =
-                ru.big.town.common.InfrastructureProfile.read(requireContext()).usesAccHooks();
-        row.setVisibility(supported ? View.VISIBLE : View.GONE);
-        if (!supported) {
-            return;
-        }
+        row.setVisibility(View.VISIBLE);
         Switch toggle = settingView(R.id.switchStockEnergyStatistics);
         toggle.setChecked(preferences.getBoolean("showStockEnergyStatistics", false));
         toggle.setOnCheckedChangeListener(
@@ -254,8 +248,7 @@ public final class VehicleSettingsFragment extends SettingsSectionFragment {
         View row = settingView(R.id.playMediaOnDoorRow);
         Switch toggle = settingView(R.id.switchPlayMediaOnDoor);
         if (row == null || toggle == null) return;
-        boolean supported =
-                ru.big.town.common.InfrastructureProfile.read(requireContext()).usesAccHooks();
+        boolean supported = ru.big.town.common.VehiclePlatform.current().isH97XY();
         row.setVisibility(supported ? View.VISIBLE : View.GONE);
         toggle.setChecked(
                 preferences.getBoolean(ru.big.town.common.DoorMediaSettings.PLAY_ON_DOOR, false));
@@ -411,8 +404,7 @@ public final class VehicleSettingsFragment extends SettingsSectionFragment {
         if (row == null) {
             return;
         }
-        boolean supported =
-                ru.big.town.common.InfrastructureProfile.read(requireContext()).usesAccHooks();
+        boolean supported = ru.big.town.common.VehiclePlatform.current().isH97XY();
         row.setVisibility(supported ? View.VISIBLE : View.GONE);
         if (!supported) {
             return;
@@ -607,7 +599,7 @@ public final class VehicleSettingsFragment extends SettingsSectionFragment {
         View driveEntryRow = settingView(R.id.driveEntryRestoreRow);
         if (driveEntryRow != null) {
             driveEntryRow.setVisibility(
-                    ru.big.town.common.InfrastructureProfile.read(requireContext()).usesAccHooks()
+                    ru.big.town.common.VehiclePlatform.current().isH97XY()
                             ? View.VISIBLE
                             : View.GONE);
             Switch toggle = settingView(R.id.switchDriveEntryRestore);

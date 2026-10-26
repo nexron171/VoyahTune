@@ -82,9 +82,9 @@ public final class DriveSelectionPreferences {
         return recycle(prefs, true);
     }
 
-    public static synchronized String recycle(SharedPreferences prefs, boolean accHooks) {
+    public static synchronized String recycle(SharedPreferences prefs, boolean accRestore) {
         String configured = prefs.getString("recycle", "LOW");
-        return accHooks ? prefs.getString("currentTripRecycle", configured) : configured;
+        return accRestore ? prefs.getString("currentTripRecycle", configured) : configured;
     }
 
     static boolean validEnergy(String mode) {
@@ -95,7 +95,7 @@ public final class DriveSelectionPreferences {
                 || "FORCE_EV".equals(mode);
     }
 
-    /** Native's PI restore boundary has no CAN-agent ACC claim; retain saved/widget targets. */
+    /** A Native restore boundary retains saved and widget targets without an ACC-agent claim. */
     static synchronized boolean beginNativeRestore(SharedPreferences prefs) {
         return prefs.edit()
                 .putString(DriveSelectionPolicy.CURRENT, "")
@@ -115,7 +115,7 @@ public final class DriveSelectionPreferences {
     }
 
     public static synchronized Bundle hook(
-            SharedPreferences prefs, String action, Bundle args, int boot, boolean accHooks) {
+            SharedPreferences prefs, String action, Bundle args, int boot, boolean accRestore) {
         if (args == null) {
             args = new Bundle();
         }
@@ -133,14 +133,14 @@ public final class DriveSelectionPreferences {
                     e.putLong(CYCLE, prefs.getLong(CYCLE, 0) + 1)
                             .putLong(REV, prefs.getLong(REV, 0) + 1);
                     e.putString(SETTINGS_START, "pending");
-                    if (accHooks) {
+                    if (accRestore) {
                         e.putBoolean(DoorMediaSettings.PLAY_PENDING, acc == 2);
                     }
                     if (!preserve) {
                         e.putString(DriveSelectionPolicy.CURRENT, "")
                                 .putString("currentTripEnergy", "")
                                 .putString(START, "pending");
-                        if (accHooks) {
+                        if (accRestore) {
                             e.remove("currentTripRecycle");
                         }
                     }
@@ -151,7 +151,7 @@ public final class DriveSelectionPreferences {
             }
         } else if (DoorMediaSettings.CLAIM_PLAY.equals(action)) {
             boolean claim =
-                    accHooks
+                    accRestore
                             && prefs.getInt(BOOT, -1) == boot
                             && prefs.getInt(ACC, -1) == 2
                             && prefs.getBoolean(DoorMediaSettings.PLAY_ON_DOOR, false)
@@ -160,7 +160,7 @@ public final class DriveSelectionPreferences {
             if (claim && !prefs.edit().putBoolean(DoorMediaSettings.PLAY_PENDING, false).commit()) {
                 throw new IllegalStateException("Door media claim not persisted");
             }
-            Bundle result = snapshot(prefs, accHooks);
+            Bundle result = snapshot(prefs, accRestore);
             result.putBoolean("claimed", claim);
             return result;
         } else if ("nativeRestore".equals(action)) {
@@ -174,7 +174,7 @@ public final class DriveSelectionPreferences {
             if (claim && !prefs.edit().putString(SETTINGS_START, "claimed").commit()) {
                 throw new IllegalStateException("Settings claim not persisted");
             }
-            Bundle result = snapshot(prefs, accHooks);
+            Bundle result = snapshot(prefs, accRestore);
             result.putBoolean("claimed", claim);
             return result;
         } else if ("completeSettings".equals(action)) {
@@ -203,13 +203,13 @@ public final class DriveSelectionPreferences {
                                 : prefs.getString("energy", "SREV"),
                         true);
             }
-            if (accHooks && prefs.getBoolean("recycleEnabled", false)) {
+            if (accRestore && prefs.getBoolean("recycleEnabled", false)) {
                 if (!prefs.edit().remove("currentTripRecycle").commit()) {
                     throw new IllegalStateException("Recuperation target not persisted");
                 }
             }
         } else if ("user".equals(action)) {
-            if (accHooks
+            if (accRestore
                     && args.containsKey("recycle")
                     && !selectRecycle(prefs, args.getString("recycle"))) {
                 throw new IllegalArgumentException("Invalid user recuperation");
@@ -231,11 +231,11 @@ public final class DriveSelectionPreferences {
                             && (prefs.getBoolean("driveEnabled", false)
                                     || prefs.getBoolean("energyEnabled", false)
                                     || prefs.getBoolean("forcedEv", false)
-                                    || (accHooks && prefs.getBoolean("recycleEnabled", false)));
+                                    || (accRestore && prefs.getBoolean("recycleEnabled", false)));
             if (claim && !prefs.edit().putString(START, "claimed").commit()) {
                 throw new IllegalStateException("Startup claim not persisted");
             }
-            Bundle result = snapshot(prefs, accHooks);
+            Bundle result = snapshot(prefs, accRestore);
             result.putBoolean("claimed", claim);
             return result;
         } else if ("complete".equals(action)) {
@@ -250,15 +250,15 @@ public final class DriveSelectionPreferences {
         } else if (!"snapshot".equals(action)) {
             throw new IllegalArgumentException("Unknown drive hook operation");
         }
-        return snapshot(prefs, accHooks);
+        return snapshot(prefs, accRestore);
     }
 
-    private static Bundle snapshot(SharedPreferences prefs, boolean accHooks) {
+    private static Bundle snapshot(SharedPreferences prefs, boolean accRestore) {
         Bundle result = new Bundle();
         result.putInt("protocol", 2);
         result.putString("mode", read(prefs).effective());
         result.putString("energy", energy(prefs));
-        if (accHooks) {
+        if (accRestore) {
             result.putString("recycle", recycle(prefs));
             result.putBoolean(
                     "applySettingsOnDrive", prefs.getBoolean("applySettingsOnDrive", false));

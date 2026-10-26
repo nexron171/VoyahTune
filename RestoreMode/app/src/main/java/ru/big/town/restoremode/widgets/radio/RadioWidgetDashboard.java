@@ -13,7 +13,6 @@ import android.os.ResultReceiver;
 import android.os.SystemClock;
 import android.widget.Toast;
 
-import ru.big.town.common.InfrastructureProfile;
 import ru.big.town.common.RadioWidgetProtocol;
 
 /**
@@ -54,7 +53,6 @@ public final class RadioWidgetDashboard {
     }
 
     public void watch(boolean enabled) {
-        enabled &= InfrastructureProfile.read(context) == InfrastructureProfile.OD;
         if (watching == enabled) return;
         watching = enabled;
         loadState();

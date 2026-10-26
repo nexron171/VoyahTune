@@ -5,23 +5,21 @@ import android.content.Context;
 import android.util.Log;
 
 import ru.big.town.common.CarPlayTarget;
-import ru.big.town.common.InfrastructureProfile;
 
 /** Uses the OEM activity-level move gate without denying the shared CarPlay package. */
-public final class OdDashboardTransferPolicy {
+public final class DashboardTransferPolicy {
     private static boolean unavailableReported;
 
-    private OdDashboardTransferPolicy() {}
+    private DashboardTransferPolicy() {}
 
-    static boolean shouldPin(InfrastructureProfile infrastructure, String activityName) {
-        return infrastructure == InfrastructureProfile.OD
-                && activityName != null
+    static boolean shouldPin(String activityName) {
+        return activityName != null
                 && activityName.startsWith("ru.big.town.restoremode.")
                 && !CarPlayTarget.LAUNCHER.equals(activityName);
     }
 
     public static void apply(Activity activity) {
-        if (!shouldPin(InfrastructureProfile.read(activity), activity.getClass().getName())) {
+        if (!shouldPin(activity.getClass().getName())) {
             return;
         }
         try {
@@ -29,7 +27,11 @@ public final class OdDashboardTransferPolicy {
             Object manager =
                     managerClass.getMethod("getInstance", Context.class).invoke(null, activity);
             managerClass
-                    .getMethod("setEnableActivityAnimation", Activity.class, boolean.class, boolean.class)
+                    .getMethod(
+                            "setEnableActivityAnimation",
+                            Activity.class,
+                            boolean.class,
+                            boolean.class)
                     .invoke(manager, activity, false, true);
         } catch (ReflectiveOperationException | LinkageError error) {
             if (!unavailableReported) {

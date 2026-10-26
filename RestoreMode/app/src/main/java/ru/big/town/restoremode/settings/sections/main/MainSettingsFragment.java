@@ -1097,12 +1097,6 @@ public class MainSettingsFragment extends SettingsSectionFragment {
         if (profile().isPassenger()) {
             useLayoutPreferences(row);
         }
-        View radioCard = row.findViewById(R.id.radioWidgetCard);
-        if (radioCard != null
-                && ru.big.town.common.InfrastructureProfile.read(requireContext())
-                        != ru.big.town.common.InfrastructureProfile.OD) {
-            radioCard.setVisibility(View.GONE);
-        }
         if (layout == R.layout.settings_main_add_shortcut) {
             return SettingsPanels.appSelectionPanel(
                     row, AppShortcutStore.load(preferences).isEmpty(), true);

@@ -59,7 +59,6 @@ import com.google.android.material.snackbar.Snackbar;
 
 import ru.big.town.common.CarPlayTarget;
 import ru.big.town.common.CarPlayWidgetProtocol;
-import ru.big.town.common.InfrastructureProfile;
 import ru.big.town.common.TripProtocol;
 import ru.big.town.restoremode.AdvanceActivity;
 import ru.big.town.restoremode.AdvanceActivityStarButton;
@@ -122,15 +121,19 @@ public class DashboardActivity extends AppCompatActivity {
     private SharedPreferences sharedPreferences;
     private SharedPreferences settingsPreferences;
     private boolean carPlayFeatureReceiverRegistered;
-    private final BroadcastReceiver carPlayFeatureReceiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            carPlayWidgetGeneration++;
-            TileOrderStore.sync(sharedPreferences, settingsPreferences, getPackageManager(),
-                    dashboardProfile.isPassenger());
-            renderSplitTiles();
-        }
-    };
+    private final BroadcastReceiver carPlayFeatureReceiver =
+            new BroadcastReceiver() {
+                @Override
+                public void onReceive(Context context, Intent intent) {
+                    carPlayWidgetGeneration++;
+                    TileOrderStore.sync(
+                            sharedPreferences,
+                            settingsPreferences,
+                            getPackageManager(),
+                            dashboardProfile.isPassenger());
+                    renderSplitTiles();
+                }
+            };
     private DashboardProfile dashboardProfile = DashboardProfile.driver();
     private int dashboardDisplayId;
     static final int MSG_RESULT = 4;
@@ -1116,8 +1119,8 @@ public class DashboardActivity extends AppCompatActivity {
     }
 
     /**
-     * Passenger entry point overrides this so its layout profile does not depend on display probing.
-     * The driver dashboard keeps the historical display-based selection.
+     * Passenger entry point overrides this so its layout profile does not depend on display
+     * probing. The driver dashboard keeps the historical display-based selection.
      */
     protected DashboardProfile resolveDashboardProfile(int displayId) {
         return DashboardProfile.forDisplay(displayId);
@@ -1510,8 +1513,7 @@ public class DashboardActivity extends AppCompatActivity {
         if (embeddedWidgetSurfaces.containsKey(entry.id)) {
             releaseEmbeddedWidget(entry.id, widgetView);
         }
-        launchEmbeddedAppWidget(
-                widgetView, entry, pkg, AppDpiStore.get(settingsPreferences, pkg));
+        launchEmbeddedAppWidget(widgetView, entry, pkg, AppDpiStore.get(settingsPreferences, pkg));
     }
 
     /** Открыть системный экран настроек Android. */
@@ -1589,7 +1591,8 @@ public class DashboardActivity extends AppCompatActivity {
         TripLocationPermission.refresh(this);
         TripLocationPermission.sync(this);
         suspensionScreenResumed = true;
-        registerReceiver(carPlayFeatureReceiver,
+        registerReceiver(
+                carPlayFeatureReceiver,
                 new IntentFilter(ru.big.town.restoremode.carplay.CarPlayFeature.ACTION_CHANGED),
                 RECEIVER_NOT_EXPORTED);
         carPlayFeatureReceiverRegistered = true;
@@ -1640,7 +1643,9 @@ public class DashboardActivity extends AppCompatActivity {
         applyContentTopInset();
         // Синхронизировать список плиток перед рендером
         TileOrderStore.sync(
-                sharedPreferences, settingsPreferences, getPackageManager(),
+                sharedPreferences,
+                settingsPreferences,
+                getPackageManager(),
                 dashboardProfile.isPassenger());
         dashboardOpening = true;
         try {
@@ -1683,7 +1688,10 @@ public class DashboardActivity extends AppCompatActivity {
     private void onScenarioToggled() {
         SplitConfigSync.pushScenarios(this, settingsPreferences);
         VoiceCommands.invalidate();
-        TileOrderStore.sync(sharedPreferences, settingsPreferences, getPackageManager(),
+        TileOrderStore.sync(
+                sharedPreferences,
+                settingsPreferences,
+                getPackageManager(),
                 dashboardProfile.isPassenger());
         renderSplitTiles();
     }
@@ -1749,8 +1757,7 @@ public class DashboardActivity extends AppCompatActivity {
         }
         switch (widgetId) {
             case RadioWidgetLayout.ID:
-                return InfrastructureProfile.read(this) == InfrastructureProfile.OD
-                        && sharedPreferences.getBoolean(RadioWidgetLayout.VISIBLE, false);
+                return sharedPreferences.getBoolean(RadioWidgetLayout.VISIBLE, false);
             case HeadlightWidgetLayout.ID:
                 return sharedPreferences.getBoolean(HeadlightWidgetLayout.VISIBLE, false);
             case "suspensionWidget":
@@ -1955,8 +1962,7 @@ public class DashboardActivity extends AppCompatActivity {
         String widgetSessionId = AppWidgetSessionStore.sessionId(this, settingsPreferences);
         boolean firstOpening =
                 dashboardOpening
-                        && AppWidgetSessionStore.isFirstOpening(
-                                sharedPreferences, widgetSessionId);
+                        && AppWidgetSessionStore.isFirstOpening(sharedPreferences, widgetSessionId);
         if (firstOpening) {
             pendingAutoStartWidgets.clear();
         }
@@ -2156,7 +2162,8 @@ public class DashboardActivity extends AppCompatActivity {
                                             ViewGroup.LayoutParams.MATCH_PARENT));
                             ((TripWidgetView) energyView)
                                     .showTripHistory(
-                                            settingsPreferences.getBoolean("saveTripHistory", true));
+                                            settingsPreferences.getBoolean(
+                                                    "saveTripHistory", true));
                             energyView.setOnLongClickListener(v -> tripWidget.performLongClick());
                             widgetView = tripWidget;
                         } else {
@@ -2370,8 +2377,7 @@ public class DashboardActivity extends AppCompatActivity {
                             AppWidgetSessionStore.findLaunch(
                                     sharedPreferences, widgetSessionId, entry.id);
                     if (firstOpening && entry.autoStart) {
-                        scheduleEmbeddedLaunch(
-                                appWidgetView, entry, null, entry.autoStartDelay);
+                        scheduleEmbeddedLaunch(appWidgetView, entry, null, entry.autoStartDelay);
                     } else if (!pendingAutoStartWidgets.contains(entry.id)
                             && sessionLaunch != null) {
                         scheduleEmbeddedLaunch(appWidgetView, entry, sessionLaunch, 0);
@@ -2542,10 +2548,7 @@ public class DashboardActivity extends AppCompatActivity {
 
     /** Open an embedded app in the tile on user action and remember it for this session. */
     private void launchEmbeddedAppWidget(
-            View widgetView,
-            AppWidgetStore.Entry entry,
-            String packageName,
-            int dpi) {
+            View widgetView, AppWidgetStore.Entry entry, String packageName, int dpi) {
         if (!CarPlayTarget.isCarPlay(packageName)) {
             AppWidgetSessionStore.saveLaunch(
                     sharedPreferences, currentWidgetSessionId(), entry.id, packageName, dpi);
@@ -2554,8 +2557,8 @@ public class DashboardActivity extends AppCompatActivity {
     }
 
     /**
-     * Launch after the screen opens. Auto-start runs only on the first opening of the session;
-     * the session launch restores an application that was started earlier.
+     * Launch after the screen opens. Auto-start runs only on the first opening of the session; the
+     * session launch restores an application that was started earlier.
      */
     private void scheduleEmbeddedLaunch(
             View widgetView,
@@ -3463,8 +3466,7 @@ public class DashboardActivity extends AppCompatActivity {
                 if (CarPlayTarget.isCarPlay(entry.packageName)) {
                     continue;
                 }
-                targets.add(
-                        new SwapTarget(other, entry.id, other.appWidgetTitle(entry) + suffix));
+                targets.add(new SwapTarget(other, entry.id, other.appWidgetTitle(entry) + suffix));
             }
         }
         return targets;
@@ -3516,7 +3518,9 @@ public class DashboardActivity extends AppCompatActivity {
 
     /** Второй экран должен быть открыт: его плитки создают поверхности для обмена. */
     private boolean checkOtherScreenReady(DashboardActivity screen) {
-        if (screen != null && !screen.isFinishing() && !screen.isDestroyed()
+        if (screen != null
+                && !screen.isFinishing()
+                && !screen.isDestroyed()
                 && screen.suspensionScreenResumed) {
             return true;
         }

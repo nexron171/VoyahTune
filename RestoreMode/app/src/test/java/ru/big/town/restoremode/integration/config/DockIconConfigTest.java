@@ -16,7 +16,6 @@ import android.widget.TextView;
 
 import androidx.appcompat.app.AlertDialog;
 
-import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -29,11 +28,9 @@ import org.robolectric.shadows.ShadowDialog;
 
 import ru.big.town.common.CarPlayTarget;
 import ru.big.town.common.DockIconStyle;
-import ru.big.town.common.InfrastructureProfile;
 import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.settings.ui.dialogs.DockIconPicker;
 
-import java.lang.reflect.Field;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -42,94 +39,70 @@ import java.util.concurrent.atomic.AtomicReference;
 public class DockIconConfigTest {
     private Application context;
     private SharedPreferences preferences;
-    private Field cachedProfile;
-    private Object previousProfile;
 
     @Before
     public void setUp() throws Exception {
         context = RuntimeEnvironment.getApplication();
         preferences = context.getSharedPreferences("dock-icons-test", Context.MODE_PRIVATE);
         preferences.edit().clear().commit();
-        cachedProfile = InfrastructureProfile.class.getDeclaredField("cached");
-        cachedProfile.setAccessible(true);
-        previousProfile = cachedProfile.get(null);
-        cachedProfile.set(null, InfrastructureProfile.OD);
-    }
-
-    @After
-    public void restoreProfile() throws Exception {
-        cachedProfile.set(null, previousProfile);
     }
 
     @Test
-    public void publishesIndependentChoicesAndExplicitResetInBothProfiles() throws Exception {
-        for (InfrastructureProfile profile : InfrastructureProfile.values()) {
-            cachedProfile.set(null, profile);
-            preferences
-                    .edit()
-                    .putString("dockOverride1", "same.app")
-                    .putString("dockOverride2", "same.app")
-                    .putString("dockOverride1Icon", "navigation")
-                    .putString("dockOverride2Icon", "music")
-                    .commit();
-            Intent config = publish();
-            assertEquals("navigation", config.getStringExtra("dock1Icon"));
-            assertEquals("music", config.getStringExtra("dock2Icon"));
-            assertEquals(
-                    "ru.big.town.anative.SetModesConfigReceiver",
-                    config.getComponent().getClassName());
+    public void publishesIndependentChoicesAndExplicitReset() throws Exception {
 
-            preferences.edit().remove("dockOverride1Icon").commit();
-            config = publish();
-            assertEquals("default", config.getStringExtra("dock1Icon"));
-            assertEquals("music", config.getStringExtra("dock2Icon"));
-        }
+        preferences
+                .edit()
+                .putString("dockOverride1", "same.app")
+                .putString("dockOverride2", "same.app")
+                .putString("dockOverride1Icon", "navigation")
+                .putString("dockOverride2Icon", "music")
+                .commit();
+        Intent config = publish();
+        assertEquals("navigation", config.getStringExtra("dock1Icon"));
+        assertEquals("music", config.getStringExtra("dock2Icon"));
+        assertEquals(
+                "ru.big.town.anative.SetModesConfigReceiver", config.getComponent().getClassName());
+
+        preferences.edit().remove("dockOverride1Icon").commit();
+        config = publish();
+        assertEquals("default", config.getStringExtra("dock1Icon"));
+        assertEquals("music", config.getStringExtra("dock2Icon"));
     }
 
     @Test
-    public void unknownChoiceFallsBackToDefaultInBothProfiles() throws Exception {
-        for (InfrastructureProfile profile : InfrastructureProfile.values()) {
-            cachedProfile.set(null, profile);
-            preferences.edit().putString("dockOverride1Icon", "unknown").commit();
-            assertEquals("default", publish().getStringExtra("dock1Icon"));
-        }
+    public void unknownChoiceFallsBackToDefault() throws Exception {
+
+        preferences.edit().putString("dockOverride1Icon", "unknown").commit();
+        assertEquals("default", publish().getStringExtra("dock1Icon"));
     }
 
     @Test
-    public void navigationButtonOverridesRemainOdOnly() throws Exception {
+    public void navigationButtonOverridesArePublished() throws Exception {
         preferences
                 .edit()
                 .putBoolean("dockHomeShortVoyahTune", true)
                 .putBoolean("dockAllAppsShortVoyahTune", true)
                 .commit();
-        for (InfrastructureProfile profile : InfrastructureProfile.values()) {
-            cachedProfile.set(null, profile);
-            Intent config = publish();
-            if (profile == InfrastructureProfile.OD) {
-                assertTrue(config.getBooleanExtra("dockHomeShortVoyahTune", false));
-                assertTrue(config.getBooleanExtra("dockAllAppsShortVoyahTune", false));
-            } else {
-                assertFalse(config.hasExtra("dockHomeShortVoyahTune"));
-                assertFalse(config.hasExtra("dockAllAppsShortVoyahTune"));
-            }
-        }
+
+        Intent config = publish();
+
+        assertTrue(config.getBooleanExtra("dockHomeShortVoyahTune", false));
+        assertTrue(config.getBooleanExtra("dockAllAppsShortVoyahTune", false));
     }
 
     @Test
-    public void carPlayTargetStaysSeparateFromDashboardInBothProfiles() throws Exception {
+    public void carPlayTargetStaysSeparateFromDashboard() throws Exception {
         preferences
                 .edit()
                 .putString("dockOverride1", CarPlayTarget.ID)
                 .putString("dockOverride2", CarPlayTarget.PACKAGE)
                 .commit();
-        for (InfrastructureProfile profile : InfrastructureProfile.values()) {
-            cachedProfile.set(null, profile);
-            Intent config = publish();
-            assertEquals(CarPlayTarget.ID, config.getStringExtra("dock1"));
-            assertEquals(CarPlayTarget.PACKAGE, config.getStringExtra("dock2"));
-            assertEquals("default", config.getStringExtra("dock1Icon"));
-            assertEquals("default", config.getStringExtra("dock2Icon"));
-        }
+
+        Intent config = publish();
+        assertEquals(CarPlayTarget.ID, config.getStringExtra("dock1"));
+        assertEquals(CarPlayTarget.PACKAGE, config.getStringExtra("dock2"));
+        assertEquals("default", config.getStringExtra("dock1Icon"));
+        assertEquals("default", config.getStringExtra("dock2Icon"));
     }
 
     @Test
