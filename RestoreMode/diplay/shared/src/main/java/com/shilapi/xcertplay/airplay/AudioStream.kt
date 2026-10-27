@@ -6,10 +6,15 @@ import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.InetSocketAddress
+import java.net.SocketTimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
-enum class AudioCodecKind { AAC_LC, OPUS, LPCM }
+enum class AudioCodecKind {
+    AAC_LC,
+    OPUS,
+    LPCM,
+}
 
 data class AudioFormat(
     val codec: AudioCodecKind,
@@ -35,10 +40,16 @@ class AudioStream(
     private val key: ByteArray,
     private val streamType: Int = -1,
     private val onDiagnostic: (String) -> Unit = {},
+    private val expectedPeer: InetAddress? = null,
+    private val recoveryBudgetMillis: (() -> Long)? = null,
+    remoteControlPort: Int? = null,
+    private val isCurrent: () -> Boolean = { true },
 ) : Closeable {
     interface Listener {
         fun onStarted(firstSample: Int) {}
+
         fun onRtp(rtp: ByteArray, sample: Int) {}
+
         fun onPacket(
             wire: ByteArray,
             rtp: ByteArray?,
@@ -56,8 +67,22 @@ class AudioStream(
     private var dataThread: Thread? = null
     private var controlThread: Thread? = null
     private var started = false
+    private val deliveryLock = Any()
+    private var listener: Listener? = null
+    private var requestSequence = 0
+    private var remoteControl =
+        remoteControlPort
+            ?.takeIf { it in 1..65535 }
+            ?.let { port -> expectedPeer?.let { InetSocketAddress(it, port) } }
+    private val recovery = recoveryBudgetMillis?.let { budget ->
+        AudioPacketRecovery(budget, ::requestResend)
+    }
+    private var lastRecoveryReportNanos = 0L
+    private var resendConfirmed = false
 
     fun listen(listener: Listener): Pair<Int, Int> {
+        check(this.listener == null && !closed.get())
+        this.listener = listener
         val data = bindAnyPort()
         // Keep short Wi-Fi bursts in the kernel while decrypting or scheduling pauses
         // the receive thread. The platform may cap this request; log the actual size.
@@ -65,18 +90,23 @@ class AudioStream(
         if (originalBufferBytes < AUDIO_RECEIVE_BUFFER_BYTES) {
             runCatching { data.receiveBufferSize = AUDIO_RECEIVE_BUFFER_BYTES }
         }
-        onDiagnostic("Audio UDP receive buffer type=$streamType original=$originalBufferBytes requested=$AUDIO_RECEIVE_BUFFER_BYTES actual=${runCatching { data.receiveBufferSize }.getOrDefault(0)}")
+        onDiagnostic(
+            "Audio UDP receive buffer type=$streamType original=$originalBufferBytes requested=$AUDIO_RECEIVE_BUFFER_BYTES actual=${runCatching { data.receiveBufferSize }.getOrDefault(0)}",
+        )
         val control = bindAnyPort()
+        if (recovery != null) data.soTimeout = RECOVERY_POLL_MILLIS
         dataSocket = data
         controlSocket = control
-        dataThread = Thread({ runData(data, listener) }, "airplay-audio-rx").apply {
-            isDaemon = true
-            start()
-        }
-        controlThread = Thread({ runControl(control) }, "airplay-rtcp-rx").apply {
-            isDaemon = true
-            start()
-        }
+        dataThread =
+            Thread({ runData(data, listener) }, "airplay-audio-rx").apply {
+                isDaemon = true
+                start()
+            }
+        controlThread =
+            Thread({ runControl(control, listener) }, "airplay-rtcp-rx").apply {
+                isDaemon = true
+                start()
+            }
         return data.localPort to control.localPort
     }
 
@@ -89,8 +119,11 @@ class AudioStream(
     }
 
     private fun runData(socket: DatagramSocket, listener: Listener) {
-        // When the head unit opens its 360° camera, default-priority audio threads wait behind it (#737).
-        runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO) }
+        // When the head unit opens its 360° camera, default-priority audio threads wait behind it
+        // (#737).
+        runCatching {
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO)
+        }
         val stats = StreamReceiveStats("audio type=$streamType", onDiagnostic)
         val buffer = ByteArray(DATAGRAM_BYTES)
         try {
@@ -99,92 +132,149 @@ class AudioStream(
                 try {
                     stats.reading()
                     socket.receive(packet)
+                } catch (_: SocketTimeoutException) {
+                    drainRecovery()
+                    continue
                 } catch (_: Exception) {
                     if (closed.get()) return else continue
                 }
+                if (expectedPeer != null && packet.address != expectedPeer) continue
                 stats.received(
                     size = packet.length,
-                    sequence = if (packet.length >= RTP_HEADER_LEN) {
-                        ((buffer[2].toInt() and 0xff) shl 8) or (buffer[3].toInt() and 0xff)
-                    } else null,
+                    sequence =
+                        if (packet.length >= RTP_HEADER_LEN) {
+                            ((buffer[2].toInt() and 0xff) shl 8) or (buffer[3].toInt() and 0xff)
+                        } else null,
                     timestamp = if (packet.length >= RTP_HEADER_LEN) readU32Be(buffer, 4) else null,
                 )
                 val wire = packet.data.copyOf(packet.length)
-                val packetNumber = receivedPackets.incrementAndGet()
-                if (wire.size < RTP_HEADER_LEN + TAIL_LEN) {
-                    if (packetNumber == 1) {
-                        android.util.Log.w(
-                            TAG,
-                            "audio stream type=$streamType short packet bytes=${wire.size}",
-                        )
-                    }
-                    listener.onPacket(
-                        wire,
-                        null,
-                        null,
-                        IOException("audio packet shorter than RTP header plus tail"),
-                    )
-                    stats.processed()
-                    continue
-                }
-
-                val aad = wire.copyOfRange(4, RTP_HEADER_LEN)
-                val sealedEnd = wire.size - NONCE_LEN
-                val sealed = wire.copyOfRange(RTP_HEADER_LEN, sealedEnd)
-                val shortNonce = wire.copyOfRange(sealedEnd, wire.size)
-                val nonce = ByteArray(12).also { shortNonce.copyInto(it, 4) }
-                val sample = readU32Be(wire, 4)
-
-                val payload = try {
-                    AirPlayCrypto.chachaOpen(key, nonce, sealed, aad)
-                } catch (error: Exception) {
-                    val failureNumber = authenticationFailures.incrementAndGet()
-                    if (failureNumber == 1) {
-                        android.util.Log.w(
-                            TAG,
-                            "audio stream type=$streamType first decrypt failure " +
-                                "wire=${wire.toHexString()}",
-                            error,
-                        )
-                    }
-                    listener.onPacket(wire, null, sample, error)
-                    stats.processed()
-                    continue
-                }
-                val rtp = wire.copyOf(RTP_HEADER_LEN) + payload
-                val decryptedNumber = decryptedPackets.incrementAndGet()
-                if (decryptedNumber <= FIRST_PACKET_LOG_COUNT) {
-                    android.util.Log.i(
-                        TAG,
-                        "audio stream type=$streamType packet=$decryptedNumber sample=$sample " +
-                            "wireBytes=${wire.size} payloadBytes=${payload.size} " +
-                            "payloadHead=${payload.copyOf(minOf(payload.size, 16)).toHexString()}",
-                    )
-                } else if (decryptedNumber % PACKET_LOG_INTERVAL == 0) {
-                    android.util.Log.i(
-                        TAG,
-                        "audio stream type=$streamType decrypted=$decryptedNumber " +
-                            "authFailures=${authenticationFailures.get()}",
-                    )
-                }
-                listener.onPacket(wire, rtp, sample, null)
-                if (!started) {
-                    started = true
-                    listener.onStarted(sample)
-                }
-                listener.onRtp(rtp, sample)
+                val response = AudioResendPacket.audioResponse(wire)
+                processPacket(response ?: wire, listener, retransmitted = response != null)
                 stats.processed()
             }
-        } finally { stats.flush(ended = true) }
+        } finally {
+            stats.flush(ended = true)
+            synchronized(deliveryLock) {
+                recovery?.let {
+                    onDiagnostic("Audio: recovery type=$streamType ${it.diagnostic()} ended=true")
+                }
+            }
+        }
     }
 
-    private fun runControl(socket: DatagramSocket) {
+    private fun processPacket(
+        wire: ByteArray,
+        listener: Listener,
+        retransmitted: Boolean = false,
+    ): Boolean {
+        if (closed.get() || !isCurrent()) return false
+        receivedPackets.incrementAndGet()
+        if (wire.size < RTP_HEADER_LEN + TAIL_LEN || wire[0].toInt() and 0xc0 != 0x80) {
+            listener.onPacket(wire, null, null, IOException("invalid audio RTP packet"))
+            return false
+        }
+        val sample = readU32Be(wire, 4)
+        val sealedEnd = wire.size - NONCE_LEN
+        val nonce = ByteArray(12).also { wire.copyInto(it, 4, sealedEnd, wire.size) }
+        val payload =
+            try {
+                AirPlayCrypto.chachaOpen(
+                    key,
+                    nonce,
+                    wire.copyOfRange(RTP_HEADER_LEN, sealedEnd),
+                    wire.copyOfRange(4, RTP_HEADER_LEN),
+                )
+            } catch (error: Exception) {
+                authenticationFailures.incrementAndGet()
+                listener.onPacket(wire, null, sample, error)
+                return false
+            }
+        val rtp = wire.copyOf(RTP_HEADER_LEN) + payload
+        decryptedPackets.incrementAndGet()
+        synchronized(deliveryLock) {
+            if (closed.get() || !isCurrent()) return false
+            listener.onPacket(wire, rtp, sample, null)
+            val packetRecovery = recovery
+            if (packetRecovery == null) {
+                deliver(rtp, listener)
+            } else {
+                val previousRecovered = packetRecovery.recoveredPackets
+                packetRecovery.offer(rtp, System.nanoTime())
+                drainRecovery()
+                if (
+                    retransmitted &&
+                        packetRecovery.recoveredPackets > previousRecovered &&
+                        !resendConfirmed
+                ) {
+                    resendConfirmed = true
+                    onDiagnostic("Audio: resend confirmed type=$streamType authenticated=true")
+                }
+            }
+        }
+        return true
+    }
+
+    private fun deliver(rtp: ByteArray, listener: Listener) {
+        if (closed.get() || !isCurrent()) return
+        val sample = readU32Be(rtp, 4)
+        if (!started) {
+            started = true
+            listener.onStarted(sample)
+        }
+        if (!closed.get() && isCurrent()) listener.onRtp(rtp, sample)
+    }
+
+    private fun drainRecovery() =
+        synchronized(deliveryLock) {
+            if (closed.get() || !isCurrent()) return@synchronized
+            val packetRecovery = recovery ?: return@synchronized
+            val receiver = listener ?: return@synchronized
+            val nowNanos = System.nanoTime()
+            packetRecovery.drain(nowNanos).forEach { deliver(it, receiver) }
+            if (nowNanos - lastRecoveryReportNanos >= RECOVERY_REPORT_NANOS) {
+                lastRecoveryReportNanos = nowNanos
+                onDiagnostic(
+                    "Audio: recovery type=$streamType ${packetRecovery.diagnostic()} confirmed=$resendConfirmed",
+                )
+            }
+        }
+
+    private fun requestResend(firstSequence: Int, count: Int): Boolean {
+        val endpoint = remoteControl ?: return false
+        val socket = controlSocket ?: return false
+        if (closed.get() || !isCurrent()) return false
+        val message = AudioResendPacket.request(requestSequence++, firstSequence, count)
+        return runCatching { socket.send(DatagramPacket(message, message.size, endpoint)) }
+            .isSuccess
+    }
+
+    private fun runControl(socket: DatagramSocket, listener: Listener) {
         val buffer = ByteArray(DATAGRAM_BYTES)
         while (!closed.get()) {
+            val datagram = DatagramPacket(buffer, buffer.size)
             try {
-                socket.receive(DatagramPacket(buffer, buffer.size))
+                socket.receive(datagram)
             } catch (_: Exception) {
-                if (closed.get()) return
+                if (closed.get()) return else continue
+            }
+            val peer = expectedPeer ?: continue
+            if (datagram.address != peer || datagram.length < 4) continue
+            val packet = datagram.data.copyOf(datagram.length)
+            val type = packet[1].toInt() and 0x7f
+            val response = AudioResendPacket.audioResponse(packet)
+            val authenticated =
+                response?.let { processPacket(it, listener, retransmitted = true) } == true
+            val timing =
+                packet.size >= 20 &&
+                    packet[0].toInt() and 0xc0 == 0x80 &&
+                    (type == 0x54 || type == 0x57)
+            if (authenticated || timing) {
+                synchronized(deliveryLock) {
+                    if (remoteControl == null) {
+                        remoteControl = InetSocketAddress(peer, datagram.port)
+                        onDiagnostic("Audio: recovery control available type=$streamType")
+                    }
+                }
             }
         }
     }
@@ -202,9 +292,6 @@ class AudioStream(
             ((source[offset + 2].toInt() and 0xff) shl 8) or
             (source[offset + 3].toInt() and 0xff)
 
-    private fun ByteArray.toHexString(): String =
-        joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
-
     private companion object {
         const val TAG = "xcertplay-usb"
         const val DATAGRAM_BYTES = 4_096
@@ -213,8 +300,8 @@ class AudioStream(
         const val TAG_LEN = 16
         const val NONCE_LEN = 8
         const val TAIL_LEN = TAG_LEN + NONCE_LEN
-        const val FIRST_PACKET_LOG_COUNT = 3
-        const val PACKET_LOG_INTERVAL = 100
+        const val RECOVERY_POLL_MILLIS = 10
+        const val RECOVERY_REPORT_NANOS = 5_000_000_000L
     }
 }
 
@@ -225,18 +312,25 @@ object AudioStreamCodec {
         val isOpus = (bits and OPUS_MONO) != 0L
         val pcm = PCM_FORMAT[bits]
         return when {
-            isOpus -> AudioFormat(
-                AudioCodecKind.OPUS, 48_000, 1, payloadType, audioType,
-                rtpClockRate = MicrophoneConfig.opusClockRate(bits),
-            )
-            isAacLc -> AudioFormat(
-                AudioCodecKind.AAC_LC,
-                if ((bits and AAC_LC_48K_STEREO) != 0L) 48_000 else 44_100,
-                2,
-                payloadType,
-                audioType,
-            )
-            pcm != null -> AudioFormat(AudioCodecKind.LPCM, pcm.first, pcm.second, payloadType, audioType)
+            isOpus ->
+                AudioFormat(
+                    AudioCodecKind.OPUS,
+                    48_000,
+                    1,
+                    payloadType,
+                    audioType,
+                    rtpClockRate = MicrophoneConfig.opusClockRate(bits),
+                )
+            isAacLc ->
+                AudioFormat(
+                    AudioCodecKind.AAC_LC,
+                    if ((bits and AAC_LC_48K_STEREO) != 0L) 48_000 else 44_100,
+                    2,
+                    payloadType,
+                    audioType,
+                )
+            pcm != null ->
+                AudioFormat(AudioCodecKind.LPCM, pcm.first, pcm.second, payloadType, audioType)
             else -> AudioFormat(AudioCodecKind.LPCM, 44_100, 2, payloadType, audioType)
         }
     }
@@ -245,18 +339,19 @@ object AudioStreamCodec {
     private const val AAC_LC_48K_STEREO = 0x800000L
     private const val OPUS_MONO = 0x10000000L or 0x20000000L or 0x40000000L
 
-    private val PCM_FORMAT = mapOf(
-        0x4L to (8_000 to 1),
-        0x8L to (8_000 to 2),
-        0x10L to (16_000 to 1),
-        0x20L to (16_000 to 2),
-        0x40L to (24_000 to 1),
-        0x80L to (24_000 to 2),
-        0x100L to (32_000 to 1),
-        0x200L to (32_000 to 2),
-        0x400L to (44_100 to 1),
-        0x800L to (44_100 to 2),
-        0x4000L to (48_000 to 1),
-        0x8000L to (48_000 to 2),
-    )
+    private val PCM_FORMAT =
+        mapOf(
+            0x4L to (8_000 to 1),
+            0x8L to (8_000 to 2),
+            0x10L to (16_000 to 1),
+            0x20L to (16_000 to 2),
+            0x40L to (24_000 to 1),
+            0x80L to (24_000 to 2),
+            0x100L to (32_000 to 1),
+            0x200L to (32_000 to 2),
+            0x400L to (44_100 to 1),
+            0x800L to (44_100 to 2),
+            0x4000L to (48_000 to 1),
+            0x8000L to (48_000 to 2),
+        )
 }
