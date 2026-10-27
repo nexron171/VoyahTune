@@ -14,6 +14,8 @@ readme.md.backup
 bin/
 gen/
 out/
+# Python bytecode caches
+__pycache__/
 # App Release Files
 #app/release/*
 
@@ -105,16 +107,9 @@ CONTEXT.md
 /Installer/desktop/src-tauri/gen/
 
 /Installer/desktop/src-tauri/tauri.release.conf.json
-/Installer/tests/__pycache__/
-
-/Installer/scripts/__pycache__/
 
 # OTA root daemon build outputs.
 /Updater/daemon/target/
-/Updater/__pycache__/
-Installer/scripts/__pycache__
-Packaging/tests/__pycache__
-Utils/__pycache__
 
 # Local credentials must never be committed.
 /Credentials/
