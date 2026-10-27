@@ -1,7 +1,7 @@
 # DiPlay в VoyahTune: спецификация интеграции и восстановления
 
 Этот документ — контракт адаптации, по которому восстанавливают интеграцию после
-полной замены исходников DiPlay. Он описывает исходники на **26 октября 2026**;
+полной замены исходников DiPlay. Он описывает исходники на **27 октября 2026**;
 состав конкретного опубликованного релиза определяется его manifest и revision.
 Имена upstream-классов могут измениться: при обновлении сохранять поведение
 и границы ответственности, а не только переносить строки патча.
@@ -17,8 +17,9 @@
   `v0.2.21` (`49bf3bc2b011cb5ee7c7f4da9b99b18cbd3a23a2`),
   репозиторий [shihabal3amri/DiPlay](https://github.com/shihabal3amri/DiPlay).
 - Отдельно перенесён [PR #1010](https://github.com/shihabal3amri/DiPlay/pull/1010),
-  commit **`70649715394ee1731dd6ed42656d68e4341d6905`**: новый регулятор музыкальных
-  часов, запас после rebuffer и сокращение накопленной задержки. Он не входит
+  commit **`70649715394ee1731dd6ed42656d68e4341d6905`**: оценка музыкальных
+  часов и запас после rebuffer. Возврат задержки заменён собственной плавной
+  реализацией, UDP reorder/resend добавлен отдельно (§9). Он не входит
   в зафиксированный main; его адаптации и проверки описаны в §9/10/12.
 - Копия [RestoreMode/diplay](../RestoreMode/diplay/README.md) — vendored source,
   не submodule. Модули `common` и `shared` импортированы; `mobile` не используется.
@@ -1693,55 +1694,91 @@ API success, проверка Android focus в JVM и реальная реак�
 В 0.2.15 сохранены upstream восстановление prebuffer после underrun с учётом
 оставшегося PCM и operating-rate hint основному видеодекодеру с fallback.
 
-База main уже включает [PR #993](https://github.com/shihabal3amri/DiPlay/pull/993).
-Поверх неё отдельно перенесён #1010 из §1. `MediaClockTrim` измеряет устойчивый
-тренд максимумов пятисекундных окон, а не регулирует скорость по текущему
-наполнению. Используется медиана попарных наклонов Theil–Sen: минимум четыре
-окна и накопленное расхождение не меньше 40 мс; дрейф менее 0,3% требует
-120 секунд наблюдений. Поправка ограничена ±1,5%, применяется с шагом около
-0,9 цента в секунду и запоминается между музыкальными потоками процесса.
+База main включает [PR #993](https://github.com/shihabal3amri/DiPlay/pull/993),
+поверх неё перенесён #1010 из §1. Его оценка `MediaClockTrim` использует Theil–Sen
+по пикам пятисекундных окон: минимум четыре окна и расхождение от 40 мс;
+дрейф менее 0,3% требует 120 секунд. Поправка ограничена ±1,5%, меняется
+плавно и запоминается между музыкальными потоками процесса. Пауза/rebuffer,
+потеря локальных пакетов и большой decoder backlog начинают новый сегмент;
+при каждом старте вызывается `onPlaybackStarted`. Обычная порция Wi-Fi около
+400 мс не считается большим backlog: его порог не меньше секунды PCM.
 
-Сохранены защиты VoyahTune в семантике нового алгоритма:
+`MusicPlaybackControl` — единственный владелец музыкальной скорости. Он
+разделяет калибровку часов и возврат лишней задержки. В оценку дрейфа добавляется
+известное дополнительное потребление исходных кадров от собственного изменения
+темпа, рассчитанное по продвижению playback head. Поэтому плавное догоняние
+не выглядит ошибкой часов и не сбрасывает 120-секундное обучение.
 
-- пауза более секунды, short rebuffer, пропуск и большой backlog декодера
-  начинают измерение заново, сохраняя выученную поправку;
-- `AudioRenderer.startPlayback` вызывает `onPlaybackStarted(System.nanoTime())`
-  при каждом запуске: время остановленного AudioTrack не входит в измерение
-  и плавное изменение скорости;
-- большой считается сжатая очередь выше максимума выбранного буфера и одной
-  секунды PCM. Первый отсчёт после неё также не входит в новые окна; обычная
-  порция Wi-Fi около 400 мс не сбрасывает обучение при пресете 300 мс.
+`MusicLatencyController` использует минимальный уровень за 10 секунд и 30 секунд
+спокойной работы, зону нечувствительности 75 мс и горизонт возврата 30 секунд.
+Дополнительный темп ограничен +1%/−0,5%, изменение — 0,05 процентного пункта
+в секунду; при почти пустом PCM ускорение снимается. После rebuffer целевой
+резерв растёт на 100 мс, максимум на 600 мс, затем после спокойного интервала
+снижается по 5 мс в секунду. Сохранённые Wi-Fi/USB preferences не меняются.
+План ёмкости `MediaAudioBuffer` сохраняет дополнительные 600 мс и headroom 200 мс;
+порог старта ограничивается фактической ёмкостью AudioTrack.
 
-`MediaAudioBuffer` резервирует для музыки ещё 600 мс сверх выбранного буфера,
-сохраняя 200 мс свободной ёмкости. Каждый rebuffer увеличивает порог повторного
-старта на 100 мс, максимум на 600 мс; выбранные пользователем Wi-Fi/USB preferences
-не меняются. `MusicCatchUp` после 30 секунд без сбоев сокращает лишнюю задержку:
-берёт минимум наполнения за последние 10 секунд и пропускает только избыток
-от 200 мс. `PcmSkip` сглаживает границы пропуска PCM затуханием/нарастанием
-по 5 мс. Новый сбой в течение трёх минут после пропуска удваивает ожидание
-следующего, максимум до восьми минут. В `audio stats` добавлены `skippedMs` и
-текущий `startMs`; `MediaPacketLagGuard` сохраняет отдельную обработку старых пакетов.
+К AudioTrack применяется один набор `PlaybackParams`: speed объединяет поправку
+часов с временным темпом, pitch содержит только поправку часов. Поэтому сетевое
+догоняние сохраняет тон относительно выбранной калибровки ЦАП. Используется
+`AUDIO_FALLBACK_MODE_FAIL`, принятые speed/pitch перечитываются. При отказе
+восстанавливается нейтральный темп и остаётся только поддерживаемая коррекция
+через `setPlaybackRate`. Если после уже принятого time-stretch нейтральные
+параметры восстановить нельзя, сохраняется последний принятый набор, дальнейшие
+изменения блокируются и журнал явно сообщает отказ; второй регулятор не запускается.
+Отказ аппаратной коррекции не отключает учёт состояния буфера.
 
-Это замена прежнего PI-регулятора; сохранение адаптаций не означает сохранение
-его коэффициентов 0.03/0.001. Коррекция аппаратного дрейфа по-прежнему использует
-`AudioTrack.setPlaybackRate` и может менять тон, но сетевые задержки обрабатываются
-запасом и пропуском, а не постоянной подстройкой тона. Цена — увеличенная после
-сбоя задержка и возможный скачок вперёд по музыке. Реальные длинные ноты, паузы,
-звонки/Siri и согласование звука на Voyah требуют проверки на автомобиле;
-симуляции её не заменяют. «Буферизованная музыка» остаётся отдельным режимом.
+`MusicCatchUp`, `PcmSkip` и тест их вырезания удалены. Штатное сокращение задержки
+не удаляет PCM и не делает flush. Устранён воспроизведённый цикл: при буфере
+1000 мс и часах на 0,25% медленнее старый catch-up удалял по 200 мс каждые
+80 секунд и сбрасывал обучение. Это проверка модели, не измерение конкретного ГУ.
+Отдельный `MediaPacketLagGuard` по-прежнему ограничивает аварийный устойчивый
+backlog сжатых пакетов; переполнение очереди/отказ декодера также могут потерять
+звук и учитываются отдельно. Отсутствие PCM skip не означает отсутствие сетевых
+или декодерных потерь.
 
-Ограничение #1010: при небольшом дрейфе catch-up может удалять избыток раньше,
-чем завершатся необходимые 120 секунд измерения, и каждый раз сбрасывать обучение.
-Локальная модель на неизменённых `MediaClockTrim`/`MusicCatchUp` воспроизводит
-при буфере 1000 мс и часах на 0,25% медленнее удаление 200 мс каждые 80 секунд,
-даже без сетевых потерь. Fade по 5 мс не сохраняет удалённое содержимое музыки.
-Это подтверждение дефекта регуляторов, а не измерение дрейфа конкретного ГУ;
-плавная коррекция задержки с сохранением тона пока не реализована.
+UDP-музыка проходит через `AudioPacketRecovery` перед декодированием. Он хранит
+до 512 ожидающих пакетов, учитывает wrap sequence, SSRC, дубликаты и опоздания.
+Пропуск останавливает выдачу следующих пакетов декодеру: уже накопленный звук
+**до** пропуска остаётся в AudioTrack и даёт время для восстановления. Поэтому
+отдельный секундный буфер не добавляется. Предел ожидания берётся из snapshot
+оставшегося PCM с вычетом прошедшего времени и 80 мс защиты, максимум 900 мс;
+при коротком запасе ожидание отключено. После долгого радиоразрыва допускается
+явный resync за пределами ограниченного окна с учётом невосстановленных пакетов.
 
-UDP-аудиопуть объявляет `controlPort`, но `AudioStream.runControl` пока лишь
-принимает и игнорирует пакеты: reorder и дозапрос потерянного аудио не реализованы.
-AirPlay resend требует отдельной проверки совместимости с CarPlay; он не заменяет
-исправление catch-up, удаляющего уже полученную музыку.
+После 20 мс ожидания reorder разрешены до трёх Apple resend для диапазона до
+128 пакетов; интервал повторов адаптируется по наблюдаемому RTT в пределах
+40–200 мс. Используется согласованный controlPort телефона либо endpoint,
+полученный от управляющего пакета текущего peer; выдуманный порт не подставляется.
+Контрольный запрос имеет тип `0xD5`; обработчик `0xD6` снимает четырёхбайтовую
+обёртку полного RTP-пакета и проверяет исходный AEAD. Повторный пакет должен
+попасть в ещё актуальный пропуск, а его RTP timestamp — между известными соседями.
+Поздний ответ не вставляется в уже выданный звук. Смена сессии блокирует выдачу
+старого потока через проверку текущего `AudioMeta`; звонки/Siri/навигация обходят
+музыкальное ожидание. Реализация ориентируется на
+[Apple resend в Shairport Sync](https://github.com/mikebrady/shairport-sync/blob/master/rtp.c);
+совместимость этой обёртки с реальным CarPlay ещё не подтверждена.
+
+Диагностика отдельными короткими строками: `Audio: music timing` содержит
+clockRate, tempo, targetMs, queuedMs, pcmSkipMs и доступность time-stretch;
+`Audio: recovery` — pending, missing, recovered, resendRequests, duplicates,
+late, rejected и confirmed. `Audio: resend confirmed ... authenticated=true`
+появляется только после аутентифицированного ответа на действующий запрос,
+а не после успешной отправки UDP. При отсутствии ответа ожидание истекает;
+это не гарантия восстановления потерянного звука.
+
+Для TCP buffered type 103 resend выполняет TCP. Музыкальный latency servo
+для него выключен: заранее доставленные кадры не являются лишней realtime-задержкой.
+При подаче по credit постоянный уровень очереди не скрывает дрейф: он оценивается
+отдельно по продвижению playback head относительно монотонного времени;
+паузы/недостоверные интервалы исключаются из измерения.
+`BufferedAudioStream` берёт заявленную стартовую задержку из выбранного музыкального
+буфера вместо фиксированных 400 мс. Когда sink сообщает фактически сыгранную
+RTP-позицию, подача следующих кадров, освобождение prefeed, pause и buffered
+feedback опираются на неё; независимые настенные часы остаются fallback для sink
+без этой возможности. Локальный lead — не меньше стартового резерва плюс 200 мс.
+Обычный UDP `/feedback` не менялся. Параметры/качество time-stretch, работа resend
+с iPhone, длинные ноты, звонки/Siri и маршрутизация Voyah требуют испытания на ГУ.
 
 Экспериментальный Bluetooth audio остаётся отдельной выключенной по умолчанию
 настройкой: при включении штатный вывод DiPlay отключается, поэтому независимые
@@ -1883,8 +1920,8 @@ DEFAULT_OEM_LABEL в AirPlayPersistence — **Voyah Free**, в том числе
 | [shared/src/main/java/com/shilapi/xcertplay/adb/LocalAdb.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/adb/LocalAdb.kt) | Ранний UNSUPPORTED по localAdbEnabled. |
 | [shared/src/main/java/com/shilapi/xcertplay/hud/BydNavigationOutputs.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/hud/BydNavigationOutputs.kt) | Guards OEM запуска/route/cleanup; не включать BYD ради VoyahNavigation. |
 | [shared/src/main/java/com/shilapi/xcertplay/hud/BydOutputSettings.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/hud/BydOutputSettings.kt) | Guards вычисляемых enabled/available и OEM-настроек независимо от старых preferences. |
-| [shared/src/main/java/com/shilapi/xcertplay/media/AndroidMediaSink.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/media/AndroidMediaSink.kt) | Voyah routing, explicit override, stream validation/fallback; временный PCM navigation focus, приоритет ролей и callback фактического OEM stream; сброс наблюдений MediaClockTrim при каждом startPlayback (§9). |
-| [shared/src/main/java/com/shilapi/xcertplay/media/MediaClockTrim.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/media/MediaClockTrim.kt)<br>[shared/src/test/java/com/shilapi/xcertplay/media/MediaClockTrimTest.kt](../RestoreMode/diplay/shared/src/test/java/com/shilapi/xcertplay/media/MediaClockTrimTest.kt) | Отдельный перенос #1010: тренд пиков/Theil–Sen вместо PI-регулятора; сохранить сброс каждого startPlayback, выученную поправку и исключение большого backlog с первым отсчётом после него. Порог backlog не меньше секунды PCM, чтобы обычная порция 400 мс не сбрасывала обучение при буфере 300 мс (§9). |
+| [shared/src/main/java/com/shilapi/xcertplay/media/AndroidMediaSink.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/media/AndroidMediaSink.kt) | Voyah routing, explicit override, stream validation/fallback; временный PCM navigation focus, приоритет ролей и callback фактического OEM stream; сброс наблюдений MediaClockTrim при каждом startPlayback; MusicPlaybackControl и snapshot позиции/запаса для transport recovery; PlaybackParams с readback и fallback (§9). |
+| [shared/src/main/java/com/shilapi/xcertplay/media/MediaClockTrim.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/media/MediaClockTrim.kt)<br>[shared/src/test/java/com/shilapi/xcertplay/media/MediaClockTrimTest.kt](../RestoreMode/diplay/shared/src/test/java/com/shilapi/xcertplay/media/MediaClockTrimTest.kt) | Отдельный перенос #1010: тренд пиков/Theil–Sen вместо PI-регулятора; сохранить сброс каждого startPlayback, выученную поправку и исключение большого backlog с первым отсчётом после него. Порог backlog не меньше секунды PCM; учитывать дополнительное потребление от темпа без сброса измерения (§9). |
 | [shared/src/main/java/com/shilapi/xcertplay/orchestration/CarPlayController.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/orchestration/CarPlayController.kt) | setVehicleNightMode с проверкой activeSession; begin/end/onFrame владельца VoyahNavigation; app-owned openHostUi для requestUI на main thread с повторной проверкой владельца (§4). |
 | [common/src/main/res/values/strings.xml](../RestoreMode/diplay/common/src/main/res/values/strings.xml)<br>[common/src/main/res/values-ru/strings.xml](../RestoreMode/diplay/common/src/main/res/values-ru/strings.xml)<br>[common/src/main/res/values-uk/strings.xml](../RestoreMode/diplay/common/src/main/res/values-uk/strings.xml)<br>[common/src/main/res/values-es/strings.xml](../RestoreMode/diplay/common/src/main/res/values-es/strings.xml)<br>[common/src/main/res/values-ar/strings.xml](../RestoreMode/diplay/common/src/main/res/values-ar/strings.xml)<br>[common/src/main/res/values-zh-rCN/strings.xml](../RestoreMode/diplay/common/src/main/res/values-zh-rCN/strings.xml)<br>[common/src/main/res/values-zh-rTW/strings.xml](../RestoreMode/diplay/common/src/main/res/values-zh-rTW/strings.xml) <br>[common/src/main/res/values-ja/strings.xml](../RestoreMode/diplay/common/src/main/res/values-ja/strings.xml) | Девять локализаций, включая values-it/strings.xml: нейтральные тексты без BYD, достоверные подсказки аудиоканалов и жестов; сохранить resource IDs и placeholders; полный русский перевод common (§5). |
 
@@ -1927,8 +1964,10 @@ DEFAULT_OEM_LABEL в AirPlayPersistence — **Voyah Free**, в том числе
 | `common/src/main/java/com/shilapi/xcertplay/GeelyClusterDisplay.kt`, `GeelyClusterProjection.kt` | Не выбирать Geely display и не читать/писать DIM Binder при выключенной vehicleIntegrationEnabled. Pure matcher device/product/model сохранён; cleanup не меняет сохранённый claim без разрешённой интеграции. |
 | `common/src/test/java/com/shilapi/xcertplay/GeelyClusterDisplayTest.kt`, `VoyahDisabledFeaturesTest.kt` | Отдельно проверять точный matcher и запрет runtime-проекции, Binder/cleanup и нового BYD music-card gate при сохранённых opt-ins. |
 | `shared/src/main/java/com/shilapi/xcertplay/hud/BydOutputSettings.kt` | Новый clusterSongGate также закрыт vehicleIntegrationEnabled; сохранённое true не запускает BYD media UI. |
-| `shared/src/main/java/com/shilapi/xcertplay/media/MediaAudioBuffer.kt`, `MusicCatchUp.kt`, `PcmSkip.kt` | Перенесены из #1010: ёмкость/повторный старт, спокойный интервал и сглаженный пропуск (§9). Не возвращать прежнюю ёмкость без дополнительного запаса, не менять выбранные буферы в preferences. |
-| `shared/src/test/java/com/shilapi/xcertplay/media/MediaAudioBufferTest.kt`, `MusicCatchUpTest.kt` | Проверки #1010: предел запаса, сокращение задержки после стабильного соединения, backoff и fade/пропуск через несколько блоков PCM. |
+| `shared/src/main/java/com/shilapi/xcertplay/media/MediaAudioBuffer.kt` | Ёмкость/повторный старт с запасом #1010; пользовательские preferences сохраняются. MusicCatchUp/PcmSkip удалены, не восстанавливать штатное вырезание PCM (§9). |
+| `shared/src/main/java/com/shilapi/xcertplay/airplay/AudioStream.kt`, `CarPlayMediaEngine.kt` | MediaSink сообщает запас/позицию renderer; UDP reorder/resend только для media, peer/control endpoint, AEAD ответа и guard текущего AudioMeta (§9). |
+| `shared/src/main/java/com/shilapi/xcertplay/airplay/BufferedAudioStream.kt` | Стартовая задержка из sink; credit/позиция по фактически проигранному RTP, fallback для других sink; TCP retransmission, без UDP catch-up (§9). |
+| `shared/src/test/java/com/shilapi/xcertplay/media/MediaAudioBufferTest.kt`, `AudioClockTrimTest.kt` | Предел запаса и реальный writePcm; принятые speed/pitch, отсутствие PCM skip, отказ/восстановление AudioTrack API. MusicCatchUpTest удалён вместе с hard skip. |
 | `shared/src/main/java/com/shilapi/xcertplay/media/MicrophoneCaptureStats.kt`, `MicrophoneUplink.kt` | Общий useSource отражает фактический AudioRecord source и fallback; новая диагностика тишины не отменяет запрет Voyah VOIP capture/эффектов. |
 | `shared/src/test/java/com/shilapi/xcertplay/media/TelephonyMicrophoneTest.kt` | Сохранены новые проверки освобождения mode request и диагностики, дополнены Voyah capture; BYD-suspend/phone-state тесты учитывают отключённые OEM routes. |
 | `common/src/test/java/com/shilapi/xcertplay/backup/SettingsBackupCodecTest.kt` | Backup восстанавливает сохранённый opt-in launcher bubble, но effective getter остаётся false по standalone policy. |
@@ -2017,6 +2056,12 @@ Kotlin/Java/JNI-файлы baseline импортированы.
 обучением при обычных кратких сжатых очередях. Отдельные регрессии запрещают
 объединять разные уровни до/после короткого rebuffer или большой очереди в один тренд.
 
+Собственные `media.MusicPlaybackControl` и `media.MusicLatencyController` заменяют
+PCM catch-up; `airplay.AudioPacketRecovery`/`AudioResendPacket` обеспечивают
+упорядочивание и ограниченный дозапрос. Сохранять их тесты `MusicPlaybackControlTest`,
+`AudioPacketRecoveryTest`, `AudioStreamRecoveryTest` и дополнение
+`BufferedAudioStreamTest` с наблюдаемым продвижением renderer (§9/12).
+
 Собственные ресурсы локализации:
 [values/strings_voyah_ui.xml](../RestoreMode/diplay/common/src/main/res/values/strings_voyah_ui.xml)
 и [values-ru/strings_voyah_ui.xml](../RestoreMode/diplay/common/src/main/res/values-ru/strings_voyah_ui.xml).
@@ -2035,9 +2080,9 @@ Common также `CarPlayThemePolicyTest`, `CarPlayHostUiNavigationTest`,
 Сверка дерева с чистым baseline main из §1 на 21 октября 2026:
 96 изменённых upstream-файлов и 59 файлов вне main внутри common/shared/gradle
 (28 файлов реализации/ресурсов и 31 тест), 5 инфраструктурных исключений
-и 2 удалённых WorkManager-файла. В число файлов вне main входят MusicCatchUp,
-PcmSkip и MusicCatchUpTest из отдельно перенесённого #1010; остальные 56 принадлежат
-адаптации VoyahTune. Это контроль полноты; собственные app/Native/OD-файлы
+и 2 удалённых WorkManager-файла. На момент этой исторической сверки три файла относились к PCM catch-up #1010;
+27 октября они удалены и заменены собственной реализацией, перечисленной выше.
+Исторические количества не являются текущим инвентарём. Это контроль полноты; собственные app/Native/OD-файлы
 дополнительно перечислены в §10.3.
 
 ### 10.3. Код вне vendored дерева
@@ -2306,7 +2351,8 @@ UI-тесты и испытания на ГУ выполнять только в
 | Siri | app `VoiceSteeringPolicyTest`; common `WheelSiriWindowTest` (включает Voyah guard) |
 | Манёвры | shared `hud.VoyahNavigationTest`; Native `ClusterNavigationLeaseTest`, `ClusterNavigationSourcesTest`; `Packaging/new/tests/navigation-source-lifecycle.test.js`, `test_cluster_navigation.js` |
 | Аудио | shared `media.VoyahAudioRoutingTest`, `media.NavigationAudioFocusTest`, `media.VoyahAudioFocusTest`, `media.AudioFocusAutoYieldTest`, `media.LegacyAudioFallbackTest`, `airplay.CarPlayAudioStreamIsolationTest`; Native `CarPlayAudioPolicyTest`; app `carplay.CarPlayAudioValuesTest`; common `VoyahAudioDefaultsTest` |
-| Скорость музыки и повторное заполнение | shared `media.MediaClockTrimTest`, `media.MediaClockTrimRecoveryTest`, `media.AudioClockTrimTest`, `media.MediaPacketLagGuardTest`, `media.AudioRebufferCapacityTest`, `media.MediaAudioBufferTest`, `media.MusicCatchUpTest`: порции 300/500/1000 мс, дрейф ±0.76%, паузы и decoder backlog, restart из AudioRenderer, растущий запас и отсутствие блокировки полного paused AudioTrack, calm/backoff и PCM skip/fade. |
+| Скорость музыки и повторное заполнение | shared `media.MediaClockTrimTest`, `media.MediaClockTrimRecoveryTest`, `media.AudioClockTrimTest`, `media.MediaPacketLagGuardTest`, `media.AudioRebufferCapacityTest`, `media.MediaAudioBufferTest`, `media.MusicPlaybackControlTest`: порции 300/500/1000 мс, дрейф ±0.05/0.15/0.25/0.76% в 15-минутной модели, независимое обучение при tempo recovery, отсутствие штатного PCM skip, пределы темпа/очереди и плавный спад резерва; отказ PlaybackParams/clock API и отсутствие второго контроллера. |
+| Повторная доставка музыки | shared `airplay.AudioPacketRecoveryTest`, `airplay.AudioStreamRecoveryTest`: порядок/wrap/dedup, срок восстановления и предел retries, большой radio gap, AEAD и timestamp ответа, endpoint и retired owner; реальные loopback UDP-сокеты с зашифрованным resend. `BufferedAudioStreamTest`/`BufferedAudioSessionTest`: выбранная стартовая задержка, credit по renderer, pause/flush/anchor и изоляция владельца. |
 
 Пути тестов: common — `RestoreMode/diplay/common/src/test/java/com/shilapi/xcertplay/`,
 shared — `RestoreMode/diplay/shared/src/test/java/com/shilapi/xcertplay/`,
