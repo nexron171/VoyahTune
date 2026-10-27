@@ -139,7 +139,7 @@ Docker/Colima не проверяются и не запускаются.
 Установите Docker CLI, Colima и `rsync`. Один раз подготовьте:
 
 1. Colima profile `v` с `COLIMA_HOME=<repo>/Releases/cache/colima`;
-2. постоянный контейнер `vti-windows` с cargo-xwin и Windows x64 target;
+2. постоянный контейнер `vti-windows` с cargo-xwin и Windows targets x64, x86 и ARM64;
 3. постоянный контейнер `vti-linux-amd64` архитектуры x86-64;
 4. на Apple Silicon — Rosetta в Colima и закреплённый файл linuxdeploy в кэше.
 

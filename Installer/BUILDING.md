@@ -90,9 +90,12 @@ macos-universal.tar.gz, windows-x64.exe, windows-x86.exe, windows-arm64.exe и b
 
 Образы собираются из `Installer/build-env/Dockerfile`. Контейнеры должны сохранять
 кэши между запусками; используйте `sleep infinity`, без `--rm`. Windows-контейнеру
-нужны cargo-xwin и target x86_64-pc-windows-msvc. На Apple Silicon включите Rosetta
+нужны cargo-xwin и Rust targets для Windows x64, x86 и ARM64. На Apple Silicon включите Rosetta
 в Colima (VZ) и подготовьте закреплённый linuxdeploy, описанный ниже. Скрипт не
 создаёт отсутствующие контейнеры и не пересобирает их образы автоматически.
+Если профиль `v` ещё не подготовлен в `Releases/cache/colima`, сборщик останавливается
+с инструкцией подготовки. Ошибки подключения к Docker сохраняются в `docker.log`,
+ошибки чтения контейнера — в `<контейнер>-inspect.log` внутри каталога логов.
 
 ## Подготовка Colima и контейнеров с нуля
 
@@ -111,12 +114,16 @@ export COLIMA_HOME="$PWD/Releases/cache/colima"
 mkdir -p "$COLIMA_HOME"
 
 # Apple Silicon:
-colima start v --vm-type vz --vz-rosetta --cpu 6 --memory 8 --disk 100 \
-  --mount "$PWD:w"
+colima start v --vm-type vz --vz-rosetta --cpus 6 --memory 8 --disk 100 \
+  --mount "$PWD:w" --activate=false
 
 # Intel: вместо предыдущей команды, без Rosetta:
-# colima start v --vm-type vz --cpu 6 --memory 8 --disk 100 --mount "$PWD:w"
+# colima start v --vm-type vz --cpus 6 --memory 8 --disk 100 --mount "$PWD:w" --activate=false
 ```
+
+Каталог `$COLIMA_HOME` должен существовать **до** вызова Colima: иначе Colima 0.10.3
+использует стандартный `~/.colima`, а сборщик продолжает искать сокет в checkout.
+`--activate=false` сохраняет выбранный глобальный Docker context.
 
 Все Docker-команды ниже явно используют сокет этого профиля. Функцию `vti_docker`
 задайте в том же терминале; она не меняет глобальный Docker context:
@@ -132,23 +139,25 @@ mkdir -p Releases/build/hosts/windows Releases/build/hosts/linux-amd64
 ### 2. Подготовить Windows builder
 
 Образ собирается для архитектуры самой VM: ARM64 на Apple Silicon либо x64
-на Intel. Cargo-xwin создаёт Windows x64 результат в обоих случаях.
+на Intel. Cargo-xwin создаёт Windows x64, x86 и ARM64 в обоих случаях.
 
 ```sh
-vti_docker build -t voyahtune-builder:host -f Installer/build-env/Dockerfile .
+vti_docker build -t voyahtune-builder:host Installer/build-env
 vti_docker run -d --name vti-windows \
   -v "$PWD/Releases/build/hosts/windows:/work" \
   voyahtune-builder:host sleep infinity
 vti_docker exec vti-windows cargo install --locked cargo-xwin
+toolchain=$(python3 -c 'import tomllib; print(tomllib.load(open("Installer/rust-toolchain.toml", "rb"))["toolchain"]["channel"])')
 vti_docker exec vti-windows rustup target add \
-  --toolchain 1.98.1 x86_64-pc-windows-msvc
+  --toolchain "$toolchain" \
+  x86_64-pc-windows-msvc i686-pc-windows-msvc aarch64-pc-windows-msvc
 ```
 
 ### 3. Подготовить Linux x64 builder
 
 ```sh
 vti_docker build --platform linux/amd64 -t voyahtune-builder:x64 \
-  -f Installer/build-env/Dockerfile .
+  Installer/build-env
 vti_docker run -d --name vti-linux-amd64 --platform linux/amd64 \
   -v "$PWD/Releases/build/hosts/linux-amd64:/work" \
   voyahtune-builder:x64 sleep infinity
@@ -163,6 +172,8 @@ vti_docker exec vti-linux-amd64 uname -m
 
 ```sh
 ./Installer/scripts/build-all-macos.sh --check --windows --linux
+# Windows-only environment:
+./Installer/scripts/build-all-macos.sh --check --windows
 # После подготовки также Android SDK и локального Rust для macOS:
 ./Installer/scripts/build-all-macos.sh --check
 ./make_release.sh 4.5.0 --minimum-ota-version 4.5.0 --installers
@@ -287,7 +298,7 @@ Node22, Rust1.98.1, GStreamer, а также xvfb/xauth для GUI-провер�
 Пример для нативного x64 Docker-host:
 
 ```sh
-docker build --platform linux/amd64 -t voyahtune-builder:x64 -f Installer/build-env/Dockerfile .
+docker build --platform linux/amd64 -t voyahtune-builder:x64 Installer/build-env
 docker run --rm -it --platform linux/amd64 -v "$PWD:/work" -w /work voyahtune-builder:x64 bash
 ```
 
