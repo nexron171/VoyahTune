@@ -588,17 +588,19 @@ function createCarPlayStatusBarController(io) {
     }
 
     function request(displayId, visible, receiver) {
-        var carPlay = isCarPlayStatusBarTarget(top(displayId), displayId);
-        apply(displayId, carPlay ? io.revealRemaining(displayId) > 0 : visible, carPlay, receiver);
+        var host = isCarPlayStatusBarTarget(top(displayId), displayId);
+        var carPlay = host && io.hideSystemBars();
+        apply(displayId, host ? !carPlay || io.revealRemaining(displayId) > 0 : visible, carPlay, receiver);
     }
 
     function reconcile() {
         for (var displayId = 0; displayId <= 1; displayId++) {
             var activity = top(displayId);
-            var carPlay = isCarPlayStatusBarTarget(activity, displayId);
-            if (!carPlay && !owned[displayId]) continue;
+            var host = isCarPlayStatusBarTarget(activity, displayId);
+            var carPlay = host && io.hideSystemBars();
+            if (!host && !owned[displayId]) continue;
             try {
-                var visible = carPlay ? io.revealRemaining(displayId) > 0 : !io.stockHidden(activity, displayId);
+                var visible = host ? !carPlay || io.revealRemaining(displayId) > 0 : !io.stockHidden(activity, displayId);
                 apply(displayId, visible, carPlay, null);
             } catch (error) {
                 io.error(error);
@@ -632,6 +634,10 @@ function installCarPlayStatusBar(application) {
         var revealSetting = "voyahtune_carplay_chrome_reveal_until_";
         var resolver = application.getContentResolver();
 
+        function hideSystemBars() {
+            return Number(SettingsGlobal.getInt(resolver, "voyahtune_carplay_hide_system_bars", 0)) === 1;
+        }
+
         function revealRemaining(displayId) {
             try {
                 var deadline = Number(SettingsGlobal.getLong(resolver, revealSetting + displayId, 0));
@@ -655,6 +661,7 @@ function installCarPlayStatusBar(application) {
         }
 
         var controller = createCarPlayStatusBarController({
+            hideSystemBars: hideSystemBars,
             revealRemaining: revealRemaining,
             top: function (displayId) {
                 var activity = ServiceManager.getDpyTopAppInfo(application, displayId, 2);
@@ -686,7 +693,7 @@ function installCarPlayStatusBar(application) {
         });
 
         originalHit.implementation = function (activity, displayId) {
-            if (isCarPlayStatusBarTarget(activity, displayId)) return revealRemaining(displayId) === 0;
+            if (isCarPlayStatusBarTarget(activity, displayId)) return hideSystemBars() && revealRemaining(displayId) === 0;
             return originalHit.call(this, activity, displayId);
         };
         installed.push(originalHit);
@@ -732,6 +739,8 @@ function installCarPlayStatusBar(application) {
         [0, 1].forEach(function (displayId) {
             resolver.registerContentObserver(SettingsGlobal.getUriFor(revealSetting + displayId), false, observer);
         });
+        resolver.registerContentObserver(SettingsGlobal.getUriFor("voyahtune_carplay_hide_system_bars"), false, observer);
+        installCarPlayAirQuality(application);
         controller.reconcile();
         console.log("[carplay-statusbar] hook ready v1");
         return true;
@@ -742,6 +751,44 @@ function installCarPlayStatusBar(application) {
         installed.forEach(function (method) { method.implementation = null; });
         console.log("[carplay-statusbar] hook failed v1: " + error);
         return false;
+    }
+}
+
+function publishCarPlayAirQuality(io, value) {
+    var measured = Number(value);
+    var sample = io.bootCount() + ":" + (Number.isInteger(measured) && measured >= 0 ? measured : -1);
+    if (io.read() !== sample) io.write(sample);
+}
+
+function installCarPlayAirQuality(application) {
+    try {
+        var SettingsGlobal = Java.use("android.provider.Settings$Global");
+        var resolver = application.getContentResolver();
+        var key = "voyahtune_carplay_air_quality";
+        var io = {
+            bootCount: function () { return Number(SettingsGlobal.getInt(resolver, "boot_count", -1)); },
+            read: function () { return String(SettingsGlobal.getString(resolver, key)); },
+            write: function (value) { SettingsGlobal.putString(resolver, key, value); }
+        };
+        var StatusBarView = Java.use("com.qinggan.systemui.statusbar.views.StatusBarView");
+        var original = StatusBarView.setPm25Incar.overload("int");
+        original.implementation = function (value) {
+            original.call(this, value);
+            try { publishCarPlayAirQuality(io, value); }
+            catch (error) { console.log("[carplay-air-quality] update failed: " + error); }
+        };
+        // The adapter can attach after the first CAN update; seed the actual displayed value.
+        Java.choose("com.qinggan.systemui.statusbar.views.StatusBarPm25View", {
+            onMatch: function (view) {
+                var text = String(view.pm25Value.value.getText());
+                var visible = Number(Java.cast(view.getParent(), Java.use("android.view.View")).getVisibility()) === 0
+                    && Number(view.getVisibility()) === 0;
+                if (visible && /^\d+$/.test(text)) publishCarPlayAirQuality(io, Number(text));
+            },
+            onComplete: function () {}
+        });
+    } catch (error) {
+        console.log("[carplay-air-quality] unavailable: " + error);
     }
 }
 

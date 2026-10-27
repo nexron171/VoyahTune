@@ -6,10 +6,12 @@ import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
 import android.widget.Button;
+import android.widget.RadioGroup;
 import android.widget.SeekBar;
 import android.widget.Switch;
 import android.widget.TextView;
 
+import com.shilapi.xcertplay.CarPlayDock;
 import com.shilapi.xcertplay.CarPlaySettingsAccess;
 import com.shilapi.xcertplay.DiPlayActivity;
 import com.shilapi.xcertplay.media.CarPlayAudioSettings;
@@ -110,13 +112,37 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
                         return;
                     }
                     CarPlayFeature.setFullscreen(requireContext(), checked);
+                    updateState();
+                });
+        Switch hideSystemBars = settingView(R.id.carPlayHideSystemBars);
+        hideSystemBars.setSaveEnabled(false);
+        hideSystemBars.setOnCheckedChangeListener(
+                (button, checked) -> {
+                    if (updating || !button.isEnabled()) return;
+                    CarPlayFeature.setHideSystemBars(requireContext(), checked);
+                    updateState();
+                });
+        RadioGroup dock = settingView(R.id.carPlayDockTheme);
+        dock.setSaveEnabled(false);
+        dock.setOnCheckedChangeListener(
+                (group, checked) -> {
+                    if (updating) return;
+                    CarPlayDock selected =
+                            checked == R.id.carPlayDockBottom
+                                    ? CarPlayDock.BOTTOM
+                                    : checked == R.id.carPlayDockAstonMartin
+                                            ? CarPlayDock.DUAL_SIDES
+                                            : CarPlayDock.DRIVER_SIDE;
+                    CarPlayFeature.setDock(requireContext(), selected);
+                    updateState();
                 });
         Switch ultra = settingView(R.id.carPlayUltra);
         ultra.setSaveEnabled(false);
         ultra.setOnCheckedChangeListener(
                 (button, checked) -> {
                     if (!updating) {
-                        CarPlaySettingsAccess.setUltra(requireContext(), checked);
+                        CarPlayFeature.setUltra(requireContext(), checked);
+                        updateState();
                     }
                 });
         bindUiScale();
@@ -314,6 +340,21 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
         settingView(R.id.carPlayFullscreenCard).setVisibility(View.VISIBLE);
         ((Switch) settingView(R.id.carPlayFullscreen))
                 .setChecked(CarPlaySettingsAccess.fullscreen(requireContext()));
+        CarPlayDock selectedDock = CarPlaySettingsAccess.dock(requireContext());
+        ((RadioGroup) settingView(R.id.carPlayDockTheme))
+                .check(
+                        selectedDock == CarPlayDock.BOTTOM
+                                ? R.id.carPlayDockBottom
+                                : selectedDock == CarPlayDock.DUAL_SIDES
+                                        ? R.id.carPlayDockAstonMartin
+                                        : R.id.carPlayDockClassic);
+        settingView(R.id.carPlayDockAstonMartin)
+                .setEnabled(CarPlaySettingsAccess.ultra(requireContext()));
+        Switch hideSystemBars = settingView(R.id.carPlayHideSystemBars);
+        hideSystemBars.setChecked(CarPlaySettingsAccess.hideSystemBars(requireContext()));
+        hideSystemBars.setEnabled(
+                CarPlaySettingsAccess.fullscreen(requireContext())
+                        && selectedDock != CarPlayDock.DUAL_SIDES);
         updateUiScale(enabled);
         Switch duckMusic = settingView(R.id.carPlayDuckMusic);
         if (duckMusic != null) {

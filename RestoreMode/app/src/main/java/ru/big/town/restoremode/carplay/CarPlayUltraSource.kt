@@ -8,18 +8,24 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
+import com.shilapi.xcertplay.CarPlayDock
+import com.shilapi.xcertplay.CarPlaySettingsAccess
 import com.shilapi.xcertplay.CarPlayUltraHost
 import com.shilapi.xcertplay.airplay.ultra.*
-import ru.big.town.common.CarPlayAudioProtocol
-import ru.big.town.common.CarPlayClimateProtocol
-import ru.big.town.restoremode.AdvanceActivity
 import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.math.roundToLong
+import ru.big.town.common.CarPlayAudioProtocol
+import ru.big.town.common.CarPlayClimateProtocol
+import ru.big.town.restoremode.AdvanceActivity
 
-/** Native owns CAN; this session adapter combines its observations with the OEM public media service. */
-class CarPlayUltraSource private constructor(
+/**
+ * Native owns CAN; this session adapter combines its observations with the OEM public media
+ * service.
+ */
+class CarPlayUltraSource
+private constructor(
     private val context: Context,
     private val bridge: CarPlayVehicleBridge,
 ) : UltraClimateSource {
@@ -29,18 +35,22 @@ class CarPlayUltraSource private constructor(
     @Volatile private var volumes = CarPlayAudioClient.Volumes(null, null)
     @Volatile private var volumeObservedAt = 0L
     private val firstVolume = CountDownLatch(1)
-    private val audio = CarPlayAudioClient(context) { observed ->
-        volumes = observed
-        volumeObservedAt = SystemClock.elapsedRealtime()
-        firstVolume.countDown()
-        if (observed.levels[0] > 0) lastAudible = observed.levels[0]
-        publish()
-    }
+    private val audio =
+        CarPlayAudioClient(context) { observed ->
+            volumes = observed
+            volumeObservedAt = SystemClock.elapsedRealtime()
+            firstVolume.countDown()
+            if (observed.levels[0] > 0) lastAudible = observed.levels[0]
+            publish()
+        }
     @Volatile private var lastAudible = 1
     private val radio = VoyahRadioClient(context, ::trace, ::publish)
     private val changed: () -> Unit = {
         val text = observed.getBundle("radioText")
-        val band = text?.getString("band")?.let { runCatching { VoyahRadioOem.Band.valueOf(it) }.getOrNull() }
+        val band =
+            text?.getString("band")?.let {
+                runCatching { VoyahRadioOem.Band.valueOf(it) }.getOrNull()
+            }
         radio.updateRadioText(
             if (text != null && band != null) {
                 VoyahRadioOem.RadioText(band, text.getLong("frequency"), text.getString("text"))
@@ -48,16 +58,19 @@ class CarPlayUltraSource private constructor(
         )
         publish()
     }
-    private val poll = object : Runnable {
-        override fun run() {
-            if (closed) return
-            audio.query()
-            publish()
-            handler.postDelayed(this, 1000)
+    private val poll =
+        object : Runnable {
+            override fun run() {
+                if (closed) return
+                audio.query()
+                publish()
+                handler.postDelayed(this, 1000)
+            }
         }
-    }
 
-    override val supportsRadio get() = radio.supported
+    override val supportsRadio
+        get() = radio.supported
+
     init {
         handler.post { if (!closed) audio.start() }
     }
@@ -70,8 +83,12 @@ class CarPlayUltraSource private constructor(
         }
         volumes.maxima[0].takeIf { it in 1..255 }
     }
-    override val supportsVolume get() = advertisedMaximum != null
-    override val volumeRange get() = 0..(advertisedMaximum ?: 100)
+    override val supportsVolume
+        get() = advertisedMaximum != null
+
+    override val volumeRange
+        get() = 0..(advertisedMaximum ?: 100)
+
     override val supportedVehicleControls = UltraVehicleControl.entries.toSet()
 
     override fun start(onSample: (UltraClimateSample?) -> Unit) {
@@ -90,47 +107,61 @@ class CarPlayUltraSource private constructor(
         if (closed) return
         val now = SystemClock.elapsedRealtime()
         val data = observed.takeIf { now - observedAt <= 6000 } ?: Bundle()
-        fun number(name: String): Long? = if (data.containsKey(name)) {
-            data.getDouble(name).takeIf { it.isFinite() }?.roundToLong()
-        } else null
+        fun number(name: String): Long? =
+            if (data.containsKey(name)) {
+                data.getDouble(name).takeIf { it.isFinite() }?.roundToLong()
+            } else null
         val fuelRange = number("fuelRange")
         val electricRange = number("electricRange")
         val currentVolumes = volumes
-        val volume = currentVolumes.levels[0].takeIf { it >= 0 && now - volumeObservedAt <= 6000 }?.toLong()
-        val vehicle = UltraVehicleReadings(
-            tirePressureKpa = (data.getFloatArray("tires")?.toList() ?: List(4) { Float.NaN }).map {
-                it.takeIf { value -> value.isFinite() && value > 0 && value <= 10 }
-                    ?.let { value -> (value * 100.0).roundToLong() }
-            },
-            fuelPercent = number("fuel"),
-            odometerKm = number("odometer"),
-            rangeKm = if (fuelRange != null && electricRange != null) fuelRange + electricRange else null,
-            volumeLevel = volume,
-            muted = volume?.let { it == 0L },
-            batteryPercent = number("battery"),
-            electricRangeKm = electricRange,
-            fuelRangeKm = fuelRange,
-            driveMode = if (data.containsKey("driveMode")) data.getInt("driveMode") else null,
+        val volume =
+            currentVolumes.levels[0].takeIf { it >= 0 && now - volumeObservedAt <= 6000 }?.toLong()
+        val vehicle =
+            UltraVehicleReadings(
+                tirePressureKpa =
+                    (data.getFloatArray("tires")?.toList() ?: List(4) { Float.NaN }).map {
+                        it.takeIf { value -> value.isFinite() && value > 0 && value <= 10 }
+                            ?.let { value -> (value * 100.0).roundToLong() }
+                    },
+                fuelPercent = number("fuel"),
+                odometerKm = number("odometer"),
+                rangeKm =
+                    if (fuelRange != null && electricRange != null) fuelRange + electricRange
+                    else null,
+                volumeLevel = volume,
+                muted = volume?.let { it == 0L },
+                batteryPercent = number("battery"),
+                electricRangeKm = electricRange,
+                fuelRangeKm = fuelRange,
+                driveMode = if (data.containsKey("driveMode")) data.getInt("driveMode") else null,
+            )
+        val controls =
+            UltraVehicleControl.entries
+                .filter { data.containsKey(it.name) }
+                .associateWith { data.getInt(it.name) }
+        listener?.invoke(
+            UltraClimateSample(
+                Double.NaN,
+                now,
+                vehicle = vehicle,
+                radio = radio.snapshot,
+                vehicleControlValues = controls,
+            ),
         )
-        val controls = UltraVehicleControl.entries.filter { data.containsKey(it.name) }
-            .associateWith { data.getInt(it.name) }
-        listener?.invoke(UltraClimateSample(
-            Double.NaN,
-            now,
-            vehicle = vehicle,
-            radio = radio.snapshot,
-            vehicleControlValues = controls,
-        ))
     }
 
     override fun writeRadio(request: UltraRadioRequest): UltraClimateWriteResult =
         if (closed) unavailable() else radio.write(request)
 
     override fun writeVolume(level: Int?, mute: Boolean?): UltraClimateWriteResult {
-        if (closed || !supportsVolume || level == null && mute == null ||
-            level != null && level !in volumeRange ||
-            level != null && mute != null && mute != (level == 0)
-        ) return unavailable()
+        if (
+            closed ||
+                !supportsVolume ||
+                level == null && mute == null ||
+                level != null && level !in volumeRange ||
+                level != null && mute != null && mute != (level == 0)
+        )
+            return unavailable()
         val wanted = if (mute == true) 0 else level ?: lastAudible.coerceIn(volumeRange)
         val done = CountDownLatch(1)
         val requestedAt = SystemClock.elapsedRealtime()
@@ -153,7 +184,10 @@ class CarPlayUltraSource private constructor(
         return unavailable()
     }
 
-    override fun writeVehicleControl(control: UltraVehicleControl, value: Int): UltraClimateWriteResult {
+    override fun writeVehicleControl(
+        control: UltraVehicleControl,
+        value: Int,
+    ): UltraClimateWriteResult {
         if (closed || control.normalizeRequest(value) == null) return unavailable()
         if (control.isAppAction) {
             val done = CountDownLatch(1)
@@ -161,11 +195,15 @@ class CarPlayUltraSource private constructor(
             handler.post {
                 try {
                     if (!closed) {
-                        val intent = if (control == UltraVehicleControl.CAR_HOME) {
-                            Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
-                        } else Intent(context, AdvanceActivity::class.java)
+                        val intent =
+                            if (control == UltraVehicleControl.CAR_HOME) {
+                                Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+                            } else Intent(context, AdvanceActivity::class.java)
                         val options = ActivityOptions.makeBasic().apply { launchDisplayId = 0 }
-                        context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), options.toBundle())
+                        context.startActivity(
+                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                            options.toBundle(),
+                        )
                         launched = true
                     }
                 } catch (unavailable: RuntimeException) {
@@ -175,7 +213,10 @@ class CarPlayUltraSource private constructor(
                 }
             }
             return try {
-                UltraClimateWriteResult(done.await(2, TimeUnit.SECONDS) && launched, "Vehicle UI launch")
+                UltraClimateWriteResult(
+                    done.await(2, TimeUnit.SECONDS) && launched,
+                    "Vehicle UI launch",
+                )
             } catch (cancelled: InterruptedException) {
                 Thread.currentThread().interrupt()
                 unavailable()
@@ -217,6 +258,7 @@ class CarPlayUltraSource private constructor(
         @Volatile private var observed = Bundle()
         @Volatile private var observedAt = 0L
         private val observers = CopyOnWriteArraySet<() -> Unit>()
+
         private fun trace(message: String) {
             Log.d("CarPlayUltra", message)
         }
@@ -236,41 +278,52 @@ class CarPlayUltraSource private constructor(
                     { CarPlayUltraSource(app, bridge) },
                     SystemClock::elapsedRealtime,
                     ::trace,
-                    themeProbe = true,
-                    vehicleDataText = UltraVehicleDataText(
-                        section = "Автомобиль",
-                        frontLeft = "Переднее левое колесо",
-                        frontRight = "Переднее правое колесо",
-                        rearLeft = "Заднее левое колесо",
-                        rearRight = "Заднее правое колесо",
-                        range = "Общий запас хода",
-                        odometer = "Пробег",
-                        fuel = "Топливо",
-                        fuelRange = "Запас хода на бензине",
-                        battery = "Заряд батареи",
-                        electricRange = "Запас хода на электричестве",
-                        driveMode = "Режим движения",
-                        driveModes = listOf("Эко", "Комфорт", "Спорт", "Бездорожье", "Индивидуальный", "Снег"),
-                        unavailable = "Нет данных",
-                        bar = "бар",
-                        kilometers = "км",
-                        localeTag = "ru",
-                    ),
-                    vehicleControlsText = UltraVehicleControlsText(
-                        section = "Управление автомобилем",
-                        driverMassage = "Массаж водителя",
-                        passengerMassage = "Массаж пассажира",
-                        driverProgram = "Программа массажа водителя",
-                        passengerProgram = "Программа массажа пассажира",
-                        lights = "Наружное освещение",
-                        carHome = "Меню автомобиля",
-                        off = "Выкл.",
-                        wave = "Волны",
-                        rollers = "Ролики",
-                        lightModes = listOf("Выкл.", "Габариты", "Ближний свет", "Авто"),
-                        unavailable = "Нет данных",
-                        settings = "Настройки VoyahTune",
-                    ),
+                    panelProbe = true,
+                    themeProbe = CarPlaySettingsAccess.dock(app) == CarPlayDock.DUAL_SIDES,
+                    vehicleDataText =
+                        UltraVehicleDataText(
+                            section = "Автомобиль",
+                            frontLeft = "Переднее левое колесо",
+                            frontRight = "Переднее правое колесо",
+                            rearLeft = "Заднее левое колесо",
+                            rearRight = "Заднее правое колесо",
+                            range = "Общий запас хода",
+                            odometer = "Пробег",
+                            fuel = "Топливо",
+                            fuelRange = "Запас хода на бензине",
+                            battery = "Заряд батареи",
+                            electricRange = "Запас хода на электричестве",
+                            driveMode = "Режим движения",
+                            driveModes =
+                                listOf(
+                                    "Эко",
+                                    "Комфорт",
+                                    "Спорт",
+                                    "Бездорожье",
+                                    "Индивидуальный",
+                                    "Снег",
+                                ),
+                            unavailable = "Нет данных",
+                            bar = "бар",
+                            kilometers = "км",
+                            localeTag = "ru",
+                        ),
+                    vehicleControlsText =
+                        UltraVehicleControlsText(
+                            section = "Управление автомобилем",
+                            driverMassage = "Массаж водителя",
+                            passengerMassage = "Массаж пассажира",
+                            driverProgram = "Программа массажа водителя",
+                            passengerProgram = "Программа массажа пассажира",
+                            lights = "Наружное освещение",
+                            carHome = "Меню автомобиля",
+                            off = "Выкл.",
+                            wave = "Волны",
+                            rollers = "Ролики",
+                            lightModes = listOf("Выкл.", "Габариты", "Ближний свет", "Авто"),
+                            unavailable = "Нет данных",
+                            settings = "Настройки VoyahTune",
+                        ),
                 )
             }
         }

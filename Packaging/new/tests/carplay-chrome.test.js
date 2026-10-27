@@ -11,13 +11,13 @@ const source = fs.readFileSync(
 const nativePackage = 'ru.big.town.anative';
 const carPlayActivity = nativePackage + '.CarPlayFullscreenActivity';
 
-function production(name) {
-    const match = new RegExp('^([ ]*)function ' + name + '\\(', 'm').exec(source);
+function production(name, implementation = source) {
+    const match = new RegExp('^([ ]*)function ' + name + '\\(', 'm').exec(implementation);
     assert(match, name);
     const closing = '\n' + match[1] + '}';
-    const end = source.indexOf(closing, match.index);
+    const end = implementation.indexOf(closing, match.index);
     assert(end > match.index, name + ' closing brace');
-    return source.slice(match.index, end + closing.length);
+    return implementation.slice(match.index, end + closing.length);
 }
 
 function harness(savedClaims = [false, false]) {
@@ -37,13 +37,15 @@ function harness(savedClaims = [false, false]) {
     let now = 1000;
     const revealUntil = [0, 0];
     const dockHidden = [-1, -1];
+    let hideSystemBars = true;
     const context = {
         OUR_PKG: nativePackage,
         CARPLAY_FULLSCREEN_HOST: carPlayActivity,
         CARPLAY_CHROME_REVEAL_SETTING: 'voyahtune_carplay_chrome_reveal_until_',
         SettingsGlobal: {
             getLong: (_, key) => revealUntil[Number(key.slice(-1))],
-            getInt: (_, key) => dockHidden[Number(key.slice(-1))],
+            getInt: (_, key) => key === 'voyahtune_carplay_hide_system_bars'
+                ? Number(hideSystemBars) : dockHidden[Number(key.slice(-1))],
             putInt(_, key, value) {
                 assert(key.startsWith('voyahtune_carplay_dock_hidden_'));
                 const displayId = Number(key.slice(-1));
@@ -169,18 +171,20 @@ function harness(savedClaims = [false, false]) {
     }
     vm.createContext(context);
     vm.runInContext([
-        'cleanJavaString', 'isUserFullscreen', 'isCarPlayFullscreen', 'hidesPhysicalDock',
+        'cleanJavaString', 'isUserFullscreen', 'isCarPlayHost', 'carPlayHidesSystemBars',
+        'isCarPlayFullscreen', 'hidesPhysicalDock',
         'carPlayChromeRevealRemaining', 'reportCarPlayDockHidden', 'carPlayChromeTransition',
         'parseTopActivity', 'topActivityForScreen',
         'rememberCarPlayChrome', 'setCarPlayStatusBarVisible', 'reconcileCarPlayStatusBar',
         'modelDockController', 'installFullscreenVisibilityGate', 'reconcilePhysicalDock',
         'reconcilePhysicalDisplays', 'scheduleCarPlayChromeCheck',
-    ].map(production).join('\n'), context);
+    ].map(name => production(name)).join('\n'), context);
     context.installFullscreenVisibilityGate('handleUpdateMainNavigationBar', 0);
     context.installFullscreenVisibilityGate('handleUpdateSecondNavigationBar', 1);
 
     return {
         context, model, top, dockVisible, dockHidden, statusVisible, saved, requests,
+        setHideSystemBars(value) { hideSystemBars = value; },
         timers, errors, failStatus, failDock, revealUntil,
         reveal(displayId) {
             revealUntil[displayId] = now + 10000;
@@ -201,6 +205,44 @@ function harness(savedClaims = [false, false]) {
         },
     };
 }
+
+test('fullscreen CarPlay keeps the OEM dock visible until hiding is explicitly enabled', () => {
+    const app = harness();
+    app.setHideSystemBars(false);
+    app.carPlay(0);
+    app.reconcile();
+    app.model.handleUpdateMainNavigationBar(nativePackage, carPlayActivity, false);
+    assert.equal(app.dockVisible[0], true);
+    assert.equal(app.dockHidden[0], 0);
+    app.setHideSystemBars(true);
+    app.reconcile();
+    assert.equal(app.dockVisible[0], false);
+    app.setHideSystemBars(false);
+    app.reconcile();
+    assert.equal(app.dockVisible[0], true);
+});
+
+test('shared OEM adapter uses the explicit CarPlay preference before package fullscreen policy', () => {
+    const implementation = fs.readFileSync(path.join(__dirname, '../adapters/launcher/shared-navigation.js'), 'utf8');
+    let hide = false;
+    const runtime = {
+        OUR_PKG: nativePackage,
+        cleanJavaString: value => value || '',
+        SettingsGlobal: {getInt: () => Number(hide)},
+        ctx: () => ({getContentResolver: () => ({})}),
+        isUserFullscreen: () => true,
+        dockPinDisabled: () => true,
+    };
+    vm.createContext(runtime);
+    vm.runInContext(['carPlayDockVisible', 'hidesPhysicalDock', 'dockKept', 'desiredDockVisible']
+        .map(name => production(name, implementation)).join('\n'), runtime);
+    const foreground = {pkg: nativePackage, act: carPlayActivity};
+    for (hide of [false, true, false]) {
+        assert.equal(runtime.hidesPhysicalDock(foreground), hide);
+        assert.equal(runtime.dockKept(nativePackage, carPlayActivity), !hide);
+        assert.equal(runtime.desiredDockVisible(0, nativePackage, carPlayActivity), !hide);
+    }
+});
 
 test('dock visibility reports follow hiding, reveal and display transfer', () => {
     const app = harness();
@@ -264,7 +306,7 @@ test('only the live physical fullscreen host owns chrome; unrelated screens stay
 test('windowed CarPlay keeps the OEM dock under ordinary inset-window policy', () => {
     const app = harness();
     app.context.cfg = () => '1';
-    vm.runInContext(['ourInsetActivity', 'dockKept'].map(production).join('\n'), app.context);
+    vm.runInContext(['ourInsetActivity', 'dockKept'].map(name => production(name)).join('\n'), app.context);
     assert.equal(app.context.dockKept(nativePackage, nativePackage + '.CarPlayWindowedActivity'), true);
     assert.equal(app.context.dockKept(nativePackage, carPlayActivity), false);
     assert.equal(app.context.dockKept(nativePackage, nativePackage + '.OtherActivity'), false);
