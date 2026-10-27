@@ -542,6 +542,9 @@ pub fn apply(shared: &Shared) -> io::Result<()> {
             }
             Ok(())
         },
+        |error| {
+            let _ = crate::log(root(), &format!("navigation_fonts_warning {error}"));
+        },
     )?;
     // A failed reboot must not leave a permanently busy UI or report success.
     thread::sleep(Duration::from_secs(30));

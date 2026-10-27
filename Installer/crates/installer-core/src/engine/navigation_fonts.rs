@@ -16,7 +16,7 @@ fn supported_model(properties: &str) -> Option<&'static str> {
 
 impl Engine {
     pub(super) fn navigation_fonts(&self, action: &str) -> Result<()> {
-        let properties = self.shell(PROPERTIES_COMMAND)?;
+        let properties = self.adb.read(PROPERTIES_COMMAND)?;
         if properties.trim().is_empty() {
             return Err(self.fail(
                 "Не удалось определить модель автомобиля",

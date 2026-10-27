@@ -7,6 +7,8 @@ mod readiness;
 mod removal;
 
 #[cfg(all(test, unix))]
+mod optional_steps_tests;
+#[cfg(all(test, unix))]
 mod recipe_files_tests;
 
 use crate::{
@@ -233,6 +235,28 @@ impl Engine {
             }
         }
     }
+    fn optional_step(
+        &mut self,
+        id: &str,
+        title: &str,
+        perform: impl FnOnce(&mut Self) -> Result<()>,
+    ) -> Result<()> {
+        let result = self.step(id, title, |engine| {
+            if let Err(error) = perform(engine) {
+                engine.warning(&error);
+            }
+            Ok(())
+        });
+        // Logging failures are optional too; explicit cancellation still stops the operation.
+        match result {
+            Err(error) if error.code != "CANCELLED" => {
+                self.warning(&error);
+                Ok(())
+            }
+            result => result,
+        }
+    }
+
     fn raw(&self, args: &[&str]) -> Result<crate::adb::Output> {
         let timeout = if self.adb.step.as_deref() == Some("verify") {
             Duration::from_secs(if args == ["wait-for-device"] { 180 } else { 30 })
@@ -327,7 +351,7 @@ impl Engine {
             "Блокировка установки и сохранение OTA-логов",
             |e| e.ota_prepare(),
         )?;
-        self.step(
+        self.optional_step(
             "navigation-fonts-check",
             "Проверка тем приборки",
             |e| e.navigation_fonts("inspect"),
@@ -414,7 +438,7 @@ impl Engine {
                     |e| e.packages(),
                 )?;
             }
-            self.step(
+            self.optional_step(
                 "navigation-fonts",
                 "Шрифты навигации приборки",
                 |e| e.navigation_fonts("apply"),
@@ -438,7 +462,7 @@ impl Engine {
                 },
             )?;
         } else {
-            self.step(
+            self.optional_step(
                 "navigation-fonts",
                 "Восстановление шрифтов приборки",
                 |e| e.navigation_fonts("restore"),

@@ -12,7 +12,11 @@ pub enum Step {
 }
 
 /// The UI package replacement ends the visible session; only reboot finalization may follow it.
-pub fn execute(runyn: bool, mut perform: impl FnMut(Step) -> io::Result<()>) -> io::Result<()> {
+pub fn execute(
+    runyn: bool,
+    mut perform: impl FnMut(Step) -> io::Result<()>,
+    mut log_navigation_fonts_error: impl FnMut(&io::Error),
+) -> io::Result<()> {
     let order = [
         Step::Native,
         Step::Runyn,
@@ -24,7 +28,13 @@ pub fn execute(runyn: bool, mut perform: impl FnMut(Step) -> io::Result<()>) -> 
     ];
     for step in order {
         if step != Step::Runyn || runyn {
-            perform(step)?;
+            if let Err(error) = perform(step) {
+                if step == Step::NavigationFonts {
+                    log_navigation_fonts_error(&error);
+                } else {
+                    return Err(error);
+                }
+            }
         }
     }
     Ok(())
@@ -36,10 +46,14 @@ mod tests {
     #[test]
     fn restore_is_the_last_operation_before_reboot() {
         let mut actual = Vec::new();
-        execute(false, |step| {
-            actual.push(step);
-            Ok(())
-        })
+        execute(
+            false,
+            |step| {
+                actual.push(step);
+                Ok(())
+            },
+            |error| panic!("Unexpected font error: {error}"),
+        )
         .unwrap();
         assert_eq!(
             actual,
@@ -56,10 +70,14 @@ mod tests {
     #[test]
     fn runyn_is_installed_before_the_ui_is_replaced() {
         let mut actual = Vec::new();
-        execute(true, |step| {
-            actual.push(step);
-            Ok(())
-        })
+        execute(
+            true,
+            |step| {
+                actual.push(step);
+                Ok(())
+            },
+            |error| panic!("Unexpected font error: {error}"),
+        )
         .unwrap();
         assert_eq!(
             actual,
@@ -75,26 +93,65 @@ mod tests {
         );
     }
     #[test]
-    fn failures_never_reach_later_writes_or_reboot() {
+    fn required_step_failures_never_reach_later_writes_or_reboot() {
         for failure in [
             Step::Native,
+            Step::Runyn,
             Step::Dns,
-            Step::NavigationFonts,
             Step::Sync,
             Step::Restore,
+            Step::Reboot,
         ] {
             let mut actual = Vec::new();
-            let result = execute(false, |step| {
-                actual.push(step);
-                if step == failure {
-                    Err(io::Error::other("injected failure"))
-                } else {
-                    Ok(())
-                }
-            });
+            let result = execute(
+                true,
+                |step| {
+                    actual.push(step);
+                    if step == failure {
+                        Err(io::Error::other("injected failure"))
+                    } else {
+                        Ok(())
+                    }
+                },
+                |error| panic!("Required step failure was ignored: {error}"),
+            );
             assert!(result.is_err());
             assert_eq!(actual.last(), Some(&failure));
-            assert!(!actual.contains(&Step::Reboot));
+            assert_eq!(actual.contains(&Step::Reboot), failure == Step::Reboot);
+        }
+    }
+
+    #[test]
+    fn navigation_font_failures_are_logged_and_installation_reaches_reboot() {
+        for runyn in [false, true] {
+            for kind in [
+                io::ErrorKind::TimedOut,
+                io::ErrorKind::PermissionDenied,
+                io::ErrorKind::InvalidData,
+                io::ErrorKind::Other,
+            ] {
+                let mut actual = Vec::new();
+                let mut warnings = Vec::new();
+                execute(
+                    runyn,
+                    |step| {
+                        actual.push(step);
+                        if step == Step::NavigationFonts {
+                            Err(io::Error::new(kind, "font operation failed"))
+                        } else {
+                            Ok(())
+                        }
+                    },
+                    |error| warnings.push((error.kind(), error.to_string())),
+                )
+                .unwrap();
+
+                assert_eq!(warnings, [(kind, "font operation failed".into())]);
+                assert!(actual.contains(&Step::Sync));
+                assert!(actual.contains(&Step::Restore));
+                assert_eq!(actual.last(), Some(&Step::Reboot));
+                assert_eq!(actual.contains(&Step::Runyn), runyn);
+            }
         }
     }
 }
