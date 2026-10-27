@@ -19,6 +19,8 @@ class PairVerify(
     private var keys: ControlKeys? = null
     private var verified = false
     private var controllerId: String? = null
+    /** Request and reply bodies of the current run, for the MFi4 transcript binding. */
+    private val transcript = java.io.ByteArrayOutputStream()
 
     val isVerified: Boolean get() = verified
     val verifiedControllerId: String? get() = controllerId
@@ -28,7 +30,8 @@ class PairVerify(
     fun handle(body: ByteArray): ByteArray {
         val tlv = Tlv8Codec.decode(body)
         val state = tlv[TYPE_STATE]?.firstOrNull()?.toInt()?.and(0xff)
-        return try {
+        if (state == 1) transcript.reset()
+        val reply = try {
             when (state) {
                 1 -> m2(tlv)
                 3 -> m4(tlv)
@@ -37,6 +40,17 @@ class PairVerify(
         } catch (_: Exception) {
             err(state ?: 0)
         }
+        if (runCatching { Tlv8Codec.decode(reply)[TYPE_ERROR] == null }.getOrDefault(false)) {
+            transcript.write(body); transcript.write(reply)
+        }
+        return reply
+    }
+
+    /** MFi4 binding proofs (the phone's, ours) once a pair-verify run has completed. */
+    fun transcriptProofs(): Pair<ByteArray, ByteArray>? {
+        if (keys == null) return null
+        val secret = sharedSecret ?: return null
+        return com.shilapi.xcertplay.airplay.mfi4.Mfi4Crypto.transcriptProofs(secret, transcript.toByteArray())
     }
 
     private fun m2(tlv: Map<Int, ByteArray>): ByteArray {

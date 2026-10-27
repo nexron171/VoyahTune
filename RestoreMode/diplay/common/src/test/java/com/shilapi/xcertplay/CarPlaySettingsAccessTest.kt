@@ -1,5 +1,6 @@
 package com.shilapi.xcertplay
 
+import android.os.Looper
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -9,6 +10,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.util.ReflectionHelpers
 
@@ -28,6 +30,17 @@ class CarPlaySettingsAccessTest {
     @After
     fun cleanup() {
         CarPlayBackgroundSession.clear()
+    }
+
+    @Test
+    fun ultraDefaultsOnAndSurvivesFeatureToggle() {
+        assertTrue(CarPlaySettingsAccess.ultra(app))
+        CarPlaySettingsAccess.setUltra(app, false)
+        CarPlaySettingsAccess.setEnabled(app, false)
+        CarPlaySettingsAccess.setEnabled(app, true)
+        assertFalse(CarPlaySettingsAccess.ultra(app))
+        CarPlaySettingsAccess.setUltra(app, true)
+        assertTrue(CarPlaySettingsAccess.ultra(app))
     }
 
     @Test
@@ -81,6 +94,7 @@ class CarPlaySettingsAccessTest {
         assertFalse(completed)
         CarPlayBackgroundSession.clear()
         finishStop!!.invoke()
+        shadowOf(Looper.getMainLooper()).idle()
         assertTrue(completed)
         assertEquals(CarPlaySettingsAccess.ConnectionState.DISCONNECTED, CarPlaySettingsAccess.connectionState())
     }

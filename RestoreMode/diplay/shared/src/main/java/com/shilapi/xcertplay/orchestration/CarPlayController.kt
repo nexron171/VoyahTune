@@ -189,6 +189,8 @@ class CarPlayController(
     private val appContext = context.applicationContext
     private val sessionIdentification = config.identification.copy(
         carPlayThemeAssetIdentifier = airPlayConfig.vehicleTheme?.assetIdentifier,
+        vehicleInformation = if (airPlayConfig.vehicleStateProtocol)
+            com.shilapi.xcertplay.transport.Iap2VehicleInformation("Voyah Free", listOf(0, 2)) else null,
     )
     private val diagnosticAttempt = diagnosticAttempts.incrementAndGet()
     private val diagnosticRun = AtomicInteger()
@@ -1585,6 +1587,8 @@ class CarPlayController(
                 accessPointBssid = hotspotInfo.accessPointBssid,
                 sdkVersion = airPlayConfig.vehicleTheme?.sdkVersion,
                 clusterAsset = airPlayConfig.vehicleTheme?.clusterAsset,
+                mutualAuthentication = if (airPlayConfig.mutualAuthentication &&
+                    runCatching { mfiSession?.client?.protocolMajor() }.getOrNull() == 3) true else null,
             )
             wirelessRuntimeIdentification = runtimeIdentification
             wirelessAirPlayEndpoint = endpoint
@@ -2369,6 +2373,8 @@ class CarPlayController(
                 deviceIdentifier = ncmHostMac.macString(),
                 sdkVersion = airPlayConfig.vehicleTheme?.sdkVersion,
                 clusterAsset = airPlayConfig.vehicleTheme?.clusterAsset,
+                mutualAuthentication = if (airPlayConfig.mutualAuthentication &&
+                    runCatching { mfiSession?.client?.protocolMajor() }.getOrNull() == 3) true else null,
             )
             onStatus(CarPlayStatus.RunningControl)
             wiredSessionActive = false

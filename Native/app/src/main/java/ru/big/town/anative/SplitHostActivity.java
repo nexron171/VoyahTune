@@ -87,6 +87,7 @@ public class SplitHostActivity extends Activity {
     // Фолбэк без TRUSTED (если ADD_TRUSTED_DISPLAY не выдан, напр. на эмуляторе) — рендер будет,
     // запуск чужой активити может не пройти, но не роняем приложение.
     private static volatile WeakReference<SplitHostActivity> activeHost = new WeakReference<>(null);
+    private static volatile long carPlayLaunchGeneration;
 
     static boolean ownsCarPlayDisplay(int displayId) {
         SplitHostActivity host = activeHost.get();
@@ -1694,31 +1695,17 @@ public class SplitHostActivity extends Activity {
         SplitHostActivity host = activeHost.get();
         if (host == null || host.hostDestroyed || !host.singleCarPlay) return;
         Integer hostedDisplayId = host.paneDisplayId(host.left);
-        if (hostedDisplayId == null || hostedDisplayId == displayId) return;
+        if (hostedDisplayId != null && hostedDisplayId == displayId) return;
         activeHost = new WeakReference<>(null);
         host.retireAsyncHostWork(true);
         host.releasePane(host.left);
         host.finishAndRemoveTask();
     }
 
-    /** Replace a visible host immediately; a parked host must not steal settings focus. */
+    /** A mode change retires the current window; only a new user launch may recreate it. */
     static void refreshCarPlayWindowMode() {
-        SplitHostActivity host = activeHost.get();
-        if (host == null || host.hostDestroyed || !host.singleCarPlay) return;
-        boolean reopen = host.watchActive && !host.isFinishing();
-        android.view.Display display = host.getWindow().getDecorView().getDisplay();
-        if (display == null) display = host.getWindowManager().getDefaultDisplay();
-        int displayId = display.getDisplayId();
-        int dpi = host.left.dpi;
-        Context application = host.getApplicationContext();
-
-        activeHost = new WeakReference<>(null);
-        host.retireAsyncHostWork(true);
-        host.releasePane(host.left);
-        host.finishAndRemoveTask();
-        if (reopen && (displayId == 0 || displayId == 1)) {
-            launchSingle(application, CarPlayTarget.ID, dpi, displayId);
-        }
+        carPlayLaunchGeneration++;
+        closeFullscreenCarPlayHostExcept(-1);
     }
 
     /**
@@ -1737,7 +1724,11 @@ public class SplitHostActivity extends Activity {
             return;
         }
         if (displayId != 0 && displayId != 1) displayId = 0;
-        SplitHostTaskLane.get(ctx).requestSingleHost(pkg, Math.max(0, dpi), displayId, valid);
+        long generation = carPlayLaunchGeneration;
+        BooleanSupplier current =
+                () -> valid.getAsBoolean()
+                        && (!CarPlayTarget.isCarPlay(pkg) || generation == carPlayLaunchGeneration);
+        SplitHostTaskLane.get(ctx).requestSingleHost(pkg, Math.max(0, dpi), displayId, current);
     }
 
     /** Called on main only after the process lane has resolved the target package. */

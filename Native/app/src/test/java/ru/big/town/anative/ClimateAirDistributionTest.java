@@ -73,4 +73,29 @@ public class ClimateAirDistributionTest {
         assertNull(ClimateCommand.from(state(1, 0, 0), UPPER, 1));
         assertFalse(ClimateCommand.valid(UPPER, 2));
     }
+
+    @Test
+    public void indexedVentUsesAllFiveOemModesAndRequiresManualReadback() {
+        String field = CarPlayClimateProtocol.VENT_MODE;
+        for (int current = 0; current <= 4; current++) {
+            assertEquals(current, state(current, 1, 0).values().get(field), 0);
+            for (int target = 0; target <= 4; target++) {
+                ClimateCommand command = ClimateCommand.from(state(current, 1, 1), field, target);
+                assertEquals("AC_FLOW_MODE", command.field);
+                assertEquals(13, command.stableId);
+                assertEquals(target, command.value);
+                assertTrue(ClimateCommand.reached(state(target, 1, 0), field, target));
+                assertFalse(ClimateCommand.reached(state(target, 1, 1), field, target));
+                assertFalse(ClimateCommand.reached(state(target, 0, 0), field, target));
+                assertNull(ClimateCommand.from(state(current, 0, 0), field, target));
+            }
+        }
+        for (double invalid : new double[] {-1, 5, 1.5, Double.NaN, Double.POSITIVE_INFINITY}) {
+            assertNull(ClimateCommand.from(state(0, 1, 0), field, invalid));
+        }
+        for (int unknown : new int[] {-1, 5, 255}) {
+            assertFalse(state(unknown, 1, 0).values().containsKey(field));
+            assertNull(ClimateCommand.from(state(unknown, 1, 0), field, 1));
+        }
+    }
 }

@@ -28,6 +28,8 @@ final class ClimateCommand {
                         && value == Math.rint(value);
             case CarPlayClimateProtocol.CYCLE_RECIRCULATION:
                 return value == 1;
+            case CarPlayClimateProtocol.VENT_MODE:
+                return value == Math.rint(value) && value >= 0 && value <= 4;
             case CarPlayClimateProtocol.POWER:
             case CarPlayClimateProtocol.COMPRESSOR:
             case CarPlayClimateProtocol.AUTO:
@@ -71,7 +73,11 @@ final class ClimateCommand {
             return null;
         }
         if (ClimateAirDistribution.handles(field)) {
-            int mode = ClimateAirDistribution.targetMode(state.airDistribution, field, target == 1);
+            int mode =
+                    CarPlayClimateProtocol.VENT_MODE.equals(field)
+                            ? (int) target
+                            : ClimateAirDistribution.targetMode(
+                                    state.airDistribution, field, target == 1);
             return state.power == 1 && mode >= 0
                     ? new ClimateCommand("AC_FLOW_MODE", 13, mode)
                     : null;
@@ -114,10 +120,10 @@ final class ClimateCommand {
     static int nextCirculationMode(OemClimateState state) {
         switch (state.circulation) {
             case OemClimateState.CIRCULATION_INTERNAL:
-                return OemClimateState.CIRCULATION_EXTERNAL;
-            case OemClimateState.CIRCULATION_EXTERNAL:
                 return OemClimateState.CIRCULATION_AUTOMATIC;
             case OemClimateState.CIRCULATION_AUTOMATIC:
+                return OemClimateState.CIRCULATION_EXTERNAL;
+            case OemClimateState.CIRCULATION_EXTERNAL:
                 return OemClimateState.CIRCULATION_INTERNAL;
             default:
                 return -1;

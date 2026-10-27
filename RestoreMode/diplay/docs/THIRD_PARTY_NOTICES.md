@@ -60,3 +60,15 @@ The static site layout, CSS and generator adapt DiAuto (AGPL-3.0). The AGPL lice
 Required Notice: Copyright AndyShaman (https://github.com/AndyShaman/BYDMate)
 
 The maneuver PNGs under `shared/src/main/assets/byd-hud-icons` were imported from BYDMate. Its PolyForm Noncommercial 1.0.0 terms and required notice are included alongside the assets. These files are separate from the project code license; upstream describes them as donor assets and their original provenance is not independently established. The validated DiLink5.1 windshield path uses factory turn codes rather than these images.
+
+## VoyahPlay CarPlay Ultra integration
+
+MFi4, RCS/CAF/OPACK, UI Sync, vehicle and radio descriptions, radio audio ownership,
+MediaBrowser integration and the reviewed RDS text layout are adapted from
+[garik345/VoyahPlay](https://github.com/garik345/VoyahPlay/tree/f34a2b0c7a010dd66c476e1bf097e028489ae493),
+commit f34a2b0c7a010dd66c476e1bf097e028489ae493 (GPL-3.0).
+The source includes protocol research and adaptations from [f-io/LIVI](https://github.com/f-io/LIVI),
+Copyright 2026 Lasse Heitgres, GPL-3.0-or-later. Source notices and the GPL text in
+`../LICENSE` are retained. VoyahTune replaces direct vehicle access with its Native IPC
+and retains its own climate schema as a separate VSP plugin. No authentication assets
+were imported with this source integration.

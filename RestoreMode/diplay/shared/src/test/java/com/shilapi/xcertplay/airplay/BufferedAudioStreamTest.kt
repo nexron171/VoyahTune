@@ -4,8 +4,8 @@ import java.io.DataOutputStream
 import java.math.BigInteger
 import java.net.InetAddress
 import java.net.Socket
-import java.util.concurrent.CountDownLatch
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import org.junit.Assert.assertArrayEquals
@@ -16,30 +16,39 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BufferedAudioStreamTest {
-    private val config = AirPlayConfig(
-        deviceName = "test",
-        deviceId = "02:00:00:00:00:02",
-        btMac = "02:00:00:00:00:02",
-        sourceVersion = "366.0",
-        main = AirPlayDisplayConfig(widthPixels = 1280, heightPixels = 720),
-    )
+    private val config =
+        AirPlayConfig(
+            deviceName = "test",
+            deviceId = "02:00:00:00:00:02",
+            btMac = "02:00:00:00:00:02",
+            sourceVersion = "366.0",
+            main = AirPlayDisplayConfig(widthPixels = 1280, heightPixels = 720),
+        )
     private val key = ByteArray(32) { (it + 1).toByte() }
-    private val format = AudioFormat(AudioCodecKind.AAC_LC, 48_000, 2, BufferedAudioStream.STREAM_TYPE, "media")
+    private val format =
+        AudioFormat(AudioCodecKind.AAC_LC, 48_000, 2, BufferedAudioStream.STREAM_TYPE, "media")
 
     @Test
     fun theOfferIsMadeOnlyWhenEnabled() {
         val off = AirPlayInfoPlist.build(config)
         assertFalse(off.containsKey("mainBufferedInfo"))
         assertFalse((off["audioFormats"] as List<*>).any { (it as Map<*, *>)["type"] == 103 })
-        assertFalse(MAIN_BUFFERED_FEATURE in setupEnabledFeatures(config, listOf("mainBuffered", "iAPChannel")))
+        assertFalse(
+            MAIN_BUFFERED_FEATURE in
+                setupEnabledFeatures(config, listOf("mainBuffered", "iAPChannel")),
+        )
 
         val on = config.copy(mainBufferedAudio = true)
         val info = AirPlayInfoPlist.build(on)
         assertEquals(emptyMap<String, Any?>(), info["mainBufferedInfo"])
-        val entry = (info["audioFormats"] as List<*>).single { (it as Map<*, *>)["type"] == 103 } as Map<*, *>
+        val entry =
+            (info["audioFormats"] as List<*>).single { (it as Map<*, *>)["type"] == 103 }
+                as Map<*, *>
         assertEquals("media", entry["audioType"])
         assertEquals(0x800000, entry["audioOutputFormats"]) // AAC-LC 48 kHz stereo
-        assertTrue(MAIN_BUFFERED_FEATURE in setupEnabledFeatures(on, listOf("mainBuffered", "iAPChannel")))
+        assertTrue(
+            MAIN_BUFFERED_FEATURE in setupEnabledFeatures(on, listOf("mainBuffered", "iAPChannel")),
+        )
         assertFalse(MAIN_BUFFERED_FEATURE in setupEnabledFeatures(on, listOf("iAPChannel")))
     }
 
@@ -47,7 +56,9 @@ class BufferedAudioStreamTest {
     fun disablingAudioOutputAlsoDisablesBufferedSetupNegotiation() {
         val muted = config.copy(mainBufferedAudio = true, disableAudioOutput = true)
         assertFalse(AirPlayInfoPlist.build(muted).containsKey("mainBufferedInfo"))
-        assertFalse(MAIN_BUFFERED_FEATURE in setupEnabledFeatures(muted, listOf(MAIN_BUFFERED_FEATURE)))
+        assertFalse(
+            MAIN_BUFFERED_FEATURE in setupEnabledFeatures(muted, listOf(MAIN_BUFFERED_FEATURE)),
+        )
     }
 
     @Test
@@ -66,11 +77,16 @@ class BufferedAudioStreamTest {
                             out.write(body)
                         }
                         out.flush()
-                    } catch (_: java.io.IOException) { /* Closing the stream interrupts a blocked writer. */ }
+                    } catch (_: java.io.IOException) {
+                        /* Closing the stream interrupts a blocked writer. */
+                    }
                 }
                 waitFor { queuedBytes(stream) >= BufferedAudioStream.AUDIO_BUFFER_BYTES - 120_000L }
                 Thread.sleep(150)
-                assertTrue("TCP preload exceeded its advertised buffer", queuedBytes(stream) <= BufferedAudioStream.AUDIO_BUFFER_BYTES)
+                assertTrue(
+                    "TCP preload exceeded its advertised buffer",
+                    queuedBytes(stream) <= BufferedAudioStream.AUDIO_BUFFER_BYTES,
+                )
                 stream.close()
                 sending.get(3, TimeUnit.SECONDS)
             }
@@ -96,10 +112,13 @@ class BufferedAudioStreamTest {
                         val out = DataOutputStream(socket.getOutputStream())
                         repeat(floor + extra) { i ->
                             val body = seal(i, i * 1024L, byteArrayOf(0x21))
-                            out.writeShort(body.size + 2); out.write(body)
+                            out.writeShort(body.size + 2)
+                            out.write(body)
                         }
                         out.flush()
-                    } catch (_: java.io.IOException) { /* Closing the stream interrupts a blocked writer. */ }
+                    } catch (_: java.io.IOException) {
+                        /* Closing the stream interrupts a blocked writer. */
+                    }
                 }
                 waitFor { queuedFrames(stream) >= floor + extra }
                 sending.get(3, TimeUnit.SECONDS)
@@ -116,15 +135,18 @@ class BufferedAudioStreamTest {
         }
     }
 
-    @Test fun pauseWaitsForAnInFlightSinkDelivery() = controlWaitsForDelivery { stream ->
+    @Test
+    fun pauseWaitsForAnInFlightSinkDelivery() = controlWaitsForDelivery { stream ->
         stream.setRate(null, 0, BigInteger.ZERO)
     }
 
-    @Test fun flushWaitsForAnInFlightSinkDelivery() = controlWaitsForDelivery { stream ->
+    @Test
+    fun flushWaitsForAnInFlightSinkDelivery() = controlWaitsForDelivery { stream ->
         stream.flush(2048L)
     }
 
-    @Test fun closeWaitsForAnInFlightSinkDelivery() = controlWaitsForDelivery { stream ->
+    @Test
+    fun closeWaitsForAnInFlightSinkDelivery() = controlWaitsForDelivery { stream ->
         stream.close()
     }
 
@@ -138,7 +160,8 @@ class BufferedAudioStreamTest {
                 val out = DataOutputStream(socket.getOutputStream())
                 repeat(100) { i ->
                     val body = seal(i, 1000L + i * 1024L, byteArrayOf(0x21))
-                    out.writeShort(body.size + 2); out.write(body)
+                    out.writeShort(body.size + 2)
+                    out.write(body)
                 }
                 out.flush()
                 stream.setRate(1000L, 1, BigInteger.ZERO)
@@ -147,9 +170,15 @@ class BufferedAudioStreamTest {
                 assertEquals(1000L, paused["rtpTime"])
                 stream.setRate(paused["rtpTime"] as Long, 1, BigInteger.ZERO)
                 waitFor { sink.started.size == 2 }
-                assertEquals("Resume skipped the one-second renderer preload", 1000, sink.started.last())
+                assertEquals(
+                    "Resume skipped the one-second renderer preload",
+                    1000,
+                    sink.started.last(),
+                )
             }
-        } finally { stream.close() }
+        } finally {
+            stream.close()
+        }
     }
 
     private fun controlWaitsForDelivery(control: (BufferedAudioStream) -> Unit) {
@@ -157,12 +186,18 @@ class BufferedAudioStreamTest {
         val release = CountDownLatch(1)
         val startedControl = CountDownLatch(1)
         val completedControl = CountDownLatch(1)
-        val sink = object : MediaSink {
-            override fun onAudioRtp(id: AudioStreamId, format: AudioFormat, rtp: ByteArray, sample: Int) {
-                delivering.countDown()
-                assertTrue(release.await(3, TimeUnit.SECONDS))
+        val sink =
+            object : MediaSink {
+                override fun onAudioRtp(
+                    id: AudioStreamId,
+                    format: AudioFormat,
+                    rtp: ByteArray,
+                    sample: Int,
+                ) {
+                    delivering.countDown()
+                    assertTrue(release.await(3, TimeUnit.SECONDS))
+                }
             }
-        }
         val stream = BufferedAudioStream(key, format, sink)
         val executor = Executors.newSingleThreadExecutor()
         try {
@@ -170,7 +205,9 @@ class BufferedAudioStreamTest {
             Socket(InetAddress.getLoopbackAddress(), stream.port).use { socket ->
                 val body = seal(0, 1024L, byteArrayOf(0x21))
                 DataOutputStream(socket.getOutputStream()).apply {
-                    writeShort(body.size + 2); write(body); flush()
+                    writeShort(body.size + 2)
+                    write(body)
+                    flush()
                 }
                 stream.setRate(1024L, 1, BigInteger.ZERO)
                 assertTrue(delivering.await(3, TimeUnit.SECONDS))
@@ -180,7 +217,10 @@ class BufferedAudioStreamTest {
                     completedControl.countDown()
                 }
                 assertTrue(startedControl.await(3, TimeUnit.SECONDS))
-                assertFalse("Control returned while a stale sink delivery was still in flight", completedControl.await(150, TimeUnit.MILLISECONDS))
+                assertFalse(
+                    "Control returned while a stale sink delivery was still in flight",
+                    completedControl.await(150, TimeUnit.MILLISECONDS),
+                )
                 release.countDown()
                 action.get(3, TimeUnit.SECONDS)
             }
@@ -192,17 +232,36 @@ class BufferedAudioStreamTest {
     }
 
     private fun queuedFrames(stream: BufferedAudioStream): Int {
-        val lock = BufferedAudioStream::class.java.getDeclaredField("lock").apply { isAccessible = true }.get(stream)!!
+        val lock =
+            BufferedAudioStream::class
+                .java
+                .getDeclaredField("lock")
+                .apply { isAccessible = true }
+                .get(stream)!!
         return synchronized(lock) {
-            val queue = BufferedAudioStream::class.java.getDeclaredField("queue").apply { isAccessible = true }.get(stream)
+            val queue =
+                BufferedAudioStream::class
+                    .java
+                    .getDeclaredField("queue")
+                    .apply { isAccessible = true }
+                    .get(stream)
             (queue as java.util.ArrayDeque<*>).size
         }
     }
 
     private fun queuedBytes(stream: BufferedAudioStream): Long {
-        val lock = BufferedAudioStream::class.java.getDeclaredField("lock").apply { isAccessible = true }.get(stream)!!
+        val lock =
+            BufferedAudioStream::class
+                .java
+                .getDeclaredField("lock")
+                .apply { isAccessible = true }
+                .get(stream)!!
         return synchronized(lock) {
-            BufferedAudioStream::class.java.getDeclaredField("queuedBytes").apply { isAccessible = true }.getLong(stream)
+            BufferedAudioStream::class
+                .java
+                .getDeclaredField("queuedBytes")
+                .apply { isAccessible = true }
+                .getLong(stream)
         }
     }
 
@@ -216,10 +275,27 @@ class BufferedAudioStreamTest {
         assertArrayEquals(payload, frame.rtp.copyOfRange(12, frame.rtp.size))
         assertNull(BufferedAudioStream.open(ByteArray(32), body))
         assertNull(BufferedAudioStream.open(key, body.copyOf(20)))
-        assertNull(BufferedAudioStream.open(key, body.copyOf().apply { this[4] = (this[4].toInt() xor 1).toByte() }))
-        assertNull(BufferedAudioStream.open(key, body.copyOf().apply { this[lastIndex - 8] = (this[lastIndex - 8].toInt() xor 1).toByte() }))
+        assertNull(
+            BufferedAudioStream.open(
+                key,
+                body.copyOf().apply { this[4] = (this[4].toInt() xor 1).toByte() },
+            ),
+        )
+        assertNull(
+            BufferedAudioStream.open(
+                key,
+                body.copyOf().apply {
+                    this[lastIndex - 8] = (this[lastIndex - 8].toInt() xor 1).toByte()
+                },
+            ),
+        )
         for (invalidHeader in listOf(0x40, 0x81, 0x90, 0xa0)) {
-            assertNull(BufferedAudioStream.open(key, body.copyOf().apply { this[0] = invalidHeader.toByte() }))
+            assertNull(
+                BufferedAudioStream.open(
+                    key,
+                    body.copyOf().apply { this[0] = invalidHeader.toByte() },
+                ),
+            )
         }
     }
 
@@ -230,37 +306,62 @@ class BufferedAudioStreamTest {
             stream.start()
             Socket(InetAddress.getLoopbackAddress(), stream.port).use { socket ->
                 socket.soTimeout = 3000
-                DataOutputStream(socket.getOutputStream()).apply { writeShort(1); flush() }
+                DataOutputStream(socket.getOutputStream()).apply {
+                    writeShort(1)
+                    flush()
+                }
                 assertEquals(-1, socket.getInputStream().read())
                 assertNull(stream.setRate(0L, 1, BigInteger.ZERO))
             }
-        } finally { stream.close() }
+        } finally {
+            stream.close()
+        }
     }
 
     @Test
     fun splitAndCoalescedTcpFramesKeepPayloadAndOrdering() {
         val packets = CopyOnWriteArrayList<ByteArray>()
-        val sink = object : MediaSink {
-            override fun onAudioRtp(id: AudioStreamId, format: AudioFormat, rtp: ByteArray, sample: Int) { packets += rtp }
-        }
+        val sink =
+            object : MediaSink {
+                override fun onAudioRtp(
+                    id: AudioStreamId,
+                    format: AudioFormat,
+                    rtp: ByteArray,
+                    sample: Int,
+                ) {
+                    packets += rtp
+                }
+            }
         val stream = BufferedAudioStream(key, format, sink)
         try {
             stream.start()
             Socket(InetAddress.getLoopbackAddress(), stream.port).use { socket ->
                 val out = DataOutputStream(socket.getOutputStream())
                 val first = seal(1, 1024L, byteArrayOf(0x21, 1, 2))
-                out.writeByte((first.size + 2) shr 8); out.flush()
+                out.writeByte((first.size + 2) shr 8)
+                out.flush()
                 out.writeByte(first.size + 2)
-                out.write(first, 0, 5); out.flush()
+                out.write(first, 0, 5)
+                out.flush()
                 out.write(first, 5, first.size - 5)
                 val second = seal(2, 2048L, byteArrayOf(0x21, 3, 4))
-                out.writeShort(second.size + 2); out.write(second); out.flush()
+                out.writeShort(second.size + 2)
+                out.write(second)
+                out.flush()
                 stream.setRate(1024L, 1, BigInteger.ZERO)
                 waitFor { packets.size == 2 }
-                assertArrayEquals(byteArrayOf(0x21, 1, 2), packets[0].copyOfRange(12, packets[0].size))
-                assertArrayEquals(byteArrayOf(0x21, 3, 4), packets[1].copyOfRange(12, packets[1].size))
+                assertArrayEquals(
+                    byteArrayOf(0x21, 1, 2),
+                    packets[0].copyOfRange(12, packets[0].size),
+                )
+                assertArrayEquals(
+                    byteArrayOf(0x21, 3, 4),
+                    packets[1].copyOfRange(12, packets[1].size),
+                )
             }
-        } finally { stream.close() }
+        } finally {
+            stream.close()
+        }
     }
 
     @Test
@@ -277,10 +378,11 @@ class BufferedAudioStreamTest {
                         val out = DataOutputStream(socket.getOutputStream())
                         repeat(5800) { i ->
                             val body = seal(i, i * 1024L, byteArrayOf(0x21))
-                            out.writeShort(body.size + 2); out.write(body)
+                            out.writeShort(body.size + 2)
+                            out.write(body)
                         }
                         out.flush()
-                    } catch (_: java.io.IOException) { }
+                    } catch (_: java.io.IOException) {}
                 }
                 waitFor { queuedBytes(stream) >= 5625L * 13 }
                 Thread.sleep(100)
@@ -315,13 +417,20 @@ class BufferedAudioStreamTest {
                     assertTrue(error.message.orEmpty().contains("reset", ignoreCase = true))
                 }
             }
-        } finally { connected.close() }
+        } finally {
+            connected.close()
+        }
     }
 
     @Test
     fun aForeignSenderCannotClaimTheSingleTcpStream() {
-        val stream = BufferedAudioStream(key, format, RecordingSink(),
-            expectedPeer = InetAddress.getByAddress(byteArrayOf(127, 0, 0, 2)))
+        val stream =
+            BufferedAudioStream(
+                key,
+                format,
+                RecordingSink(),
+                expectedPeer = InetAddress.getByAddress(byteArrayOf(127, 0, 0, 2)),
+            )
         try {
             stream.start()
             repeat(2) {
@@ -331,7 +440,9 @@ class BufferedAudioStreamTest {
                 }
             }
             assertNull(stream.anchor())
-        } finally { stream.close() }
+        } finally {
+            stream.close()
+        }
     }
 
     @Test
@@ -339,32 +450,54 @@ class BufferedAudioStreamTest {
         val paused = CountDownLatch(1)
         val packets = CopyOnWriteArrayList<Int>()
         lateinit var stream: BufferedAudioStream
-        val sink = object : MediaSink {
-            override fun onAudioStarted(id: AudioStreamId, format: AudioFormat, firstSample: Int) {
-                stream.setRate(null, 0, BigInteger.ZERO)
-                paused.countDown()
+        val sink =
+            object : MediaSink {
+                override fun onAudioStarted(
+                    id: AudioStreamId,
+                    format: AudioFormat,
+                    firstSample: Int,
+                ) {
+                    stream.setRate(null, 0, BigInteger.ZERO)
+                    paused.countDown()
+                }
+
+                override fun onAudioRtp(
+                    id: AudioStreamId,
+                    format: AudioFormat,
+                    rtp: ByteArray,
+                    sample: Int,
+                ) {
+                    packets += sample
+                }
             }
-            override fun onAudioRtp(id: AudioStreamId, format: AudioFormat, rtp: ByteArray, sample: Int) { packets += sample }
-        }
         stream = BufferedAudioStream(key, format, sink)
         try {
             stream.start()
             Socket(InetAddress.getLoopbackAddress(), stream.port).use { socket ->
                 val body = seal(1, 1024L, byteArrayOf(0x21))
-                DataOutputStream(socket.getOutputStream()).apply { writeShort(body.size + 2); write(body); flush() }
+                DataOutputStream(socket.getOutputStream()).apply {
+                    writeShort(body.size + 2)
+                    write(body)
+                    flush()
+                }
                 stream.setRate(1024L, 1, BigInteger.ZERO)
                 assertTrue(paused.await(3, TimeUnit.SECONDS))
                 Thread.sleep(100)
                 assertTrue(packets.isEmpty())
                 assertEquals(13L, queuedBytes(stream))
             }
-        } finally { stream.close() }
+        } finally {
+            stream.close()
+        }
     }
 
     @Test
     fun theAnchorUsesThe1970EpochAndA64BitFraction() {
         // NTP seconds 2208988800 + 131959 (the iPhone's clock) and half a second.
-        val ntp = BigInteger.valueOf(2_208_988_800L + 131_959L).shiftLeft(32).or(BigInteger.valueOf(0x8000_0000L))
+        val ntp =
+            BigInteger.valueOf(2_208_988_800L + 131_959L)
+                .shiftLeft(32)
+                .or(BigInteger.valueOf(0x8000_0000L))
         val anchor = BufferedAudioStream.anchorPlist(0x1_0000_0010L, ntp, 1)
         assertEquals(0x10L, anchor["rtpTime"])
         assertEquals(131_959L, anchor["networkTimeSecs"])
@@ -390,7 +523,12 @@ class BufferedAudioStreamTest {
             Socket(InetAddress.getLoopbackAddress(), stream.port).use { socket ->
                 val out = DataOutputStream(socket.getOutputStream())
                 for (i in 0 until 4) {
-                    val body = seal(sequence = i, timestamp = 1_000L + i * 1_024L, payload = byteArrayOf(0x21, i.toByte()))
+                    val body =
+                        seal(
+                            sequence = i,
+                            timestamp = 1_000L + i * 1_024L,
+                            payload = byteArrayOf(0x21, i.toByte()),
+                        )
                     out.writeShort(body.size + 2)
                     out.write(body)
                 }
@@ -406,7 +544,10 @@ class BufferedAudioStreamTest {
                 assertEquals(anchor, stream.anchor())
                 waitFor { sink.rtp.size == 3 }
                 // The frame before rtpTime was dropped; playback starts at it.
-                assertEquals(listOf(2_024L, 3_048L, 4_072L), sink.rtp.map { it.toLong() and 0xffff_ffffL })
+                assertEquals(
+                    listOf(2_024L, 3_048L, 4_072L),
+                    sink.rtp.map { it.toLong() and 0xffff_ffffL },
+                )
                 assertEquals(1, sink.started.size)
 
                 val paused = stream.setRate(rtpTime = null, newRate = 0, nowNtp = now)!!
@@ -429,12 +570,74 @@ class BufferedAudioStreamTest {
         val header = ByteArray(12)
         header[0] = 0x80.toByte()
         header[1] = 0x60
-        header[2] = (sequence shr 8).toByte(); header[3] = sequence.toByte()
+        header[2] = (sequence shr 8).toByte()
+        header[3] = sequence.toByte()
         for (i in 0 until 4) header[4 + i] = (timestamp shr (24 - 8 * i)).toByte()
         val nonceTail = ByteArray(8) { (sequence + it).toByte() }
         val nonce = ByteArray(12).also { nonceTail.copyInto(it, 4) }
         val sealed = AirPlayCrypto.chachaSeal(key, nonce, payload, header.copyOfRange(4, 12))
         return header + sealed + nonceTail
+    }
+
+    @Test
+    fun rendererProgressControlsTheLeadAndTheOneSecondStartupAnchor() {
+        val played = java.util.concurrent.atomic.AtomicLong(1000L)
+        val clock = java.util.concurrent.atomic.AtomicLong(0L)
+        val delivered = CopyOnWriteArrayList<Int>()
+        val sink =
+            object : MediaSink {
+                override fun audioPlaybackSample(id: AudioStreamId): Long = played.get()
+
+                override fun onAudioRtp(
+                    id: AudioStreamId,
+                    format: AudioFormat,
+                    rtp: ByteArray,
+                    sample: Int,
+                ) {
+                    delivered += sample
+                }
+            }
+        val stream =
+            BufferedAudioStream(
+                key,
+                format,
+                sink,
+                nanoTime = clock::get,
+                startupLatencyMillis = 1000,
+            )
+        try {
+            stream.start()
+            Socket(InetAddress.getLoopbackAddress(), stream.port).use { socket ->
+                val output = DataOutputStream(socket.getOutputStream())
+                repeat(100) { index ->
+                    val frame = seal(index, 1000L + index * 1024L, byteArrayOf(0x21))
+                    output.writeShort(frame.size + 2)
+                    output.write(frame)
+                }
+                output.flush()
+                val now = BigInteger.valueOf(100L).shiftLeft(32)
+                val anchor = stream.setRate(1000L, 1, now)!!
+                assertEquals(
+                    BufferedAudioStream.anchorPlist(
+                        1000L,
+                        now.add(BufferedAudioStream.millisToNtp(1000)),
+                        1,
+                    ),
+                    anchor,
+                )
+                waitFor { delivered.size >= 57 }
+                clock.set(60_000_000_000L)
+                Thread.sleep(100)
+                assertEquals(57, delivered.size)
+                assertEquals(1000L, stream.feedback(now, 42L)["sampleTime"])
+                played.addAndGet(48_000)
+                waitFor { delivered.size == 100 }
+                assertEquals(49_000L, stream.feedback(now, 42L)["sampleTime"])
+                assertEquals(100, delivered.distinct().size)
+            }
+        } finally {
+            stream.close()
+        }
     }
 
     private fun waitFor(condition: () -> Boolean) {
@@ -447,8 +650,22 @@ class BufferedAudioStreamTest {
         val started = CopyOnWriteArrayList<Int>()
         val rtp = CopyOnWriteArrayList<Int>()
         @Volatile var stopped = 0
-        override fun onAudioStarted(id: AudioStreamId, format: AudioFormat, firstSample: Int) { started += firstSample }
-        override fun onAudioRtp(id: AudioStreamId, format: AudioFormat, rtp: ByteArray, sample: Int) { this.rtp += sample }
-        override fun onAudioStopped(id: AudioStreamId) { stopped++ }
+
+        override fun onAudioStarted(id: AudioStreamId, format: AudioFormat, firstSample: Int) {
+            started += firstSample
+        }
+
+        override fun onAudioRtp(
+            id: AudioStreamId,
+            format: AudioFormat,
+            rtp: ByteArray,
+            sample: Int,
+        ) {
+            this.rtp += sample
+        }
+
+        override fun onAudioStopped(id: AudioStreamId) {
+            stopped++
+        }
     }
 }

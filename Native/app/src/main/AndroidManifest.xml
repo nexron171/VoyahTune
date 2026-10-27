@@ -68,6 +68,7 @@
     <uses-permission android:name="com.qinggan.permission.WRITE_CANBUS" />
 
     <queries>
+        <package android:name="com.pateo.rdsapp" />
         <provider android:authorities="ru.big.town.restoremode.restoremodecontentprovider" />
         <package android:name="com.qinggan.carsignal.service" />
         <package android:name="com.qinggan.canbus.service" />

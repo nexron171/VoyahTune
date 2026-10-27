@@ -53,4 +53,6 @@
     <string name="carplay_widget_size_summary">%1$d × %2$d · %3$d из 60 ячеек</string>
     <string name="carplay_widget_auto_start">Автоматический запуск</string>
     <string name="carplay_duck_music">Приглушать музыку при объявлении маневра</string>
+    <string name="carplay_ultra">CarPlay Ultra</string>
+    <string name="carplay_ultra_description">Климат, автомобиль и радио в CarPlay с оформлением Ultra. Изменение применяется при следующем подключении iPhone.</string>
 </resources>

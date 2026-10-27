@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="voyah_carplay_phone_countdown">Подключение к %1$s через %2$d с</string>
+    <string name="voyah_carplay_selected_phone">Выбран телефон: %1$s</string>
+    <string name="voyah_carplay_no_paired_phones">Нет доступных сопряжённых телефонов</string>
     <string name="voyah_carplay_music_buffer_default">%1$d мс · по умолчанию</string>
     <string name="voyah_carplay_projection_launch_failed">Не удалось открыть CarPlay на этом экране. Повторите попытку.</string>
     <string name="voyah_carplay_notification_channel">Подключение CarPlay</string>

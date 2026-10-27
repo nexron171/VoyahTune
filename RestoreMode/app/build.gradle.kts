@@ -80,6 +80,7 @@ android {
 }
 
 dependencies {
+    implementation("androidx.media:media:1.6.0")
     implementation(project(":updater-ui"))
     implementation(project(":diplay-common"))
 

@@ -22,6 +22,7 @@ public final class CarPlayClimateProtocol {
     public static final String RECIRCULATION = "recirculation";
     public static final String RECIRCULATION_AUTO = "recirculationAuto";
     public static final String CYCLE_RECIRCULATION = "cycleRecirculation";
+    public static final String VENT_MODE = "ventMode";
     public static final String VENT_UPPER = "ventUpper";
     public static final String VENT_MIDDLE = "ventMiddle";
     public static final String VENT_LOWER = "ventLower";

@@ -22,6 +22,19 @@ fun interface VehicleStatusProvider {
     fun snapshot(): VehicleStatusSnapshot?
 }
 
+/** iAP2 VehicleInformationComponent content; [engineTypes] are EngineType values (0 gas, 1 diesel, 2 electric, 3 CNG). */
+data class Iap2VehicleInformation(val name: String, val engineTypes: List<Int>) {
+    init {
+        require(name.isNotBlank() && '\u0000' !in name) { "vehicle name must be non-blank text" }
+        require(engineTypes.isNotEmpty() && engineTypes.all { it in 0..3 }) { "engine types must be iAP2 EngineType values" }
+    }
+
+    companion object {
+        const val GASOLINE = 0
+        const val ELECTRIC = 2
+    }
+}
+
 /** The charging inlets the car declares, as iAP2 SupportedChargingConnectors values. */
 enum class EvChargingConnectors(internal vararg val wireValues: Int) {
     CCS2_TYPE2(1, 4), // CCS2 (DC) and Mennekes / Type 2 (AC), as on European BYD models
@@ -52,6 +65,20 @@ object Iap2VehicleStatus {
     private const val ENGINE_TYPE_ELECTRIC = 2
 
     /** IdentificationInformation params 20 (VehicleInformation) and 21 (VehicleStatus). */
+    /**
+     * VehicleInformationComponent (20) alone: the phone learns this is a car, its name and engines,
+     * with no status component and no status messages to answer.
+     */
+    fun Iap2BodyBuilder.vehicleInformationComponent(info: Iap2VehicleInformation) {
+        group(20) {
+            u16(0, 3) // Identifier
+            string(1, info.name) // Name
+            for (engine in info.engineTypes) u8(2, engine) // EngineType, repeated
+            string(6, info.name) // DisplayName
+            string(8, info.name) // MapsDisplayName
+        }
+    }
+
     fun Iap2BodyBuilder.electricVehicleComponents(name: String, connectors: EvChargingConnectors) {
         group(20) {
             u16(0, 3) // Identifier

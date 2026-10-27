@@ -99,7 +99,13 @@ data class AirPlayConfig(
      */
     val speechWithout8And16Khz: Boolean = false,
     val vehicleTheme: AirPlayVehicleTheme? = null,
+    val protocolExtension: AirPlayProtocolExtension? = null,
+    val mutualAuthentication: Boolean = false,
+    val vehicleStateProtocol: Boolean = false,
 ) {
+    val clusterDisplayIdentifier: String
+        get() = if (vehicleTheme != null) "Cluster_Display" else AirPlayInfoPlist.ALT_UUID
+
     val mainDisplayIdentifier: String
         get() = vehicleTheme?.mainDisplayIdentifier ?: AirPlayInfoPlist.MAIN_UUID
 }

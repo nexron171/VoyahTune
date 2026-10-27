@@ -19,6 +19,28 @@
         android:layout_height="wrap_content"
         android:orientation="vertical">
         <LinearLayout
+            style="@style/SettingsCard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+            <Switch
+                android:id="@+id/carPlayUltra"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:saveEnabled="false"
+                android:text="@string/carplay_ultra"
+                android:textColor="@color/settings_text"
+                android:textSize="22sp" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="@string/carplay_ultra_description"
+                android:textColor="@color/settings_muted"
+                android:textSize="18sp" />
+        </LinearLayout>
+        <LinearLayout
             android:id="@+id/carPlayFullscreenCard"
             style="@style/SettingsCard"
             android:layout_width="match_parent"

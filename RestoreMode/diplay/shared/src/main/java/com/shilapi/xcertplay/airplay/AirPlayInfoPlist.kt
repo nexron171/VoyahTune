@@ -29,16 +29,16 @@ object AirPlayInfoPlist {
         if (config.disableAudioOutput) CARPLAY_FEATURES_NO_AUDIO else CARPLAY_FEATURES
 
     fun build(config: AirPlayConfig): Map<String, Any?> {
-        val climateAvailable = VehicleClimate.available
+        val climateAvailable = config.vehicleStateProtocol && VehicleClimate.available
         val displays = arrayListOf(
             displayEntry(
                 config.main,
                 STREAM_TYPE_MAIN_SCREEN,
                 config.mainDisplayIdentifier,
-                defaultDockEdge = if (climateAvailable) DOCK_EDGE_BOTTOM else null,
+                defaultDockEdge = if (climateAvailable && config.vehicleTheme == null) DOCK_EDGE_BOTTOM else null,
             ),
         )
-        config.cluster?.let { displays.add(displayEntry(it, STREAM_TYPE_ALT_SCREEN, ALT_UUID)) }
+        config.cluster?.let { displays.add(displayEntry(it, STREAM_TYPE_ALT_SCREEN, config.clusterDisplayIdentifier)) }
 
         val info = linkedMapOf<String, Any?>(
             "sourceVersion" to config.sourceVersion,
@@ -96,6 +96,7 @@ object AirPlayInfoPlist {
             val legacy = features(config)
             info["videoPlaybackInfo"] = VideoInCar.info(legacy, VideoInCar.allowed)
         }
+        config.protocolExtension?.decorateInfo(info)
         return info
     }
 

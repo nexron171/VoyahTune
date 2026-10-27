@@ -29,6 +29,7 @@ final class CarPlayVehicleController implements AutoCloseable {
     private final ClusterNavigationController navigation;
     private final CarPlayAudioController audio;
     private final CarPlayClimateController climate;
+    private final CarPlayUltraController ultra;
     private final CarPlayLightState lightState;
     private final CarPlayWifiScanController wifiScan;
     private Messenger owner;
@@ -57,6 +58,7 @@ final class CarPlayVehicleController implements AutoCloseable {
         navigation = ClusterNavigationController.get(context);
         this.audio = audio;
         climate = new CarPlayClimateController(context, handler, this::publish);
+        ultra = new CarPlayUltraController(context, handler, this::publish);
         Context applicationContext = context.getApplicationContext();
         wifiScan = new CarPlayWifiScanController(applicationContext);
         lightState =
@@ -83,6 +85,11 @@ final class CarPlayVehicleController implements AutoCloseable {
     }
 
     void handle(Message message) {
+        if (message.what == ru.big.town.common.CarPlayUltraProtocol.SET) {
+            if (owner != null && owner.equals(message.replyTo) && client.active())
+                ultra.handle(message);
+            return;
+        }
         if (message.what == CarPlayClimateProtocol.SET) {
             if (owner != null && owner.equals(message.replyTo) && client.active())
                 climate.handle(message);
@@ -118,6 +125,9 @@ final class CarPlayVehicleController implements AutoCloseable {
         owner = message.replyTo;
         client.set(message.replyTo);
         climate.start(message.replyTo);
+        if (message.getData().getBoolean(ru.big.town.common.CarPlayUltraProtocol.ENABLED))
+            ultra.start(message.replyTo);
+        else ultra.close();
         if (subscription == null) {
             subscription =
                     hub.subscribe(
@@ -172,6 +182,7 @@ final class CarPlayVehicleController implements AutoCloseable {
         values.putInt(CarPlayVehicleProtocol.GEAR, gear);
         values.putInt(CarPlayVehicleProtocol.SW_REASON, reason);
         values.putBundle(CarPlayClimateProtocol.STATE, climate.snapshot());
+        values.putBundle(ru.big.town.common.CarPlayUltraProtocol.STATE, ultra.snapshot());
         Message message = Message.obtain(null, CarPlayVehicleProtocol.STATE);
         message.setData(values);
         if (!client.send(message)) close();
@@ -182,12 +193,14 @@ final class CarPlayVehicleController implements AutoCloseable {
         if (wifiScan != null) wifiScan.close();
         lightQueryExecutor.shutdownNow();
         climate.destroy();
+        ultra.destroy();
     }
 
     @Override
     public void close() {
         handler.removeCallbacks(poll);
         climate.close();
+        ultra.close();
         client.clear();
         owner = null;
         lightState.reset();

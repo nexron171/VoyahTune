@@ -1,7 +1,7 @@
 # DiPlay в VoyahTune: спецификация интеграции и восстановления
 
 Этот документ — контракт адаптации, по которому восстанавливают интеграцию после
-полной замены исходников DiPlay. Он описывает исходники на **23 октября 2026**;
+полной замены исходников DiPlay. Он описывает исходники на **27 октября 2026**;
 состав конкретного опубликованного релиза определяется его manifest и revision.
 Имена upstream-классов могут измениться: при обновлении сохранять поведение
 и границы ответственности, а не только переносить строки патча.
@@ -17,8 +17,9 @@
   `v0.2.21` (`49bf3bc2b011cb5ee7c7f4da9b99b18cbd3a23a2`),
   репозиторий [shihabal3amri/DiPlay](https://github.com/shihabal3amri/DiPlay).
 - Отдельно перенесён [PR #1010](https://github.com/shihabal3amri/DiPlay/pull/1010),
-  commit **`70649715394ee1731dd6ed42656d68e4341d6905`**: новый регулятор музыкальных
-  часов, запас после rebuffer и сокращение накопленной задержки. Он не входит
+  commit **`70649715394ee1731dd6ed42656d68e4341d6905`**: оценка музыкальных
+  часов и запас после rebuffer. Возврат задержки заменён собственной плавной
+  реализацией, UDP reorder/resend добавлен отдельно (§9). Он не входит
   в зафиксированный main; его адаптации и проверки описаны в §9/10/12.
 - Копия [RestoreMode/diplay](../RestoreMode/diplay/README.md) — vendored source,
   не submodule. Модули `common` и `shared` импортированы; `mobile` не используется.
@@ -282,9 +283,9 @@ fallback только для controller без app-owned callback.
   `ru.big.town.anative.carplay`; закрытие одного режима не удаляет task другого.
   Оба компонента используют управление VD и жизненным циклом из `SplitHostActivity`.
   Повторный запуск сохраняет VD только при совпадении режима, экрана и DPI.
-  При смене опции Native сразу освобождает старый standalone-host/VD. Видимый host
-  открывается заново на том же экране с сохранением DPI; фоновый не выводится
-  поверх настроек. Размер нового окна не ждёт завершения отключения транспорта.
+  При смене опции сессия отключается, Native сразу освобождает старый standalone-host/VD
+  и отменяет ещё не исполненные запросы его запуска. Автоматического открытия нет:
+  новый host с выбранной темой окна создаётся при следующем открытии CarPlay.
   Возврат в прежний host после изменения опции запускает компонент нового режима
   через ту же последовательную очередь; неподходящий host не возобновляется.
   PI сохраняет существующий fullscreen-компонент независимо от этой OD-настройки.
@@ -461,6 +462,22 @@ fallback только для controller без app-owned callback.
   роняет приложение. Сброс данных, пересоздание VD или перенос на физический экран
   для этого перехода не нужны.
 
+Явное отключение через home, настройки VoyahTune, уведомление или «Отмена» проходит
+через `CarPlaySessionHosts`: слабый реестр закрывает все Activity сессии, включая
+ожидание разрешений/выбора телефона до создания controller. Текущий owner выполняет
+асинхронный teardown транспорта и медиаресурсов; UI tasks удаляются сразу через
+`finishAndRemoveTask()`. Завершение stop не запускает новых окон. Пассивный Back,
+удаление UI task и внутренний перенос сессии между дисплеями сохраняют отдельные
+контракты и не используют этот путь.
+
+`VoyahCarPlayIntegration.Host.closeProjection` передаёт Native ограниченный запрос
+`CLOSE_PROJECTION=134` с прежним VD displayId, ответ — `PROJECTION_RESULT=125`.
+Native принимает закрытие только для принадлежащего ему действующего CarPlay VD:
+освобождает виджет/standalone-host и отменяет отложенные запуски. Это не даёт
+надзирателю панели восстановить намеренно закрытую Activity. Ответ со старым VD,
+который уже освобождён, не закрывает новый host. Клиент закрытия не удерживает Activity,
+освобождает bind по ответу или через 5 секунд; открытие по-прежнему проверяет владельца.
+
 `CarPlayBackgroundSession` — штатный объект в памяти процесса: controller, sink,
 размер, display, ownerDisplayId, owner и stopAction. ownerDisplayId фиксируется при
 store из WindowManager владельца (доступен уже в onCreate до attach decor).
@@ -630,16 +647,36 @@ Voyah-адаптере, чтобы не конкурировать с Native.
 `settings_back`/`settings_icon_back`, как в Advanced (72dp, в компактном режиме 56dp).
 Она вызывает Actions.back → DiPlayActivity.onBackPressedDispatcher.onBackPressed()
 без disconnect/stop сессии. Внизу справа всегда видна отдельная кнопка «Выйти»:
-она вызывает `CarPlayHomeUi.finishActivities()`: удаляет выделенные UI tasks
+она вызывает `CarPlayHomeUi.exitToHome()`: открывает штатный домашний экран автомобиля
+через `ACTION_MAIN` + `CATEGORY_HOME` на соответствующем физическом экране (§4),
+затем удаляет выделенные UI tasks
 `DiPlayActivity` и `CarPlayHostActivity` по точному компоненту baseIntent, затем
 завершает текущую Activity через `finishAndRemoveTask()`. Поэтому оставшийся экран
 подключения не появляется под настройками. Другие tasks RestoreMode сохраняются.
 Действие не зависит от обработчика Back и не вызывает disconnect/stop сессии.
+`VoyahCarPlayIntegration.Host.physicalDisplayId` сопоставляет VD его физическому
+экрану через сохранённое состояние `CarPlayDashboardLauncher`; без интеграции
+сохраняется исходный 0/1, неизвестный VD направляется на 0. Выход не вызывает
+`openDashboard`, библиотеки не зависят от компонентов RestoreMode.
+`finishActivities()` остаётся отдельной операцией закрытия UI.
 Рядом с «Вернуться в настройки» на экране подключения есть «Отмена»: она блокирует
-повторные попытки, вызывает штатный shutdown без завершения процесса и сразу
+повторные попытки, вызывает явное отключение через `CarPlaySessionHosts` и сразу
 закрывает UI через тот же `finishActivities()`. Транспорт и медиаресурсы закрываются
 асинхронно; UI не ждёт teardown, home после него не открывается.
 Таймера автоматической отмены нет.
+
+Перед первым беспроводным соединением `CarPlayPhoneSelection` читает список
+сопряжённых Bluetooth-устройств — тот же источник, что существующий выбор iPhone.
+При двух и более различных адресах экран подключения показывает выбранный телефон,
+отсчёт **5 → 4 → 3 → 2 → 1** и кнопку «Выберите свой iPhone». Сохранённый адрес имеет
+приоритет; если его нет в списке, выбирается первое устройство. Открытый список
+приостанавливает отсчёт, выбор сохраняется в DiPlayPreferences; после закрытия списка
+или возврата из фона даются новые пять секунд. Исчезновение выбранного устройства
+сбрасывает отсчёт для замены; пустой список во время ожидания не запускает транспорт.
+При нуле/одном устройстве на входе дополнительной задержки нет; единственное
+устройство становится выбранным. USB, adopt активной сессии и её внутренние retry
+не получают задержку. Отмена, disconnect и уничтожение Activity удаляют callback
+таймера. Сопряжение не доказывает нахождение телефона рядом или поддержку CarPlay.
 
 `CarPlayWindowUi` оборачивает home/settings и весь корневой View проекции общей
 безопасной областью, включая экран подключения, видео и жесты.
@@ -739,7 +776,8 @@ Native зеркалирует явно переданное значение т�
 настройку. Все отдельные входы выбирают host по этому значению (§4), включая
 возврат из фона. Изменение сразу сохраняет новый режим, запускает асинхронный stop
 текущей сессии и передаёт конфигурацию Native без ожидания завершения stop.
-Native обновляет окно при изменении зеркального значения; обычная синхронизация
+Native закрывает окно при изменении зеркального значения и создаёт новое только
+по следующему открытию CarPlay; обычная синхронизация
 того же значения не пересоздаёт host. Повторный выбор той же опции — no-op,
 быстрые переключения публикуют последнее значение; в callback завершения stop
 нет повторного применения режима или закрытия окон. Следующий handshake получает
@@ -1025,21 +1063,82 @@ DARK/LIGHT/AUTO сохраняется, AUTO в VEHICLE следует сист�
 через существующий `CarPlayVehicleBridge`; зависимости shared на Native нет.
 Потеря IPC очищает снимок и завершает ожидающие команды ошибкой.
 
-В VoyahTune регистрация климатического адаптера отключена в конструкторе
-`CarPlayVehicleBridge`: `VehicleClimate.install(null)`. Поэтому `/info` не объявляет
-VSP, SETUP не согласует `vehicleStateProtocol`, климат не задаёт нижний док.
-Без автомобильной темы `displayPanels` также отсутствует. Это временное отключение
-до выяснения причины чёрного экрана; IPC и реализация VSP сохранены.
-При установленном адаптере библиотека `/info` объявляет `vehicleStateProtocolInfo` версии 1.0,
-один plug-in VoyahTune и аксессуары Climate/VehicleResources/Seats. SETUP принимает
-`vehicleStateProtocol` только если его предложил iPhone. `displayPanels` описывает
-только настроенные видеодисплеи: каждой панели соответствует существующий видеопоток.
-Геометрия берётся из соответствующего `display`; основной и опциональный приборный
-видеопотоки сохраняются. Служебная панель, Local UI `displayPlugins` и признак
-`showsInstruments` удалены, в том числе у приборного дисплея; `properties` пуст.
-Описание VSP-сервисов климата и сидений сохраняется.
-В прежних испытаниях удаление служебной панели скрывало климатический интерфейс
-на исследованном iPhone; появление UI после этого изменения требует проверки на ГУ.
+В настройках VoyahTune переключатель **CarPlay Ultra** по умолчанию включён
+(`voyah_carplay_availability/ultra`, отсутствующий ключ = true). Значение фиксируется
+при создании сессии; переключение требует нового подключения iPhone, без переустановки.
+`VehicleClimate.install(this)` регистрирует наш адаптер постоянно, но объявление VSP
+и согласование SETUP управляются `AirPlayConfig.vehicleStateProtocol`.
+При выключенном Ultra отсутствуют VSP, UI Sync, MFi4 и автомобильная тема; сохраняются
+обычные размеры, масштаб, док и оформление CarPlay. Автоматическая дневная/ночная
+тема по освещению остаётся независимой настройкой.
+
+Включённый Ultra использует тему **44C9FA31EC:985:19.0**, canvas **1920×720**,
+`Center_Display` и, при наличии приборного видеопотока, `Cluster_Display`.
+Физическая ширина берётся из текущей конфигурации, высота пропорциональна canvas.
+Принудительный нижний док климата не применяется к Ultra; HID и команды view area
+используют идентификатор и координаты выбранной темы.
+Панели перенесены из VoyahPlay: основная содержит свой видеопоток без Local UI,
+приборная/служебная — `showsInstruments` и `displayPlugins`. Когда отдельного
+приборного видео нет, служебная панель не объявляет дополнительный видеопоток.
+Это отличается от эксперимента 25 октября, когда Local UI добавлялся в основную панель.
+Отсутствие чёрного экрана у этой адаптации **ещё не проверено на ГУ**.
+
+Протокол заимствован из [VoyahPlay f34a2b0c](https://github.com/garik345/VoyahPlay/tree/f34a2b0c7a010dd66c476e1bf097e028489ae493):
+`airplay/mfi4`, `airplay/rcs`, `airplay/ultra`, `AirPlayAudioResource`, extension hooks,
+транскрипт PairVerify и iAP2 mutual-auth/theme/VehicleInformation. Upstream debug-код
+включён в main библиотеки; доступность управляется настройкой, а не типом APK.
+MFi4 объявляется при protocolMajor=3 существующей identity; обычный MFi-SAP остаётся
+fallback. Секреты и identity не заменяются. Как в upstream, проверяется подпись телефона,
+но полная цепочка сертификатов до доверенного корня Apple не валидируется.
+VehicleInformation описывает Voyah Free как gasoline+electric без фиктивного EV-status.
+
+VSP 1.0 содержит два независимых плагина: **0 / VoyahTune** — наша прежняя схема
+Climate/VehicleResources/Seats; **1 / org.voyahtune.vehicle** — Navigation,
+AutomakerSettings, топливо/запас хода/пробег/шины/громкость и радио из VoyahPlay.
+Климатические Native-команды проходят через прежний OEM-транспорт. RCS-потоки
+обслуживает перенесённый транспорт, маршрутизация pluginID=0 передаёт запрос нашему
+`VehicleStateProtocol`. Он принимает прямой OPACK и через адаптер старую bplist-обёртку;
+`readResponse`/`registerResponse` содержат `errors`, в том числе пустой словарь;
+`unregisterResponse` не содержит лишнего `errors`.
+Сессии и teardown отдельных каналов изолированы; транспортный ACK предшествует OEM-команде.
+
+`CarPlayUltraSource` в app объединяет Native STATE/122 `ultra: Bundle` и стандартный
+MediaBrowser/MediaController `com.pateo.rdsapp`. Новый IPC **182/183** использует тот же
+owner/generation/deadline и ограниченную очередь. Native подписывается через
+CanBusEventHub только при Ultra: давление (bar → kPa), SOC, топливо, одометр,
+бензиновый `mCanTravelMileage` и электрический `mEVCruisingRang_real` запас хода,
+режим движения, массаж и положение света. Неизвестные/невалидные и устаревшие более 6 секунд значения отсутствуют;
+общий запас хода появляется только при известных обеих составляющих.
+Массаж/программы используют общий OemVehicleStateTransport и подтверждение чтением.
+Интенсивность массажа — `ButtonSetting` (`0x16000002`) с `ButtonAction`
+(`0x36000010`, UInt8), отдельная кнопка для каждого переднего сиденья.
+IPC `DRIVER_MASSAGE_CYCLE`/`PASSENGER_MASSAGE_CYCLE` со значением 1 выбирает
+**выкл → 3 → 2 → 1 → выкл** после свежего чтения switch/intensity в Native.
+`OemSeatMassageState` отделяет активный уровень от сохранённой интенсивности;
+неизвестный switch или неизвестная интенсивность включённого массажа не дают цели.
+Программа остаётся абсолютным выбором 1/2. Подпись `UserVisibleLabel` кнопки
+динамически показывает подтверждённый уровень, например «Массаж водителя: 3 / 3».
+У ButtonSetting/CAFAutomakerSetting нет свойства ValueDisplay (локальные Apple runtime headers),
+поэтому отдельная характеристика этого типа не объявляется. ButtonAction отдельно
+подтверждается echo и возвращается в 0 на следующем update.
+`UltraWriteTransactions` хранит последние 256 write-транзакций плагина 1 на сессию,
+общие для обоих RCS-каналов: повтор возвращает прежний результат, другой payload
+с тем же transactionID отклоняется до OEM-команды. Это защищает циклы от повторного шага.
+Подтверждающее echo сохраняется и для повторных phone-owned записей маршрута, включая null.
+Наружный свет — существующий HeadlightSelectionController с обратной связью
+`LAMP_SWITCH_POSITION_FB`, сохраняя автоматическую политику VoyahTune.
+Кнопки меню/настроек открывают системный HOME/AdvanceActivity на display 0.
+
+Радио поддерживает FM/AM, станции, play/pause/next/previous/tune и подтверждает
+операции по метаданным/состоянию OEM MediaSession. Перед воспроизведением запрашивается
+аудиоресурс CarPlay; при отказе команда не выполняется. Громкость и mute (уровень 0,
+восстановление последнего слышимого уровня) идут через существующий CarPlayAudioClient
+и OEM AudioPolicy Native, с чтением фактического диапазона и подтверждением уровня.
+Закрытый read-only RDS RT getter перенесён в Native `CarPlayRadioText`: доступ разрешён
+только для SHA-256 OEM APK `36b4d73a889aa78325f6a6ff0c8113c6b13605620a5a4b045209fbff36449cca`;
+на другой версии недоступен только дополнительный RT, стандартные метаданные остаются.
+Новых CAN/OEM Binder entry points в RestoreMode нет.
+
 Два DataStream UUID
 `3E2F3C61-AAD0-42CB-A8AA-BF22186DA62E` и
 `FF4A6720-F2BE-4F56-A3E1-DB3B4E37D634` принадлежат одной AirPlay-сессии.
@@ -1048,14 +1147,16 @@ ChaCha20-Poly1305, 2-байтная little-endian длина, 32-байтный 
 Ответ на `sync` сохраняет token; исходящий `asyn/cmnd` имеет **нулевой token**.
 ACK и команды разделяют сериализованный счётчик nonce. Закрытие сессии освобождает
 оба канала, подписки и ожидающие ответы. Исходящие команды выполняются отдельным
-writer с очередью до 32 пакетов; переполнение закрывает канал, не блокируя UI/Native IPC.
+writer с очередью до 32 пакетов в прежнем VehicleStateChannel; Ultra использует CAF worker
+с очередью до 64 задач. Ответы и наблюдения климата из Native также ставятся в очередь,
+а не пишутся в сокет на UI-потоке; переполнение закрывает канал.
 
 `OpackCodec` сохраняет 64-битные transactionID и числовые ключи, ограничивает размер,
 глубину и число объектов. Поддержаны config/register/read/unregister/write и
 updateNotify. Повторная write-транзакция возвращает сохранённый ответ без новой
 OEM-команды. Телефон может управлять двумя температурами, питанием, A/C, вентилятором,
 AUTO, SYNC, рециркуляцией и направлениями обдува. Добавлены четыре подогрева сидений
-и две передние вентиляции: уровни 0–3 и отдельные характеристики `On`.
+и две передние вентиляции: уровни 0–3 без отдельных характеристик `On`.
 Read/register допускают до 64 характеристик.
 Температуры: 15,5–30,5 с шагом 0,5; крайние значения
 соответствуют OEM LO/HI. Вентилятор: 0–7, где 0 выключает HVAC. Измеренная температура салона не объявляется:
@@ -1196,6 +1297,9 @@ TX30-снимок раз в секунду и очищает данные ста
 а `AC_BLOWER` принимает соответствующие команды 2–8 (`уровень + 1`).
 Выключение AUTO использует то же преобразование наблюдаемого ручного уровня.
 Уровень 0 отправляет условный импульс питания; успех требует readback выключенного HVAC.
+При выключенном HVAC VSP сообщает скорость 0 независимо от сохранённого airWindSpeed;
+при неизвестном питании скорость не публикуется. Включённый HVAC передаёт валидные
+уровни 0–7 без сдвига; ручная команда 1–7 подтверждается только при power=1 и AUTO=0.
 Рециркуляция H97: **0 — внутренний воздух, 1 — внешний, 2 — автоматический режим**.
 Это значения `AirCondition.AC_RETURN_InternalCirculation/ExternalCirculation/AutoCirculation`
 из CAN service 1.2.0 и выбора inner/outer/auto drawable в
@@ -1213,7 +1317,7 @@ TX30-снимок раз в секунду и очищает данные ста
 Неизвестный OEM-код делает обе характеристики недоступными.
 
 Каждая новая VSP-запись On передаёт IPC-команду `cycleRecirculation=1`:
-**Вкл → Выкл → Авто → Вкл** (OEM 0 → 1 → 2 → 0). Boolean, присланный iPhone,
+**Вкл → Авто → Выкл → Вкл** (OEM 0 → 2 → 1 → 0). Boolean, присланный iPhone,
 не используется как абсолютная цель: Native выбирает следующий режим после свежего
 чтения в последовательной очереди. Повтор той же VSP-транзакции не повторяет команду.
 OEM `AC_RECIRC_AIR` (stable ID 11) принимает однобитный импульс 1;
@@ -1242,12 +1346,16 @@ OEM `AC_RECIRC_AIR` (stable ID 11) принимает однобитный им�
 трёхбитное значение без явного запрета этих кодов. На H97 их поддержка не проверена;
 значения вне 0–4 публикуются как неизвестные.
 
-VSP описывает три Vent-сервиса `0x11000006`, IID 548/553/558:
-верх, низ, середина. Каждый объявляет On, общий HVAC AUTO,
-read-only `VentCombinations` (`0x31000025`, Array=13) с одной маской 2/4/16
-и `vehicleLayoutKey=seat_front`. Native принимает `ventUpper/ventLower/ventMiddle`
-и вычисляет допустимый OEM-режим с сохранением остальных выходов.
-Отдельные `CurrentIndex` и IPC `ventMode` не объявляются.
+VSP описывает один Vent-сервис `0x11000006`, IID 548 с многопозиционным
+`CurrentIndex` (`0x30000038`, IID 549, UInt32=3, диапазон 0–4).
+Read-only `VentCombinations` (`0x31000025`, IID 551, Array=13) содержит
+маски `[16, 20, 4, 6, 2]`: лицо → лицо+ноги → ноги → стекло+ноги → стекло → лицо.
+Общий HVAC `AutoMode` (IID 550) доступен только для чтения,
+`vehicleLayoutKey=seat_front` — IID 552. Отдельного On у Vent нет.
+CurrentIndex передаёт абсолютный IPC `ventMode`, совпадающий с OEM-кодом;
+подтверждение требует выбранного режима и AUTO=0. Legacy поля
+`ventUpper/ventLower/ventMiddle` сохранены в Native для совместимости.
+Тип и UInt32-свойство CurrentIndex сверены с локальным CarAccessoryFramework iOS 27.0 (24A437).
 
 Аксессуар Seats (`0x01500001`, IID 1024) содержит четыре HeatingCooling-сервиса
 `0x22000001` (IID 1025/1029/1033/1037, уровень `0x31000021`, Int32=7).
@@ -1257,7 +1365,12 @@ read-only `VentCombinations` (`0x31000025`, Array=13) с одной маской
 Модель свойств `CAFSeatFan` подтверждается публичным runtime-header iOS 26;
 числовой тип подтверждён `+[CAFSeatFan serviceIdentifier]` и константой
 `_CAFServiceTypeSeatFan` в бинарнике Apple iOS 27.0 (источник ниже).
-Принятие и отображение на iPhone остаются отдельной проверкой.
+Для SeatHeatingCooling и SeatFan публикуются только writable Level 0–3
+и позиция, без optional On. Целевой цикл штатной многоуровневой кнопки:
+**выкл → 3 → 2 → 1 → выкл**. Native принимает абсолютный запрошенный уровень,
+чтобы сохранить согласованность CAF readback и прямого выбора уровня.
+Порядок нажатий и отображение штатного UI iPhone остаются отдельной проверкой на ГУ;
+локальные тесты подтверждают схему и полный проход запрошенных уровней.
 Vent и HeatingCooling сверены с закреплённой версией LIVI ниже.
 
 `OemSeatClimateState` сопоставляет включение с `VehicleState.*_SWITCH`
@@ -1272,8 +1385,9 @@ Stable ID COMMAND/SWITCH: подогрев водитель 261/698, пасса�
 CAN service 1.2.0 `DongfengH97CCanBusComponentImpl`, включая задние подогревы.
 Поддержка задней вентиляции для H97C не установлена и не объявляется.
 
-Каждая изменяемая характеристика `On`/`Level` отправляется отдельной командой
-Native. VSP не объединяет записи одного канала и не задаёт приоритет выключения.
+Каждая изменяемая характеристика уровня отправляется отдельной командой Native.
+VSP не изменяет показания оптимистически; удалённые On сидений не принимаются как
+команды новой схемы. Legacy IPC включения сиденья сохраняет прежнюю семантику.
 Повтор transactionID не отправляет команду заново; значения публикуются
 только из обратного чтения. Рециркуляция преобразует запись On в одну команду
 `cycleRecirculation`, вычисляющую следующий режим по свежему OEM-снимку.
@@ -1580,55 +1694,91 @@ API success, проверка Android focus в JVM и реальная реак�
 В 0.2.15 сохранены upstream восстановление prebuffer после underrun с учётом
 оставшегося PCM и operating-rate hint основному видеодекодеру с fallback.
 
-База main уже включает [PR #993](https://github.com/shihabal3amri/DiPlay/pull/993).
-Поверх неё отдельно перенесён #1010 из §1. `MediaClockTrim` измеряет устойчивый
-тренд максимумов пятисекундных окон, а не регулирует скорость по текущему
-наполнению. Используется медиана попарных наклонов Theil–Sen: минимум четыре
-окна и накопленное расхождение не меньше 40 мс; дрейф менее 0,3% требует
-120 секунд наблюдений. Поправка ограничена ±1,5%, применяется с шагом около
-0,9 цента в секунду и запоминается между музыкальными потоками процесса.
+База main включает [PR #993](https://github.com/shihabal3amri/DiPlay/pull/993),
+поверх неё перенесён #1010 из §1. Его оценка `MediaClockTrim` использует Theil–Sen
+по пикам пятисекундных окон: минимум четыре окна и расхождение от 40 мс;
+дрейф менее 0,3% требует 120 секунд. Поправка ограничена ±1,5%, меняется
+плавно и запоминается между музыкальными потоками процесса. Пауза/rebuffer,
+потеря локальных пакетов и большой decoder backlog начинают новый сегмент;
+при каждом старте вызывается `onPlaybackStarted`. Обычная порция Wi-Fi около
+400 мс не считается большим backlog: его порог не меньше секунды PCM.
 
-Сохранены защиты VoyahTune в семантике нового алгоритма:
+`MusicPlaybackControl` — единственный владелец музыкальной скорости. Он
+разделяет калибровку часов и возврат лишней задержки. В оценку дрейфа добавляется
+известное дополнительное потребление исходных кадров от собственного изменения
+темпа, рассчитанное по продвижению playback head. Поэтому плавное догоняние
+не выглядит ошибкой часов и не сбрасывает 120-секундное обучение.
 
-- пауза более секунды, short rebuffer, пропуск и большой backlog декодера
-  начинают измерение заново, сохраняя выученную поправку;
-- `AudioRenderer.startPlayback` вызывает `onPlaybackStarted(System.nanoTime())`
-  при каждом запуске: время остановленного AudioTrack не входит в измерение
-  и плавное изменение скорости;
-- большой считается сжатая очередь выше максимума выбранного буфера и одной
-  секунды PCM. Первый отсчёт после неё также не входит в новые окна; обычная
-  порция Wi-Fi около 400 мс не сбрасывает обучение при пресете 300 мс.
+`MusicLatencyController` использует минимальный уровень за 10 секунд и 30 секунд
+спокойной работы, зону нечувствительности 75 мс и горизонт возврата 30 секунд.
+Дополнительный темп ограничен +1%/−0,5%, изменение — 0,05 процентного пункта
+в секунду; при почти пустом PCM ускорение снимается. После rebuffer целевой
+резерв растёт на 100 мс, максимум на 600 мс, затем после спокойного интервала
+снижается по 5 мс в секунду. Сохранённые Wi-Fi/USB preferences не меняются.
+План ёмкости `MediaAudioBuffer` сохраняет дополнительные 600 мс и headroom 200 мс;
+порог старта ограничивается фактической ёмкостью AudioTrack.
 
-`MediaAudioBuffer` резервирует для музыки ещё 600 мс сверх выбранного буфера,
-сохраняя 200 мс свободной ёмкости. Каждый rebuffer увеличивает порог повторного
-старта на 100 мс, максимум на 600 мс; выбранные пользователем Wi-Fi/USB preferences
-не меняются. `MusicCatchUp` после 30 секунд без сбоев сокращает лишнюю задержку:
-берёт минимум наполнения за последние 10 секунд и пропускает только избыток
-от 200 мс. `PcmSkip` сглаживает границы пропуска PCM затуханием/нарастанием
-по 5 мс. Новый сбой в течение трёх минут после пропуска удваивает ожидание
-следующего, максимум до восьми минут. В `audio stats` добавлены `skippedMs` и
-текущий `startMs`; `MediaPacketLagGuard` сохраняет отдельную обработку старых пакетов.
+К AudioTrack применяется один набор `PlaybackParams`: speed объединяет поправку
+часов с временным темпом, pitch содержит только поправку часов. Поэтому сетевое
+догоняние сохраняет тон относительно выбранной калибровки ЦАП. Используется
+`AUDIO_FALLBACK_MODE_FAIL`, принятые speed/pitch перечитываются. При отказе
+восстанавливается нейтральный темп и остаётся только поддерживаемая коррекция
+через `setPlaybackRate`. Если после уже принятого time-stretch нейтральные
+параметры восстановить нельзя, сохраняется последний принятый набор, дальнейшие
+изменения блокируются и журнал явно сообщает отказ; второй регулятор не запускается.
+Отказ аппаратной коррекции не отключает учёт состояния буфера.
 
-Это замена прежнего PI-регулятора; сохранение адаптаций не означает сохранение
-его коэффициентов 0.03/0.001. Коррекция аппаратного дрейфа по-прежнему использует
-`AudioTrack.setPlaybackRate` и может менять тон, но сетевые задержки обрабатываются
-запасом и пропуском, а не постоянной подстройкой тона. Цена — увеличенная после
-сбоя задержка и возможный скачок вперёд по музыке. Реальные длинные ноты, паузы,
-звонки/Siri и согласование звука на Voyah требуют проверки на автомобиле;
-симуляции её не заменяют. «Буферизованная музыка» остаётся отдельным режимом.
+`MusicCatchUp`, `PcmSkip` и тест их вырезания удалены. Штатное сокращение задержки
+не удаляет PCM и не делает flush. Устранён воспроизведённый цикл: при буфере
+1000 мс и часах на 0,25% медленнее старый catch-up удалял по 200 мс каждые
+80 секунд и сбрасывал обучение. Это проверка модели, не измерение конкретного ГУ.
+Отдельный `MediaPacketLagGuard` по-прежнему ограничивает аварийный устойчивый
+backlog сжатых пакетов; переполнение очереди/отказ декодера также могут потерять
+звук и учитываются отдельно. Отсутствие PCM skip не означает отсутствие сетевых
+или декодерных потерь.
 
-Ограничение #1010: при небольшом дрейфе catch-up может удалять избыток раньше,
-чем завершатся необходимые 120 секунд измерения, и каждый раз сбрасывать обучение.
-Локальная модель на неизменённых `MediaClockTrim`/`MusicCatchUp` воспроизводит
-при буфере 1000 мс и часах на 0,25% медленнее удаление 200 мс каждые 80 секунд,
-даже без сетевых потерь. Fade по 5 мс не сохраняет удалённое содержимое музыки.
-Это подтверждение дефекта регуляторов, а не измерение дрейфа конкретного ГУ;
-плавная коррекция задержки с сохранением тона пока не реализована.
+UDP-музыка проходит через `AudioPacketRecovery` перед декодированием. Он хранит
+до 512 ожидающих пакетов, учитывает wrap sequence, SSRC, дубликаты и опоздания.
+Пропуск останавливает выдачу следующих пакетов декодеру: уже накопленный звук
+**до** пропуска остаётся в AudioTrack и даёт время для восстановления. Поэтому
+отдельный секундный буфер не добавляется. Предел ожидания берётся из snapshot
+оставшегося PCM с вычетом прошедшего времени и 80 мс защиты, максимум 900 мс;
+при коротком запасе ожидание отключено. После долгого радиоразрыва допускается
+явный resync за пределами ограниченного окна с учётом невосстановленных пакетов.
 
-UDP-аудиопуть объявляет `controlPort`, но `AudioStream.runControl` пока лишь
-принимает и игнорирует пакеты: reorder и дозапрос потерянного аудио не реализованы.
-AirPlay resend требует отдельной проверки совместимости с CarPlay; он не заменяет
-исправление catch-up, удаляющего уже полученную музыку.
+После 20 мс ожидания reorder разрешены до трёх Apple resend для диапазона до
+128 пакетов; интервал повторов адаптируется по наблюдаемому RTT в пределах
+40–200 мс. Используется согласованный controlPort телефона либо endpoint,
+полученный от управляющего пакета текущего peer; выдуманный порт не подставляется.
+Контрольный запрос имеет тип `0xD5`; обработчик `0xD6` снимает четырёхбайтовую
+обёртку полного RTP-пакета и проверяет исходный AEAD. Повторный пакет должен
+попасть в ещё актуальный пропуск, а его RTP timestamp — между известными соседями.
+Поздний ответ не вставляется в уже выданный звук. Смена сессии блокирует выдачу
+старого потока через проверку текущего `AudioMeta`; звонки/Siri/навигация обходят
+музыкальное ожидание. Реализация ориентируется на
+[Apple resend в Shairport Sync](https://github.com/mikebrady/shairport-sync/blob/master/rtp.c);
+совместимость этой обёртки с реальным CarPlay ещё не подтверждена.
+
+Диагностика отдельными короткими строками: `Audio: music timing` содержит
+clockRate, tempo, targetMs, queuedMs, pcmSkipMs и доступность time-stretch;
+`Audio: recovery` — pending, missing, recovered, resendRequests, duplicates,
+late, rejected и confirmed. `Audio: resend confirmed ... authenticated=true`
+появляется только после аутентифицированного ответа на действующий запрос,
+а не после успешной отправки UDP. При отсутствии ответа ожидание истекает;
+это не гарантия восстановления потерянного звука.
+
+Для TCP buffered type 103 resend выполняет TCP. Музыкальный latency servo
+для него выключен: заранее доставленные кадры не являются лишней realtime-задержкой.
+При подаче по credit постоянный уровень очереди не скрывает дрейф: он оценивается
+отдельно по продвижению playback head относительно монотонного времени;
+паузы/недостоверные интервалы исключаются из измерения.
+`BufferedAudioStream` берёт заявленную стартовую задержку из выбранного музыкального
+буфера вместо фиксированных 400 мс. Когда sink сообщает фактически сыгранную
+RTP-позицию, подача следующих кадров, освобождение prefeed, pause и buffered
+feedback опираются на неё; независимые настенные часы остаются fallback для sink
+без этой возможности. Локальный lead — не меньше стартового резерва плюс 200 мс.
+Обычный UDP `/feedback` не менялся. Параметры/качество time-stretch, работа resend
+с iPhone, длинные ноты, звонки/Siri и маршрутизация Voyah требуют испытания на ГУ.
 
 Экспериментальный Bluetooth audio остаётся отдельной выключенной по умолчанию
 настройкой: при включении штатный вывод DiPlay отключается, поэтому независимые
@@ -1770,8 +1920,8 @@ DEFAULT_OEM_LABEL в AirPlayPersistence — **Voyah Free**, в том числе
 | [shared/src/main/java/com/shilapi/xcertplay/adb/LocalAdb.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/adb/LocalAdb.kt) | Ранний UNSUPPORTED по localAdbEnabled. |
 | [shared/src/main/java/com/shilapi/xcertplay/hud/BydNavigationOutputs.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/hud/BydNavigationOutputs.kt) | Guards OEM запуска/route/cleanup; не включать BYD ради VoyahNavigation. |
 | [shared/src/main/java/com/shilapi/xcertplay/hud/BydOutputSettings.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/hud/BydOutputSettings.kt) | Guards вычисляемых enabled/available и OEM-настроек независимо от старых preferences. |
-| [shared/src/main/java/com/shilapi/xcertplay/media/AndroidMediaSink.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/media/AndroidMediaSink.kt) | Voyah routing, explicit override, stream validation/fallback; временный PCM navigation focus, приоритет ролей и callback фактического OEM stream; сброс наблюдений MediaClockTrim при каждом startPlayback (§9). |
-| [shared/src/main/java/com/shilapi/xcertplay/media/MediaClockTrim.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/media/MediaClockTrim.kt)<br>[shared/src/test/java/com/shilapi/xcertplay/media/MediaClockTrimTest.kt](../RestoreMode/diplay/shared/src/test/java/com/shilapi/xcertplay/media/MediaClockTrimTest.kt) | Отдельный перенос #1010: тренд пиков/Theil–Sen вместо PI-регулятора; сохранить сброс каждого startPlayback, выученную поправку и исключение большого backlog с первым отсчётом после него. Порог backlog не меньше секунды PCM, чтобы обычная порция 400 мс не сбрасывала обучение при буфере 300 мс (§9). |
+| [shared/src/main/java/com/shilapi/xcertplay/media/AndroidMediaSink.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/media/AndroidMediaSink.kt) | Voyah routing, explicit override, stream validation/fallback; временный PCM navigation focus, приоритет ролей и callback фактического OEM stream; сброс наблюдений MediaClockTrim при каждом startPlayback; MusicPlaybackControl и snapshot позиции/запаса для transport recovery; PlaybackParams с readback и fallback (§9). |
+| [shared/src/main/java/com/shilapi/xcertplay/media/MediaClockTrim.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/media/MediaClockTrim.kt)<br>[shared/src/test/java/com/shilapi/xcertplay/media/MediaClockTrimTest.kt](../RestoreMode/diplay/shared/src/test/java/com/shilapi/xcertplay/media/MediaClockTrimTest.kt) | Отдельный перенос #1010: тренд пиков/Theil–Sen вместо PI-регулятора; сохранить сброс каждого startPlayback, выученную поправку и исключение большого backlog с первым отсчётом после него. Порог backlog не меньше секунды PCM; учитывать дополнительное потребление от темпа без сброса измерения (§9). |
 | [shared/src/main/java/com/shilapi/xcertplay/orchestration/CarPlayController.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/orchestration/CarPlayController.kt) | setVehicleNightMode с проверкой activeSession; begin/end/onFrame владельца VoyahNavigation; app-owned openHostUi для requestUI на main thread с повторной проверкой владельца (§4). |
 | [common/src/main/res/values/strings.xml](../RestoreMode/diplay/common/src/main/res/values/strings.xml)<br>[common/src/main/res/values-ru/strings.xml](../RestoreMode/diplay/common/src/main/res/values-ru/strings.xml)<br>[common/src/main/res/values-uk/strings.xml](../RestoreMode/diplay/common/src/main/res/values-uk/strings.xml)<br>[common/src/main/res/values-es/strings.xml](../RestoreMode/diplay/common/src/main/res/values-es/strings.xml)<br>[common/src/main/res/values-ar/strings.xml](../RestoreMode/diplay/common/src/main/res/values-ar/strings.xml)<br>[common/src/main/res/values-zh-rCN/strings.xml](../RestoreMode/diplay/common/src/main/res/values-zh-rCN/strings.xml)<br>[common/src/main/res/values-zh-rTW/strings.xml](../RestoreMode/diplay/common/src/main/res/values-zh-rTW/strings.xml) <br>[common/src/main/res/values-ja/strings.xml](../RestoreMode/diplay/common/src/main/res/values-ja/strings.xml) | Девять локализаций, включая values-it/strings.xml: нейтральные тексты без BYD, достоверные подсказки аудиоканалов и жестов; сохранить resource IDs и placeholders; полный русский перевод common (§5). |
 
@@ -1814,8 +1964,10 @@ DEFAULT_OEM_LABEL в AirPlayPersistence — **Voyah Free**, в том числе
 | `common/src/main/java/com/shilapi/xcertplay/GeelyClusterDisplay.kt`, `GeelyClusterProjection.kt` | Не выбирать Geely display и не читать/писать DIM Binder при выключенной vehicleIntegrationEnabled. Pure matcher device/product/model сохранён; cleanup не меняет сохранённый claim без разрешённой интеграции. |
 | `common/src/test/java/com/shilapi/xcertplay/GeelyClusterDisplayTest.kt`, `VoyahDisabledFeaturesTest.kt` | Отдельно проверять точный matcher и запрет runtime-проекции, Binder/cleanup и нового BYD music-card gate при сохранённых opt-ins. |
 | `shared/src/main/java/com/shilapi/xcertplay/hud/BydOutputSettings.kt` | Новый clusterSongGate также закрыт vehicleIntegrationEnabled; сохранённое true не запускает BYD media UI. |
-| `shared/src/main/java/com/shilapi/xcertplay/media/MediaAudioBuffer.kt`, `MusicCatchUp.kt`, `PcmSkip.kt` | Перенесены из #1010: ёмкость/повторный старт, спокойный интервал и сглаженный пропуск (§9). Не возвращать прежнюю ёмкость без дополнительного запаса, не менять выбранные буферы в preferences. |
-| `shared/src/test/java/com/shilapi/xcertplay/media/MediaAudioBufferTest.kt`, `MusicCatchUpTest.kt` | Проверки #1010: предел запаса, сокращение задержки после стабильного соединения, backoff и fade/пропуск через несколько блоков PCM. |
+| `shared/src/main/java/com/shilapi/xcertplay/media/MediaAudioBuffer.kt` | Ёмкость/повторный старт с запасом #1010; пользовательские preferences сохраняются. MusicCatchUp/PcmSkip удалены, не восстанавливать штатное вырезание PCM (§9). |
+| `shared/src/main/java/com/shilapi/xcertplay/airplay/AudioStream.kt`, `CarPlayMediaEngine.kt` | MediaSink сообщает запас/позицию renderer; UDP reorder/resend только для media, peer/control endpoint, AEAD ответа и guard текущего AudioMeta (§9). |
+| `shared/src/main/java/com/shilapi/xcertplay/airplay/BufferedAudioStream.kt` | Стартовая задержка из sink; credit/позиция по фактически проигранному RTP, fallback для других sink; TCP retransmission, без UDP catch-up (§9). |
+| `shared/src/test/java/com/shilapi/xcertplay/media/MediaAudioBufferTest.kt`, `AudioClockTrimTest.kt` | Предел запаса и реальный writePcm; принятые speed/pitch, отсутствие PCM skip, отказ/восстановление AudioTrack API. MusicCatchUpTest удалён вместе с hard skip. |
 | `shared/src/main/java/com/shilapi/xcertplay/media/MicrophoneCaptureStats.kt`, `MicrophoneUplink.kt` | Общий useSource отражает фактический AudioRecord source и fallback; новая диагностика тишины не отменяет запрет Voyah VOIP capture/эффектов. |
 | `shared/src/test/java/com/shilapi/xcertplay/media/TelephonyMicrophoneTest.kt` | Сохранены новые проверки освобождения mode request и диагностики, дополнены Voyah capture; BYD-suspend/phone-state тесты учитывают отключённые OEM routes. |
 | `common/src/test/java/com/shilapi/xcertplay/backup/SettingsBackupCodecTest.kt` | Backup восстанавливает сохранённый opt-in launcher bubble, но effective getter остаётся false по standalone policy. |
@@ -1846,7 +1998,8 @@ Kotlin/Java/JNI-файлы baseline импортированы.
 Точки подключения: `AirPlayInfoPlist`, `AirPlaySession`, `CarPlayMediaEngine`.
 `AirPlayInfoPlist` выбирает нижний док главного экрана при доступном климате,
 если край явно не задан. `VehicleStateProtocolTest` фиксирует диапазон вентилятора
-в передаваемых единицах, VentCombinations, позиции/диапазоны сидений,
+в передаваемых единицах, единственный Vent/CurrentIndex с пятью VentCombinations,
+позиции/диапазоны и полный цикл уровней сидений без On,
 цикл рециркуляции с отдельным read-only AutoMode и дедупликацией нажатий,
 тип и диапазон подогрева руля, маршрутизацию
 и отсутствие оптимистических обновлений; `VehicleStateDisplayPanelsTest` — основной
@@ -1854,6 +2007,10 @@ Kotlin/Java/JNI-файлы baseline импортированы.
 `VehicleClimateDockTest` — выбор дока, приоритет
 настроек и сохранение геометрии.
 При обновлении upstream переносить VSP отдельно от iAP2 VehicleStatus и video settings.
+`shared/.../airplay/ultra/VoyahVehicleControls.kt`, `VoyahClimateAccessory.kt`,
+`UltraWriteTransactions.kt`, `VoyahUltraProtocol.kt` сохраняют ButtonSetting массажа,
+раздельные action echo/observed level и общую для каналов историю записей;
+`ultra/VoyahVehicleControlsTest.kt` проверяет этот контракт.
 
 `shared/.../airplay/AirPlayVehicleTheme.kt` — единый профиль опубликованной темы,
 идентификаторов, кадра и физических размеров (§6), сохранённый в библиотеке.
@@ -1868,13 +2025,15 @@ Kotlin/Java/JNI-файлы baseline импортированы.
 
 | Файл | Назначение |
 | --- | --- |
-| [common/src/main/java/com/shilapi/xcertplay/CarPlayHomeUi.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/CarPlayHomeUi.kt) | Контракт фабрики app-owned home и callbacks/state; finishActivities закрывает только выделенные UI tasks CarPlay, сохраняя сессию и другие экраны RestoreMode (§5). |
+| [common/src/main/java/com/shilapi/xcertplay/CarPlayHomeUi.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/CarPlayHomeUi.kt) | Контракт фабрики app-owned home и callbacks/state; exitToHome открывает штатный HOME на физическом экране, finishActivities закрывает только выделенные UI tasks CarPlay, сохраняя сессию и другие экраны RestoreMode (§5). |
+| [common/src/main/java/com/shilapi/xcertplay/CarPlaySessionHosts.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/CarPlaySessionHosts.kt) | Явный disconnect: слабый реестр host Activity, закрытие ожидающего UI, teardown owner и запрос освобождения Native VD (§4–5). |
+| [common/src/main/java/com/shilapi/xcertplay/CarPlayPhoneSelection.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/CarPlayPhoneSelection.kt) | Список сопряжённых устройств и пятисекундный отсчёт до первого wireless start; выбор, пауза, изменения списка, отмена и USB (§5). |
 | [common/src/main/java/com/shilapi/xcertplay/CarPlayWindowUi.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/CarPlayWindowUi.kt) | App-policy безопасных границ, обёртка UI/видео, потребление insets, текст ошибки auth, connectionIcon и darkHostAppearance с безопасным fallback без приложения (§5). |
 | [common/src/main/java/com/shilapi/xcertplay/CarPlaySettingsAccess.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/CarPlaySettingsAccess.kt) | Java-friendly доступ настроек VoyahTune к preferences/состоянию/stop DiPlay, общему флагу доступности (default true), режиму fullscreen (default false) и существующему ui_scale_percent (default 100). |
 | [shared/src/main/java/com/shilapi/xcertplay/airplay/CarPlayUiScale.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/airplay/CarPlayUiScale.kt)<br>[common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt) | Пресеты 75/85/100/115%; physicalSize масштабирует сообщаемую физическую геометрию. Host читает настройку при handshake, не меняет видеокадр; прежняя автомобильная тема не влияет на масштаб (§5/6). |
 | [common/src/main/java/com/shilapi/xcertplay/CarPlayThemePolicy.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/CarPlayThemePolicy.kt) | SWReason влияет только на projection в выбранном VEHICLE (§6). |
 | [common/src/main/java/com/shilapi/xcertplay/VoyahCarPlayDefaults.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/VoyahCarPlayDefaults.kt) | Defaults с отдельными миграциями навигационного канала и названия кнопки автомобиля; Wi-Fi Direct при отсутствии wireless_hotspot_mode без перезаписи сохранённого выбора. |
-| [common/src/main/java/com/shilapi/xcertplay/VoyahCarPlayIntegration.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/VoyahCarPlayIntegration.kt) | Регистрация Host, available, скорость, night, Siri через snapshot; callbacks запуска проекции на VD и главной VoyahTune (§4). |
+| [common/src/main/java/com/shilapi/xcertplay/VoyahCarPlayIntegration.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/VoyahCarPlayIntegration.kt) | Регистрация Host, available, скорость, night, Siri через snapshot; callbacks запуска/закрытия проекции на VD, открытия главной VoyahTune и определения физического экрана для системного HOME (§4–5). |
 | [shared/src/main/java/com/shilapi/xcertplay/VoyahPlatformPolicy.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/VoyahPlatformPolicy.kt) | Ограничения BYD/ADB/standaloneAppEnabled false. |
 | [shared/src/main/java/com/shilapi/xcertplay/transport/VoyahVehicleSpeedSource.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/transport/VoyahVehicleSpeedSource.kt) | Буфер/единицы/передачи/возраст данных. |
 | [shared/src/main/java/com/shilapi/xcertplay/hud/VoyahNavigation.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/hud/VoyahNavigation.kt) | Независимый route owner, таблица иконок, snapshot. |
@@ -1897,6 +2056,12 @@ Kotlin/Java/JNI-файлы baseline импортированы.
 обучением при обычных кратких сжатых очередях. Отдельные регрессии запрещают
 объединять разные уровни до/после короткого rebuffer или большой очереди в один тренд.
 
+Собственные `media.MusicPlaybackControl` и `media.MusicLatencyController` заменяют
+PCM catch-up; `airplay.AudioPacketRecovery`/`AudioResendPacket` обеспечивают
+упорядочивание и ограниченный дозапрос. Сохранять их тесты `MusicPlaybackControlTest`,
+`AudioPacketRecoveryTest`, `AudioStreamRecoveryTest` и дополнение
+`BufferedAudioStreamTest` с наблюдаемым продвижением renderer (§9/12).
+
 Собственные ресурсы локализации:
 [values/strings_voyah_ui.xml](../RestoreMode/diplay/common/src/main/res/values/strings_voyah_ui.xml)
 и [values-ru/strings_voyah_ui.xml](../RestoreMode/diplay/common/src/main/res/values-ru/strings_voyah_ui.xml).
@@ -1907,7 +2072,7 @@ Kotlin/Java/JNI-файлы baseline импортированы.
 Собственные тесты common: `VoyahSessionTransferTest`, `VoyahCarPlayIntegrationTest`,
 `VoyahAudioDefaultsTest`, `VoyahCarBrandingTest`, `CarPlayAutoConnectOnOpenTest`, `CarPlaySettingsAccessTest`, `CarPlayWindowUiTest`.
 Common также `CarPlayThemePolicyTest`, `CarPlayHostUiNavigationTest`,
-`VoyahSettingsUiTest`, `VoyahConnectionUiTest`,
+`VoyahSettingsUiTest`, `VoyahConnectionUiTest`, `CarPlayPhoneSelectionTest`, `CarPlayHomeUiTest`,
 `VoyahUpstreamGuardsTest` (defaults, updater, BYD opt-ins и Native wheel ownership без UI),
 `VoyahDisabledFeaturesTest` (сохранённые opt-ins bubble/rhythm, overlay permission и запрет hotspot import/write); shared: `VoyahNavigationTest`, `VoyahAudioRoutingTest`,
 `NavigationAudioFocusTest`, `VoyahAudioFocusTest`. Они перечислены с путями в §12.
@@ -1915,16 +2080,16 @@ Common также `CarPlayThemePolicyTest`, `CarPlayHostUiNavigationTest`,
 Сверка дерева с чистым baseline main из §1 на 21 октября 2026:
 96 изменённых upstream-файлов и 59 файлов вне main внутри common/shared/gradle
 (28 файлов реализации/ресурсов и 31 тест), 5 инфраструктурных исключений
-и 2 удалённых WorkManager-файла. В число файлов вне main входят MusicCatchUp,
-PcmSkip и MusicCatchUpTest из отдельно перенесённого #1010; остальные 56 принадлежат
-адаптации VoyahTune. Это контроль полноты; собственные app/Native/OD-файлы
+и 2 удалённых WorkManager-файла. На момент этой исторической сверки три файла относились к PCM catch-up #1010;
+27 октября они удалены и заменены собственной реализацией, перечисленной выше.
+Исторические количества не являются текущим инвентарём. Это контроль полноты; собственные app/Native/OD-файлы
 дополнительно перечислены в §10.3.
 
 ### 10.3. Код вне vendored дерева
 
 Климат (§6): `SharedAndroid/.../CarPlayClimateProtocol.java`; Native
 `OemClimateState`, `ClimateCommand`, `ClimateAirDistribution`,
-`OemSeatClimateState`, `OemComfortClimateState`, `CarPlayClimateController` и расширения
+`OemSeatClimateState`, `OemSeatMassageState`, `OemComfortClimateState`, `CarPlayClimateController` и расширения
 `CanBusEvent`, `CanBusEventRouter`, `CanBusEventHub`, `OemVehicleStateTransport`,
 `CarPlayVehicleController`, `SetModesService`; app `CarPlayVehicleBridge`.
 `OemClimateState` сохраняет раздельные признаки ручной рециркуляции и AUTO;
@@ -1939,7 +2104,7 @@ OEM-снимка и подтверждают переход чтением. IPC 
 | [RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayDashboardLauncher.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayDashboardLauncher.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayHostDisplayReceiver.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayHostDisplayReceiver.java)<br>[SharedAndroid/src/main/java/ru/big/town/common/DashboardTarget.java](../SharedAndroid/src/main/java/ru/big/town/common/DashboardTarget.java) | requestUI → отдельная задача сетки физического экрана 0/1, CLEAR_TOP/SINGLE_TOP и fullscreen без закрытия CarPlay; пара VD/физический экран и последний экран Dashboard без ссылки на Activity. Signature-protected receiver обновляет пару при переносе; initial extra того же VD не перезаписывает обновление (§4). |
 | [RestoreMode/app/src/main/java/ru/big/town/restoremode/dashboard/DashboardTransferPolicy.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/dashboard/DashboardTransferPolicy.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/passenger/PassengerDashboardActivity.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/passenger/PassengerDashboardActivity.java) | Независимый пассажирский корень задачи; OEM-запрет переноса собственных Activity только в OD с исключением всех Activity CarPlay, подключённый через VoyahApplication (§4). |
 | [Native/app/src/main/java/ru/big/town/anative/CarPlayAudioController.java](../Native/app/src/main/java/ru/big/town/anative/CarPlayAudioController.java)<br>[Native/app/src/main/java/ru/big/town/anative/CarPlayAudioPolicy.java](../Native/app/src/main/java/ru/big/town/anative/CarPlayAudioPolicy.java)<br>[SharedAndroid/src/main/java/ru/big/town/common/CarPlayAudioProtocol.java](../SharedAndroid/src/main/java/ru/big/town/common/CarPlayAudioProtocol.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayAudioClient.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayAudioClient.java) | OEM focus/громкость, четыре ограниченных stream, settings-only binding, revisions и независимость от CAN-подписки (§5/6/9). |
-| [RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayProjectionClient.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayProjectionClient.java)<br>[Native/app/src/main/java/ru/big/town/anative/SetModesService.java](../Native/app/src/main/java/ru/big/town/anative/SetModesService.java)<br>[Native/app/src/main/java/ru/big/town/anative/SplitHostActivity.java](../Native/app/src/main/java/ru/big/town/anative/SplitHostActivity.java) | Ограниченный запрос projection 124/125, 5-секундный bind, проверка действующего CarPlay VD и запуск его владельцем (§4). |
+| [RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayProjectionClient.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayProjectionClient.java)<br>[Native/app/src/main/java/ru/big/town/anative/SetModesService.java](../Native/app/src/main/java/ru/big/town/anative/SetModesService.java)<br>[Native/app/src/main/java/ru/big/town/anative/SplitHostActivity.java](../Native/app/src/main/java/ru/big/town/anative/SplitHostActivity.java) | Запуск projection 124, закрытие 134, ответ 125; 5-секундный bind, проверка действующего CarPlay VD. Явное закрытие/смена режима освобождают host и отменяют ожидающий запуск (§4). |
 | [RestoreMode/settings.gradle.kts](../RestoreMode/settings.gradle.kts)<br>[RestoreMode/app/build.gradle.kts](../RestoreMode/app/build.gradle.kts)<br>[RestoreMode/gradle/libs.versions.toml](../RestoreMode/gradle/libs.versions.toml)<br>[RestoreMode/gradle/wrapper/gradle-wrapper.properties](../RestoreMode/gradle/wrapper/gradle-wrapper.properties) | Модули, зависимости, AGP/Gradle, assets и ABI (§3). |
 | [RestoreMode/app/src/main/AndroidManifest.xml](../RestoreMode/app/src/main/AndroidManifest.xml)<br>[Native/app/src/main/AndroidManifest.xml](../Native/app/src/main/AndroidManifest.xml) | Overrides компонентов/launcher/boot и signature permission (§3). |
 | [RestoreMode/app/src/main/java/ru/big/town/restoremode/VoyahApplication.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/VoyahApplication.java) | Установка bridge, home factory и window policy вне :ota (§2). |
@@ -1958,7 +2123,7 @@ OEM-снимка и подтверждают переход чтением. IPC 
 | [CarPlayWidgetSettings.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/main/CarPlayWidgetSettings.java)<br>[settings_main_carplay_widget.xml](../RestoreMode/app/src/main/res/layout/settings_main_carplay_widget.xml) | Включение, Ярлык/Окно, размеры и общий предпросмотр сетки; сохраняет ID и параметры существующей записи (§4). |
 | [VoyahWifiScanPause.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/network/VoyahWifiScanPause.kt)<br>[WifiScanPause.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/network/WifiScanPause.kt)<br>[CarPlayWifiScanProtocol.java](../SharedAndroid/src/main/java/ru/big/town/common/CarPlayWifiScanProtocol.java)<br>[CarPlayWifiScanController.java](../Native/app/src/main/java/ru/big/town/anative/CarPlayWifiScanController.java)<br>[vd_bypass.js](../Packaging/new/agents/windows.js)<br>[carplay_wifi_scan.xml](../RestoreMode/diplay/common/src/main/res/values-ru/carplay_wifi_scan.xml) | OD lease автоматического поиска Wi-Fi: Host устанавливается Application, owner tokens передаются Bridge, Native публикует ограниченный heartbeat, system_server сохраняет/восстанавливает autojoin на Wi-Fi Handler. Default true, только Wi-Fi Direct; LocalAdb и PI не включать (§5/6). |
 | [RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/carplay/CarPlaySettingsFragment.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/carplay/CarPlaySettingsFragment.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/core/SettingsSection.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/core/SettingsSection.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/core/SettingsSectionLayouts.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/core/SettingsSectionLayouts.java)<br>[RestoreMode/app/src/main/res/layout/settings_carplay.xml](../RestoreMode/app/src/main/res/layout/settings_carplay.xml)<br>[RestoreMode/app/src/main/res/values/carplay_home.xml](../RestoreMode/app/src/main/res/values/carplay_home.xml)<br>[RestoreMode/app/src/main/res/layout/view_settings_navigation_rail.xml](../RestoreMode/app/src/main/res/layout/view_settings_navigation_rail.xml) | Раздел 9, общий выключатель, дискретный масштаб без выбора темы, navigation, живой статус, отключение, SWReason и четыре OEM-ползунка; без общего автоподключения (§5). |
-| [RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayVehicleBridge.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayVehicleBridge.java)<br>[SharedAndroid/src/main/java/ru/big/town/common/CarPlayVehicleProtocol.java](../SharedAndroid/src/main/java/ru/big/town/common/CarPlayVehicleProtocol.java)<br>[Native/app/src/main/java/ru/big/town/anative/CarPlayVehicleController.java](../Native/app/src/main/java/ru/big/town/anative/CarPlayVehicleController.java) | Двунаправленный IPC, owner/generation/подписки (§6/8); регистрация климатического адаптера VSP отключена (§6). |
+| [RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayVehicleBridge.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/carplay/CarPlayVehicleBridge.java)<br>[SharedAndroid/src/main/java/ru/big/town/common/CarPlayVehicleProtocol.java](../SharedAndroid/src/main/java/ru/big/town/common/CarPlayVehicleProtocol.java)<br>[Native/app/src/main/java/ru/big/town/anative/CarPlayVehicleController.java](../Native/app/src/main/java/ru/big/town/anative/CarPlayVehicleController.java) | Двунаправленный IPC, owner/generation/подписки (§6/8); климат и Ultra-адаптер, включение VSP по настройке (§6). |
 | [Native/app/src/main/java/ru/big/town/anative/CarPlayLightState.java](../Native/app/src/main/java/ru/big/town/anative/CarPlayLightState.java)<br>[Native/app/src/test/java/ru/big/town/anative/CarPlayLightStateTest.java](../Native/app/src/test/java/ru/big/town/anative/CarPlayLightStateTest.java) | Начальное TX57-чтение SWReason, последующие события; защита от устаревшего snapshot после события/reconnect/close (§6). |
 | [Native/app/src/main/java/ru/big/town/anative/CanBusEvent.java](../Native/app/src/main/java/ru/big/town/anative/CanBusEvent.java)<br>[Native/app/src/main/java/ru/big/town/anative/CanBusEventRouter.java](../Native/app/src/main/java/ru/big/town/anative/CanBusEventRouter.java)<br>[Native/app/src/main/java/ru/big/town/anative/CanBusEventHub.java](../Native/app/src/main/java/ru/big/town/anative/CanBusEventHub.java) | Скорость, interests, OEM callback/getter в общем CAN hub (§6). |
 | [RestoreMode/app/src/main/java/ru/big/town/restoremode/voice/commands/VoiceSteeringPolicy.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/voice/commands/VoiceSteeringPolicy.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/voice/VoiceSettingsPage.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/voice/VoiceSettingsPage.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/integration/config/SplitConfigSync.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/integration/config/SplitConfigSync.java)<br>[RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/steering/SteeringSettingsFragment.java](../RestoreMode/app/src/main/java/ru/big/town/restoremode/settings/sections/steering/SteeringSettingsFragment.java)<br>[RestoreMode/app/src/main/res/layout/settings_steering_reserved.xml](../RestoreMode/app/src/main/res/layout/settings_steering_reserved.xml)<br>[Native/app/src/main/java/ru/big/town/anative/SetModesReceiverDynamic.java](../Native/app/src/main/java/ru/big/town/anative/SetModesReceiverDynamic.java) | Выбор нажатия Siri, пояснение, экспорт действия и broadcast (§7). |
@@ -2118,6 +2283,24 @@ Authentication assets и бинарную иконку сохранить отд
 подсказка жеста не содержит DiPlay. Тёмный host UI не должен менять тему iPhone:
 SWReason управляет только проекцией в режиме VEHICLE.
 
+### Карта переноса Ultra, 26 октября 2026
+
+- `diplay/shared/airplay/{mfi4,rcs,ultra}` и `AirPlayProtocolExtension` — протоколы VoyahPlay;
+  `VehicleStateProtocol` остаётся отдельным климатическим плагином.
+- `CarPlaySettingsAccess`, `CarPlaySettingsFragment`, `settings_carplay.xml`,
+  `CarPlayHostActivity`, `CarPlayUltraHost` — переключатель и согласованный профиль сессии.
+- `app/carplay/{CarPlayUltraSource,VoyahRadioClient,CarPlayVehicleBridge}` — адаптеры приложения;
+  dependency `androidx.media:media:1.6.0` нужна для OEM списка станций MediaSessionCompat.
+- `SharedAndroid/CarPlayUltraProtocol`, Native `CarPlayUltraController`, `CarPlayRadioText`,
+  `CarPlayVehicleController`, `EnergyTelemetrySample` — данные, команды, RDS и жизненный цикл.
+- `Iap2IdentificationClient`, `Iap2VehicleStatus`, `CarPlayController`, wired/wireless endpoints —
+  тема, тип двигателя и MFi4; bootstrap Bluetooth не объявляет VehicleInformation.
+- Целевые проверки: компиляция app/common/shared и Native, MFi4, UI Sync, RadioAudio,
+  AirPlayAudioResource, наш климат, `VoyahTuneUltraIntegrationTest` (два плагина на реальном
+  локальном encrypted RCS-канале), `CarPlaySettingsAccessTest`, `CarPlayUltraTelemetryTest`.
+  Установка/проверка на автомобиле не выполнялась; для доставки нужны APK RestoreMode и Native,
+  пересборка Installer не требуется — его код и установочный контракт не менялись.
+
 ## 12. Критерии восстановления и проверки
 
 Тесты проверяют выполнение рабочей реализации на разных входах, включая границы
@@ -2158,16 +2341,18 @@ UI-тесты и испытания на ГУ выполнять только в
 | Task/component/display | Native `CarPlayTargetTest` (выбор компонента home на 0/1 и projection на VD со старым ID; полноэкранные входы направляются в VD-хост до разрешения intent), `AppDisplayTaskPlanTest`, `SplitHostTaskSnapshotTest` (CarPlay на своём VD, исключение Dashboard/launcher, unknown display); app `CarPlayDashboardDisplayTest` (возврат с полноэкранного VD на физический экран хоста); common `VoyahSessionTransferTest`, `SmoothVideoHostLifecycleTest`, `LauncherIntentTest` |
 | Выключатель и темы CarPlay | app `CarPlayFeatureTest`, `CarPlaySettingsLifecycleTest`: default true, компоненты/независимый Dashboard, оба профиля виджетов, док, скрытие контента, сохранение трёх тем; common `CarPlayEntryActivityTest`: выключенные entry/home/projection не запускают транспорт. OD `test_carplay_allapps.js`: включение/выключение, stale cache, отсутствие дублей, независимые клики на 0/1. |
 | Автоподключение и настройки | common `CarPlayAutoConnectOnOpenTest`, `CarPlaySettingsAccessTest`, `DefaultConnectionModeTest`, `VoyahEmbeddedEntryPointsTest`, `PhoneBluetoothReceiverTest` |
+| Выход, отключение и выбор телефона | common `CarPlayHomeUiTest`: системный HOME на физическом 0/1 без вызова Dashboard, fallback без интеграции и сохранение фоновой сессии при закрытии UI; app `CarPlayHomeScreenUiTest`: настоящий тап «Выйти» создаёт HOME Intent. `VoyahConnectionUiTest`: disconnect из настроек/уведомления до создания controller, закрытие VD без ожидания teardown, реальный диалог выбора и отмена. `CarPlayPhoneSelectionTest`: 0/1/несколько адресов, сохранённый/исчезнувший телефон, пять секунд, пауза выбора/фона, закрытие и USB. app `CarPlayProjectionClientTest`: Native Messenger, displayId закрытия, ответ с чужим ID, timeout/unbind и отказ запуска для завершённой Activity. |
 | Масштаб в настройках | app `CarPlaySettingsLifecycleTest`: default 100, четыре позиции, сохранение после пересоздания строк и доступность при старом значении DUAL_SIDES. common `CarPlaySettingsAccessTest`: общий preference и sanitization; `CarPlayHostResolutionTest`: повторное чтение при handshake, неизменность кадра/view areas, физические размеры и игнорирование старых тем. Итоговую читаемость и раскладку отдельно проверять на iPhone. |
 | Опциональный полный экран OD | app `CarPlaySettingsLifecycleTest`: default false, сохранение, signature DOCK_CONFIG и скрытие с остальным разделом; `CarPlayFeatureTest`: немедленная публикация при незавершённом stop, быстрые переключения и отсутствие позднего применения. common `CarPlaySettingsAccessTest`: настройка переживает выключение функции. `Packaging/new/tests/carplay-chrome.test.js`/`Packaging/new/tests/carplay-statusbar.test.js`: обычный component сохраняет док по inset-политике и не скрывает панели, переход из fullscreen восстанавливает их на 0/1. Сборки обоих APK; на ГУ проверить смену режима активного/фонового окна, отключение и новый handshake, отступы, подъём и перенос экрана. |
 | Способ Wi-Fi подключения | common `HotspotModeMigrationTest`, `ExistingWifiSettingsTest`: default Wi-Fi Direct, сохранение выбранного режима и реквизитов сетей |
 | Приостановка поиска Wi-Fi OD | shared `WifiScanPauseTest`: отменённый acquire, release и отсутствие ADB; app `CarPlayWifiScanBridgeTest`: несколько владельцев, закрытие до доставки и reconnect; Native `CarPlayWifiScanProtocolTest`: исходное время heartbeat, просроченные/будущие запросы; `Packaging/new/tests/carplay-wifi-scan-pause.test.js`: исполнение OD-агента на Wi-Fi Handler, expiry/boot, исходная и внешняя политика, частичная ошибка, rollback. |
 | Скорость, gear, SWReason | app `CarPlayVehicleSpeedPipelineTest` (Messenger → iAP2); Native `CanBusEventRouterTest` (скорость и timestamp), `CarPlayLightStateTest` (начальный SWReason, события и запоздавшие ответы); common `VoyahCarPlayIntegrationTest`, `CarPlayThemePolicyTest` |
-| Климат VSP | shared `OpackCodecTest` (iPhone/Apple SDK vectors, границы), `VehicleStateProtocolTest` (неизвестные значения, readback, дедупликация, диапазоны, VentCombinations, позиции сидений, цикл рециркуляции и маршрутизация команд), `VehicleStateChannelTest` (шифрование, фрагментация, ACK/token), `VehicleStateDisplayPanelsTest` (панели без дополнительного видеопотока), `VehicleClimateDockTest` и `AirPlayInfoPlistTest` (док, приоритет сохранённого края, main/cluster и геометрия); Native `ClimateCommandTest`, `ClimateAirDistributionTest` (режимы H97 и сохранение нижнего выхода), `OemSeatClimateStateTest` (реальные switch/level, отдельные места, unknown и выключение), `OemComfortClimateStateTest` (руль 0/1, ошибка 10, подтверждение и независимость сидений), `CanBusEventRouterTest`; компиляция обеих сторон IPC. На ГУ отдельно проверить принятие SeatFan, все позиции/уровни, физический результат, обратное изменение штатной кнопкой, температуры в доке вне приложения «Климат», потерю CAN и reconnect. |
+| Климат VSP | shared `OpackCodecTest` (iPhone/Apple SDK vectors, границы), `VehicleStateProtocolTest` (неизвестные значения, readback, дедупликация, диапазоны, VentCombinations, позиции сидений, цикл рециркуляции и маршрутизация команд), `VehicleStateChannelTest` (шифрование, фрагментация, ACK/token), `VehicleStateDisplayPanelsTest` (панели без дополнительного видеопотока), `VehicleClimateDockTest` и `AirPlayInfoPlistTest` (док, приоритет сохранённого края, main/cluster и геометрия); Native `ClimateCommandTest`, `ClimateAirDistributionTest` (пять абсолютных режимов H97, ручной readback и legacy направления), `OemSeatClimateStateTest` (реальные switch/level, отдельные места, unknown и выключение), `OemSeatMassageStateTest` (цикл 0–3–2–1–0, сохранённая интенсивность и unknown), shared `ultra.VoyahVehicleControlsTest` (кнопка массажа, echo/ready, readback уровня, дедупликация между каналами и ошибки), `OemComfortClimateStateTest` (руль 0/1, ошибка 10, подтверждение и независимость сидений), `CanBusEventRouterTest`; компиляция обеих сторон IPC. На ГУ отдельно проверить принятие SeatFan, все позиции/уровни, физический результат, обратное изменение штатной кнопкой, температуры в доке вне приложения «Климат», потерю CAN и reconnect. |
 | Siri | app `VoiceSteeringPolicyTest`; common `WheelSiriWindowTest` (включает Voyah guard) |
 | Манёвры | shared `hud.VoyahNavigationTest`; Native `ClusterNavigationLeaseTest`, `ClusterNavigationSourcesTest`; `Packaging/new/tests/navigation-source-lifecycle.test.js`, `test_cluster_navigation.js` |
 | Аудио | shared `media.VoyahAudioRoutingTest`, `media.NavigationAudioFocusTest`, `media.VoyahAudioFocusTest`, `media.AudioFocusAutoYieldTest`, `media.LegacyAudioFallbackTest`, `airplay.CarPlayAudioStreamIsolationTest`; Native `CarPlayAudioPolicyTest`; app `carplay.CarPlayAudioValuesTest`; common `VoyahAudioDefaultsTest` |
-| Скорость музыки и повторное заполнение | shared `media.MediaClockTrimTest`, `media.MediaClockTrimRecoveryTest`, `media.AudioClockTrimTest`, `media.MediaPacketLagGuardTest`, `media.AudioRebufferCapacityTest`, `media.MediaAudioBufferTest`, `media.MusicCatchUpTest`: порции 300/500/1000 мс, дрейф ±0.76%, паузы и decoder backlog, restart из AudioRenderer, растущий запас и отсутствие блокировки полного paused AudioTrack, calm/backoff и PCM skip/fade. |
+| Скорость музыки и повторное заполнение | shared `media.MediaClockTrimTest`, `media.MediaClockTrimRecoveryTest`, `media.AudioClockTrimTest`, `media.MediaPacketLagGuardTest`, `media.AudioRebufferCapacityTest`, `media.MediaAudioBufferTest`, `media.MusicPlaybackControlTest`: порции 300/500/1000 мс, дрейф ±0.05/0.15/0.25/0.76% в 15-минутной модели, независимое обучение при tempo recovery, отсутствие штатного PCM skip, пределы темпа/очереди и плавный спад резерва; отказ PlaybackParams/clock API и отсутствие второго контроллера. |
+| Повторная доставка музыки | shared `airplay.AudioPacketRecoveryTest`, `airplay.AudioStreamRecoveryTest`: порядок/wrap/dedup, срок восстановления и предел retries, большой radio gap, AEAD и timestamp ответа, endpoint и retired owner; реальные loopback UDP-сокеты с зашифрованным resend. `BufferedAudioStreamTest`/`BufferedAudioSessionTest`: выбранная стартовая задержка, credit по renderer, pause/flush/anchor и изоляция владельца. |
 
 Пути тестов: common — `RestoreMode/diplay/common/src/test/java/com/shilapi/xcertplay/`,
 shared — `RestoreMode/diplay/shared/src/test/java/com/shilapi/xcertplay/`,

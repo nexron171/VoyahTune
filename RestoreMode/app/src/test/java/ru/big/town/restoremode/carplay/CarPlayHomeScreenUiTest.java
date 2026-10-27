@@ -185,6 +185,10 @@ public class CarPlayHomeScreenUiTest {
             assertTrue(position(exit)[1] >= position(tiles.get(0))[1] + tiles.get(0).getHeight());
             exit.performClick();
             assertTrue(activity.isFinishing());
+            Intent home = shadowOf(activity).getNextStartedActivity();
+            assertEquals(Intent.ACTION_MAIN, home.getAction());
+            assertTrue(home.hasCategory(Intent.CATEGORY_HOME));
+            assertNull(home.getComponent());
             verify(actions, never()).disconnect();
             assertTrue(new CarPlayWindowPolicy().darkHostAppearance());
             assertEquals(R.drawable.carplay_home_logo, new CarPlayWindowPolicy().connectionIcon());

@@ -21,6 +21,17 @@ object CarPlaySettingsAccess {
     }
 
     @JvmStatic
+    fun ultra(context: Context): Boolean =
+        context.getSharedPreferences(AVAILABILITY_PREFERENCES, Context.MODE_PRIVATE)
+            .getBoolean("ultra", true)
+
+    @JvmStatic
+    fun setUltra(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(AVAILABILITY_PREFERENCES, Context.MODE_PRIVATE)
+            .edit().putBoolean("ultra", enabled).apply()
+    }
+
+    @JvmStatic
     fun fullscreen(context: Context): Boolean =
         context.getSharedPreferences(AVAILABILITY_PREFERENCES, Context.MODE_PRIVATE)
             .getBoolean("fullscreen", false)
@@ -70,5 +81,5 @@ object CarPlaySettingsAccess {
     }
 
     @JvmStatic
-    fun disconnect(completion: Runnable) = CarPlayBackgroundSession.stop { completion.run() }
+    fun disconnect(completion: Runnable) = CarPlaySessionHosts.disconnect { completion.run() }
 }

@@ -9,6 +9,7 @@ import org.junit.Test
 class VehicleClimateDockTest {
     private val config = AirPlayConfig(
         deviceName = "test",
+        vehicleStateProtocol = true,
         deviceId = "02:00:00:00:00:02",
         btMac = "02:00:00:00:00:02",
         sourceVersion = "366.0",
