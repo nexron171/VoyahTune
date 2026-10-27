@@ -41,6 +41,57 @@
                 android:textSize="18sp" />
         </LinearLayout>
         <LinearLayout
+            style="@style/SettingsCard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/carplay_theme_title"
+                android:textColor="@color/settings_text"
+                android:textSize="22sp" />
+            <RadioGroup
+                android:id="@+id/carPlayDockTheme"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:orientation="vertical"
+                android:saveEnabled="false">
+                <RadioButton
+                    android:id="@+id/carPlayDockClassic"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:saveEnabled="false"
+                    android:text="@string/carplay_theme_classic"
+                    android:textColor="@color/settings_text"
+                    android:textSize="20sp" />
+                <RadioButton
+                    android:id="@+id/carPlayDockBottom"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:saveEnabled="false"
+                    android:text="@string/carplay_theme_bottom"
+                    android:textColor="@color/settings_text"
+                    android:textSize="20sp" />
+                <RadioButton
+                    android:id="@+id/carPlayDockAstonMartin"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:saveEnabled="false"
+                    android:text="@string/carplay_theme_aston_martin"
+                    android:textColor="@color/settings_text"
+                    android:textSize="20sp" />
+            </RadioGroup>
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="@string/carplay_theme_description"
+                android:textColor="@color/settings_muted"
+                android:textSize="18sp" />
+        </LinearLayout>
+        <LinearLayout
             android:id="@+id/carPlayFullscreenCard"
             style="@style/SettingsCard"
             android:layout_width="match_parent"
@@ -60,6 +111,23 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
                 android:text="@string/carplay_fullscreen_description"
+                android:textColor="@color/settings_muted"
+                android:textSize="18sp" />
+            <Switch
+                android:id="@+id/carPlayHideSystemBars"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:minHeight="48dp"
+                android:saveEnabled="false"
+                android:text="@string/carplay_hide_system_bars"
+                android:textColor="@color/settings_text"
+                android:textSize="22sp" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="@string/carplay_hide_system_bars_description"
                 android:textColor="@color/settings_muted"
                 android:textSize="18sp" />
         </LinearLayout>

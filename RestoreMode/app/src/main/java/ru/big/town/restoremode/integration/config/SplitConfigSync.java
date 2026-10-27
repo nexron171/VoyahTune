@@ -117,6 +117,13 @@ public final class SplitConfigSync {
         i.putExtra(
                 ru.big.town.common.CarPlayTarget.FULLSCREEN,
                 com.shilapi.xcertplay.CarPlaySettingsAccess.fullscreen(context));
+        i.putExtra(
+                ru.big.town.common.CarPlayTarget.HIDE_SYSTEM_BARS,
+                com.shilapi.xcertplay.CarPlaySettingsAccess.hideSystemBars(context));
+        i.putExtra(
+                ru.big.town.common.CarPlayTarget.ASTON_MARTIN,
+                com.shilapi.xcertplay.CarPlaySettingsAccess.dock(context)
+                        == com.shilapi.xcertplay.CarPlayDock.DUAL_SIDES);
         i.putExtra("dockHomeShortVoyahTune", prefs.getBoolean("dockHomeShortVoyahTune", false));
         i.putExtra(
                 "dockAllAppsShortVoyahTune", prefs.getBoolean("dockAllAppsShortVoyahTune", false));

@@ -198,6 +198,21 @@ VoyahLauncherAdapters["shared-navigation"] = function (adapter) {
         return !!pkg && cache.fullscreen[pkg] === true;
     }
 
+    function carPlayDockVisible(pkg, act) {
+        act = cleanJavaString(act);
+        if (act.charAt(0) === ".") act = pkg + act;
+        if (pkg !== OUR_PKG || act !== "ru.big.town.anative.CarPlayFullscreenActivity") return null;
+        try {
+            return Number(SettingsGlobal.getInt(ctx().getContentResolver(),
+                "voyahtune_carplay_hide_system_bars", 0)) !== 1;
+        } catch (error) { return true; }
+    }
+
+    function hidesPhysicalDock(foreground) {
+        var carPlay = carPlayDockVisible(foreground.pkg, foreground.act);
+        return carPlay === null ? isUserFullscreen(foreground.pkg) : !carPlay;
+    }
+
     function ourInsetActivity(act) {
         act = cleanJavaString(act);
         return act.indexOf("SplitHostActivity") >= 0 || act.indexOf("restoremode.MainActivity") >= 0 ||
@@ -209,6 +224,8 @@ VoyahLauncherAdapters["shared-navigation"] = function (adapter) {
     function dockKept(pkg, act) {
         pkg = cleanJavaString(pkg);
         act = cleanJavaString(act);
+        var carPlay = carPlayDockVisible(pkg, act);
+        if (carPlay !== null) return carPlay;
         if (dockPinDisabled())
             return false;
         if (!pkg)
@@ -231,6 +248,8 @@ VoyahLauncherAdapters["shared-navigation"] = function (adapter) {
     function desiredDockVisible(screenId, pkg, act) {
         pkg = cleanJavaString(pkg);
         act = cleanJavaString(act);
+        var carPlay = carPlayDockVisible(pkg, act);
+        if (carPlay !== null) return carPlay;
         if (!pkg)
             return null;
         if (isUserFullscreen(pkg))
@@ -655,7 +674,7 @@ VoyahLauncherAdapters["shared-navigation"] = function (adapter) {
         if (screenOf(bar) !== 0)
             return;  // passenger bar remains completely OEM-controlled
         var views = dockViews(bar);
-        if (isUserFullscreen(topActivityForScreen(0).pkg)) {
+        if (hidesPhysicalDock(topActivityForScreen(0))) {
             // Boot/reload icon passes must never expose children of the detached fullscreen dock.
             setDockViewVisibility(views.up, 8, "fullscreen screenUp");
             setDockViewVisibility(views.down, 8, "fullscreen screenDown");
@@ -1504,7 +1523,7 @@ VoyahLauncherAdapters["shared-navigation"] = function (adapter) {
         try {
             if (screenOf(this) !== 0)
                 return;
-            if (isUserFullscreen(topActivityForScreen(0).pkg)) {
+            if (hidesPhysicalDock(topActivityForScreen(0))) {
                 forceHideDockBar(this, "screen-lift driver");
                 return;
             }
@@ -1591,7 +1610,7 @@ VoyahLauncherAdapters["shared-navigation"] = function (adapter) {
                 (moving ? " moving=" + moving.pkg + "/" + Math.ceil(moving.remaining) + "ms" : "") +
                 (pending ? " pending=" + pending.pkg + "/" + Math.ceil(pending.remaining) + "ms" : ""));
             // Fullscreen policy wins over stale transfer/launch guards: hide and detach the root now.
-            if (isUserFullscreen(fg.pkg)) {
+            if (hidesPhysicalDock(fg)) {
                 if (forceHideDockBar(this, "dismiss fullscreen display=" + sid))
                     return;
                 return origDismiss.call(this);
@@ -1619,7 +1638,10 @@ VoyahLauncherAdapters["shared-navigation"] = function (adapter) {
             var foreground = topActivityForScreen(displayId);
             // With no live helper answer, the request is fresher than updateSelectedApp cache.
             var decisionPkg = foreground.live ? foreground.pkg : (cleanJavaString(pkgArg) || foreground.pkg);
-            if (!isUserFullscreen(decisionPkg))
+            var decisionAct = foreground.live ? foreground.act : cleanJavaString(actArg);
+            var carPlay = carPlayDockVisible(decisionPkg, decisionAct);
+            if (carPlay === true) return original.call(this, pkgArg, actArg, true);
+            if (!hidesPhysicalDock({pkg: decisionPkg, act: decisionAct}))
                 return original.call(this, pkgArg, actArg, visible);
             fgByScreen[displayId].pkg = decisionPkg;
             if (!foreground.live)

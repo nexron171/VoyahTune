@@ -19,7 +19,9 @@ function harness() {
     let now = 1000;
     const revealUntil = [0, 0];
     const hiddenForCarPlay = [-1, -1];
+    let hideSystemBars = true;
     const controller = context.createCarPlayStatusBarController({
+        hideSystemBars: () => hideSystemBars,
         revealRemaining(displayId) { return Math.max(0, revealUntil[displayId] - now); },
         top(displayId) {
             if (top[displayId] instanceof Error) throw top[displayId];
@@ -40,6 +42,7 @@ function harness() {
     });
     return {
         top, visible, hiddenForCarPlay, timers, errors, calls, fail, controller, revealUntil,
+        setHideSystemBars(value) { hideSystemBars = value; },
         reveal(displayId) {
             revealUntil[displayId] = now + 10000;
             controller.reconcile();
@@ -52,6 +55,44 @@ function harness() {
         },
     };
 }
+
+test('fullscreen alone keeps the status bar visible and disabling hiding restores it immediately', () => {
+    const app = harness();
+    app.setHideSystemBars(false);
+    app.top[0] = carPlay;
+    app.controller.reconcile();
+    app.controller.request(0, false);
+    assert.equal(app.visible[0], true);
+    app.setHideSystemBars(true);
+    app.controller.reconcile();
+    assert.equal(app.visible[0], false);
+    app.setHideSystemBars(false);
+    app.controller.reconcile();
+    assert.equal(app.visible[0], true);
+    assert.equal(app.hiddenForCarPlay[0], 0);
+});
+
+test('OEM cabin PM2.5 publication preserves zero, clears unknown values and deduplicates updates', () => {
+    let saved = null;
+    let writes = 0;
+    let boot = 12;
+    const io = {
+        bootCount: () => boot,
+        read: () => saved,
+        write(value) { saved = value; writes++; },
+    };
+    context.publishCarPlayAirQuality(io, 0);
+    assert.equal(saved, '12:0');
+    context.publishCarPlayAirQuality(io, 0);
+    assert.equal(writes, 1);
+    context.publishCarPlayAirQuality(io, 27);
+    assert.equal(saved, '12:27');
+    context.publishCarPlayAirQuality(io, -1);
+    assert.equal(saved, '12:-1');
+    boot++;
+    context.publishCarPlayAirQuality(io, 27);
+    assert.equal(saved, '13:27');
+});
 
 test('status reports are independent of the dock and follow successful OEM changes', () => {
     const app = harness();

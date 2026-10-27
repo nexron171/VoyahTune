@@ -17,6 +17,11 @@ public final class CarPlayTarget {
     public static final String ENABLED = "carPlayEnabled";
     public static final String FULLSCREEN = "carPlayFullscreen";
     public static final String FULLSCREEN_SETTING = "voyahtune_carplay_fullscreen";
+    public static final String HIDE_SYSTEM_BARS = "carPlayHideSystemBars";
+    public static final String HIDE_SYSTEM_BARS_SETTING = "voyahtune_carplay_hide_system_bars";
+    public static final String ASTON_MARTIN = "carPlayAstonMartin";
+    public static final String ASTON_MARTIN_SETTING = "voyahtune_carplay_aston_martin";
+    public static final String AIR_QUALITY_SETTING = "voyahtune_carplay_air_quality";
     public static final String EXTRA_HOST_DISPLAY_ID = "carPlayHostDisplayId";
     public static final String EXTRA_PROJECTION_DISPLAY_ID = "carPlayProjectionDisplayId";
     public static final String ACTION_HOST_DISPLAY_CHANGED =
@@ -34,7 +39,8 @@ public final class CarPlayTarget {
     public static boolean isEnabled(Context context) {
         try {
             return context.getPackageManager()
-                    .getActivityInfo(new ComponentName(PACKAGE, LAUNCHER), 0).enabled;
+                    .getActivityInfo(new ComponentName(PACKAGE, LAUNCHER), 0)
+                    .enabled;
         } catch (PackageManager.NameNotFoundException unavailable) {
             return false;
         }

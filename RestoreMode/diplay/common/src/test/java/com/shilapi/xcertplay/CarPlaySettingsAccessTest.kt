@@ -17,13 +17,15 @@ import org.robolectric.util.ReflectionHelpers
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30], manifest = Config.NONE)
 class CarPlaySettingsAccessTest {
-    private val app get() = RuntimeEnvironment.getApplication()
+    private val app
+        get() = RuntimeEnvironment.getApplication()
 
     @Before
     fun prepare() {
         app.getSharedPreferences("diplay", 0).edit().clear().commit()
         app.getSharedPreferences("xcertplay_airplay", 0).edit().clear().commit()
         app.getSharedPreferences("voyah_carplay_availability", 0).edit().clear().commit()
+        app.getSharedPreferences("diplay_carplay_dock", 0).edit().clear().commit()
         CarPlayBackgroundSession.clear()
     }
 
@@ -81,14 +83,79 @@ class CarPlaySettingsAccessTest {
     }
 
     @Test
+    fun systemBarsRequireFullscreenAndNeverRestoreAHiddenPreferenceAfterItIsDisabled() {
+        assertFalse(CarPlaySettingsAccess.hideSystemBars(app))
+        CarPlaySettingsAccess.setHideSystemBars(app, true)
+        assertFalse(CarPlaySettingsAccess.hideSystemBars(app))
+        CarPlaySettingsAccess.setFullscreen(app, true)
+        assertFalse(CarPlaySettingsAccess.hideSystemBars(app))
+        CarPlaySettingsAccess.setHideSystemBars(app, true)
+        assertTrue(CarPlaySettingsAccess.hideSystemBars(app))
+        CarPlaySettingsAccess.setFullscreen(app, false)
+        CarPlaySettingsAccess.setFullscreen(app, true)
+        assertFalse(CarPlaySettingsAccess.hideSystemBars(app))
+    }
+
+    @Test
+    fun astonMartinEnablesFullscreenLocksSystemBarsAndRequiresUltra() {
+        CarPlaySettingsAccess.setDock(app, CarPlayDock.BOTTOM)
+        assertEquals(CarPlayDock.BOTTOM, CarPlayDock.load(app))
+        CarPlaySettingsAccess.setDock(app, CarPlayDock.DUAL_SIDES)
+        assertTrue(CarPlaySettingsAccess.fullscreen(app))
+        assertTrue(CarPlaySettingsAccess.hideSystemBars(app))
+        assertEquals(CarPlayDock.DUAL_SIDES, CarPlayDock.load(app))
+        CarPlaySettingsAccess.setHideSystemBars(app, false)
+        assertTrue(CarPlaySettingsAccess.hideSystemBars(app))
+        CarPlaySettingsAccess.setFullscreen(app, false)
+        assertEquals(CarPlayDock.DRIVER_SIDE, CarPlayDock.load(app))
+        assertFalse(CarPlaySettingsAccess.hideSystemBars(app))
+        CarPlaySettingsAccess.setDock(app, CarPlayDock.DUAL_SIDES)
+        CarPlaySettingsAccess.setUltra(app, false)
+        assertEquals(CarPlayDock.DRIVER_SIDE, CarPlayDock.load(app))
+        CarPlaySettingsAccess.setDock(app, CarPlayDock.DUAL_SIDES)
+        assertEquals(CarPlayDock.DRIVER_SIDE, CarPlayDock.load(app))
+        CarPlaySettingsAccess.setUltra(app, true)
+        assertEquals(CarPlayDock.DRIVER_SIDE, CarPlayDock.load(app))
+    }
+
+    @Test
+    fun anInactiveLegacyThemeCannotReappearWhenFullscreenOrUltraIsEnabled() {
+        app.getSharedPreferences("diplay_carplay_dock", 0)
+            .edit()
+            .putString("dock", "DUAL_SIDES")
+            .commit()
+        assertEquals(CarPlayDock.DRIVER_SIDE, CarPlaySettingsAccess.dock(app))
+        CarPlaySettingsAccess.setFullscreen(app, true)
+        assertEquals(CarPlayDock.DRIVER_SIDE, CarPlaySettingsAccess.dock(app))
+        assertFalse(CarPlaySettingsAccess.hideSystemBars(app))
+        CarPlaySettingsAccess.setUltra(app, false)
+        app.getSharedPreferences("diplay_carplay_dock", 0)
+            .edit()
+            .putString("dock", "DUAL_SIDES")
+            .commit()
+        CarPlaySettingsAccess.setUltra(app, false)
+        CarPlaySettingsAccess.setUltra(app, true)
+        assertEquals(CarPlayDock.DRIVER_SIDE, CarPlaySettingsAccess.dock(app))
+    }
+
+    @Test
     fun statusTracksSessionAndDisconnectWaitsForActualStop() {
-        assertEquals(CarPlaySettingsAccess.ConnectionState.DISCONNECTED, CarPlaySettingsAccess.connectionState())
+        assertEquals(
+            CarPlaySettingsAccess.ConnectionState.DISCONNECTED,
+            CarPlaySettingsAccess.connectionState(),
+        )
         var finishStop: (() -> Unit)? = null
         val stop: ((() -> Unit) -> Unit) = { completion -> finishStop = completion }
         ReflectionHelpers.setField(CarPlayBackgroundSession, "stopAction", stop)
-        assertEquals(CarPlaySettingsAccess.ConnectionState.CONNECTING, CarPlaySettingsAccess.connectionState())
+        assertEquals(
+            CarPlaySettingsAccess.ConnectionState.CONNECTING,
+            CarPlaySettingsAccess.connectionState(),
+        )
         CarPlayBackgroundSession.active = true
-        assertEquals(CarPlaySettingsAccess.ConnectionState.CONNECTED, CarPlaySettingsAccess.connectionState())
+        assertEquals(
+            CarPlaySettingsAccess.ConnectionState.CONNECTED,
+            CarPlaySettingsAccess.connectionState(),
+        )
         var completed = false
         CarPlaySettingsAccess.disconnect { completed = true }
         assertFalse(completed)
@@ -96,6 +163,9 @@ class CarPlaySettingsAccessTest {
         finishStop!!.invoke()
         shadowOf(Looper.getMainLooper()).idle()
         assertTrue(completed)
-        assertEquals(CarPlaySettingsAccess.ConnectionState.DISCONNECTED, CarPlaySettingsAccess.connectionState())
+        assertEquals(
+            CarPlaySettingsAccess.ConnectionState.DISCONNECTED,
+            CarPlaySettingsAccess.connectionState(),
+        )
     }
 }

@@ -2,7 +2,14 @@
 <resources>
     <string name="carplay_enabled">Включить CarPlay</string>
     <string name="carplay_fullscreen">Полноэкранный CarPlay</string>
-    <string name="carplay_fullscreen_description">Скрывать штатный док и статус-бар. Изменение сразу применяется и отключает текущую сессию CarPlay.</string>
+    <string name="carplay_fullscreen_description">Развернуть CarPlay на всю высоту экрана. Изменение отключает текущую сессию CarPlay.</string>
+    <string name="carplay_theme_title">Тема CarPlay</string>
+    <string name="carplay_theme_classic">Классическая — док слева</string>
+    <string name="carplay_theme_bottom">Док снизу</string>
+    <string name="carplay_theme_aston_martin">Aston Martin</string>
+    <string name="carplay_theme_description">Aston Martin доступна с CarPlay Ultra и включает полный экран со скрытием штатных панелей. Смена темы отключает текущую сессию CarPlay.</string>
+    <string name="carplay_hide_system_bars">Скрывать штатный док и статус-бар</string>
+    <string name="carplay_hide_system_bars_description">Доступно в полноэкранном режиме. Для Aston Martin включено всегда. Изменение отключает текущую сессию CarPlay.</string>
     <string name="carplay_ui_scale_reconnect">Масштаб применится при следующем переподключении CarPlay.</string>
     <string name="carplay_ui_scale_title">Масштаб интерфейса</string>
     <string name="carplay_ui_scale_value">Масштаб интерфейса: %1$d%%</string>
@@ -54,5 +61,5 @@
     <string name="carplay_widget_auto_start">Автоматический запуск</string>
     <string name="carplay_duck_music">Приглушать музыку при объявлении маневра</string>
     <string name="carplay_ultra">CarPlay Ultra</string>
-    <string name="carplay_ultra_description">Климат, автомобиль и радио в CarPlay с оформлением Ultra. Изменение применяется при следующем подключении iPhone.</string>
+    <string name="carplay_ultra_description">Климат, автомобиль и радио в CarPlay. Открывает выбор темы Aston Martin. Изменение отключает текущую сессию CarPlay.</string>
 </resources>

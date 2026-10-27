@@ -190,16 +190,29 @@ VoyahLauncherAdapters["split-navigation"] = function (adapter) {
         return !!pkg && cache.fullscreen[pkg] === true;
     }
 
-    function isCarPlayFullscreen(foreground) {
+    function isCarPlayHost(foreground) {
         if (!foreground || !foreground.live || foreground.pkg !== OUR_PKG) return false;
         var activity = cleanJavaString(foreground.act);
         if (activity.charAt(0) === ".") activity = foreground.pkg + activity;
         return activity === CARPLAY_FULLSCREEN_HOST;
     }
 
+    function isCarPlayFullscreen(foreground) {
+        return isCarPlayHost(foreground) && carPlayHidesSystemBars();
+    }
+
+    function carPlayHidesSystemBars() {
+        try {
+            return Number(SettingsGlobal.getInt(ctx().getContentResolver(),
+                "voyahtune_carplay_hide_system_bars", 0)) === 1;
+        } catch (error) { return false; }
+    }
+
     function hidesPhysicalDock(foreground, displayId) {
         if (restoringCarPlayDock[displayId]) return false;
-        if (isCarPlayFullscreen(foreground)) return carPlayChromeRevealRemaining(displayId) === 0;
+        if (isCarPlayHost(foreground)) {
+            return isCarPlayFullscreen(foreground) && carPlayChromeRevealRemaining(displayId) === 0;
+        }
         return isUserFullscreen(foreground.pkg);
     }
 
@@ -252,6 +265,7 @@ VoyahLauncherAdapters["split-navigation"] = function (adapter) {
     function dockKept(pkg, act) {
         pkg = cleanJavaString(pkg);
         act = cleanJavaString(act);
+        if (pkg === OUR_PKG && act === CARPLAY_FULLSCREEN_HOST) return !carPlayHidesSystemBars();
         if (cfg("dockpin") === "0" || cfg("freeform") === "0") return false;
         if (!pkg) return false;
         if (isUserFullscreen(pkg)) return false;
@@ -1783,7 +1797,8 @@ VoyahLauncherAdapters["split-navigation"] = function (adapter) {
                         ? foreground.pkg : (requestedPkg || foreground.pkg);
                     var decisionActivity = foreground.live
                         ? foreground.act : (cleanJavaString(actArg) || foreground.act);
-                    if (isCarPlayFullscreen(foreground) && carPlayChromeRevealRemaining(displayId) > 0) {
+                    if (isCarPlayHost(foreground) && (!carPlayHidesSystemBars()
+                        || carPlayChromeRevealRemaining(displayId) > 0)) {
                         var shown = original.call(this, pkgArg, actArg, true);
                         reportCarPlayDockHidden(displayId, false);
                         return shown;

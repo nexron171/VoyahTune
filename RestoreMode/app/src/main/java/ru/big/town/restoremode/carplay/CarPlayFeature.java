@@ -11,6 +11,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 
+import com.shilapi.xcertplay.CarPlayDock;
 import com.shilapi.xcertplay.CarPlaySettingsAccess;
 import com.shilapi.xcertplay.DiPlaySessionService;
 
@@ -51,6 +52,33 @@ public final class CarPlayFeature {
             return;
         }
         CarPlaySettingsAccess.setFullscreen(application, enabled);
+        publishPresentation(application);
+    }
+
+    public static void setDock(Context context, CarPlayDock dock) {
+        Context application = context.getApplicationContext();
+        if (CarPlaySettingsAccess.dock(application) == dock) return;
+        CarPlaySettingsAccess.setDock(application, dock);
+        publishPresentation(application);
+    }
+
+    public static void setHideSystemBars(Context context, boolean enabled) {
+        Context application = context.getApplicationContext();
+        boolean previous = CarPlaySettingsAccess.hideSystemBars(application);
+        CarPlaySettingsAccess.setHideSystemBars(application, enabled);
+        if (previous != CarPlaySettingsAccess.hideSystemBars(application)) {
+            publishPresentation(application);
+        }
+    }
+
+    public static void setUltra(Context context, boolean enabled) {
+        Context application = context.getApplicationContext();
+        if (CarPlaySettingsAccess.ultra(application) == enabled) return;
+        CarPlaySettingsAccess.setUltra(application, enabled);
+        publishPresentation(application);
+    }
+
+    private static void publishPresentation(Context application) {
         // Window configuration is published without waiting for transport teardown.
         CarPlaySettingsAccess.disconnect(() -> {});
         SplitConfigSync.pushDock(

@@ -61,6 +61,7 @@ public class SetModesConfigReceiver extends BroadcastReceiver {
                         context.getContentResolver(), "voyahtune_" + key, style.value);
             }
 
+            boolean carPlayPresentationChanged = false;
             if (intent.hasExtra(ru.big.town.common.CarPlayTarget.FULLSCREEN)) {
                 int fullscreen =
                         intent.getBooleanExtra(ru.big.town.common.CarPlayTarget.FULLSCREEN, false)
@@ -75,10 +76,21 @@ public class SetModesConfigReceiver extends BroadcastReceiver {
                         context.getContentResolver(),
                         ru.big.town.common.CarPlayTarget.FULLSCREEN_SETTING,
                         fullscreen);
-                if (previousFullscreen != fullscreen) {
-                    SplitHostActivity.refreshCarPlayWindowMode();
-                }
+                carPlayPresentationChanged = previousFullscreen != fullscreen;
             }
+            carPlayPresentationChanged |=
+                    mirrorCarPlayOption(
+                            context,
+                            intent,
+                            ru.big.town.common.CarPlayTarget.HIDE_SYSTEM_BARS,
+                            ru.big.town.common.CarPlayTarget.HIDE_SYSTEM_BARS_SETTING);
+            carPlayPresentationChanged |=
+                    mirrorCarPlayOption(
+                            context,
+                            intent,
+                            ru.big.town.common.CarPlayTarget.ASTON_MARTIN,
+                            ru.big.town.common.CarPlayTarget.ASTON_MARTIN_SETTING);
+            if (carPlayPresentationChanged) SplitHostActivity.refreshCarPlayWindowMode();
             for (String key :
                     new String[] {"dockHomeShortVoyahTune", "dockAllAppsShortVoyahTune"}) {
                 Settings.Global.putString(
@@ -122,6 +134,23 @@ public class SetModesConfigReceiver extends BroadcastReceiver {
                 Log.e(TAG, "Cluster navigation setting was not saved");
             }
         }
+    }
+
+    private static boolean mirrorCarPlayOption(
+            Context context, Intent intent, String extra, String setting) {
+        if (!intent.hasExtra(extra)) return false;
+        int value =
+                intent.getBooleanExtra(extra, false)
+                                && Settings.Global.getInt(
+                                                context.getContentResolver(),
+                                                ru.big.town.common.CarPlayTarget.FULLSCREEN_SETTING,
+                                                0)
+                                        == 1
+                        ? 1
+                        : 0;
+        int previous = Settings.Global.getInt(context.getContentResolver(), setting, 0);
+        Settings.Global.putInt(context.getContentResolver(), setting, value);
+        return previous != value;
     }
 
     private static void applyKeyboardMode(Context context, String requestedMode) {
