@@ -10,7 +10,8 @@ public final class AndroidCallerLifecycleTest {
     public static void main(String[] arguments) throws Throwable {
         NativeTestBootstrap.load(arguments[0]);
         verify();
-        System.out.println("AndroidCallerLifecycleTest: index release, pending coverage and rebuilding passed");
+        System.out.println(
+            "AndroidCallerLifecycleTest: index release, pending coverage and rebuilding passed");
     }
 
     static void verify() throws Throwable {
@@ -42,16 +43,18 @@ public final class AndroidCallerLifecycleTest {
                 return HookBridge.unhook(target);
             }
         });
+        // Enter a fresh caller frame; the warmed test frame itself may already contain inlined code.
+        Method caller = DexCallerFixtures.class.getDeclaredMethod("outer", String.class);
         try {
             for (String name : new String[] {"leaf", "middle"}) {
                 Method target = DexCallerFixtures.class.getDeclaredMethod(name, String.class);
-                try (AutoCloseable hook =
-                         hooks.install("caller-lifecycle", target, invocation -> invocation.proceed() + "hook")) {
+                try (AutoCloseable hook = hooks.install(
+                         "caller-lifecycle", target, invocation -> invocation.proceed() + "hook")) {
                     for (int index = 0; index < 1000; index++) {
-                        require("check!hook", DexCallerFixtures.outer("check"));
+                        require("check!hook", (String) caller.invoke(null, "check"));
                     }
                 }
-                require("original!", DexCallerFixtures.outer("original"));
+                require("original!", (String) caller.invoke(null, "original"));
             }
         } finally {
             hooks.close();

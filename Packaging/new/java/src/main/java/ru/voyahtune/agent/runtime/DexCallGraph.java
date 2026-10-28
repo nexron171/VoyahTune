@@ -72,6 +72,10 @@ public final class DexCallGraph {
     }
 
     public List<Reference> callers(Reference target) {
+        return callers(target, Set.of());
+    }
+
+    public List<Reference> callers(Reference target, Set<String> covered) {
         java.util.BitSet visited = new java.util.BitSet(methods.size());
         java.util.BitSet selected = new java.util.BitSet(methods.size());
         ArrayDeque<Reference> remaining = new ArrayDeque<>();
@@ -79,18 +83,22 @@ public final class DexCallGraph {
         int targetId = methods.find(target);
         while (!remaining.isEmpty()) {
             Reference method = remaining.removeFirst();
+            if (covered.contains(method.key()))
+                continue;
             int declaration = methods.find(method);
             if (declaration >= 0 && nonInlineable.get(declaration) && !inlineable.get(declaration))
                 continue;
             boolean constructor = method.name.startsWith("<");
-            boolean direct = declaration >= 0 && directMethods.get(declaration) && !virtualMethods.get(declaration);
-            Set<String> owners =
-                constructor || direct ? new LinkedHashSet<>(Set.of(method.owner)) : hierarchy(method.owner, parents);
+            boolean direct =
+                declaration >= 0 && directMethods.get(declaration) && !virtualMethods.get(declaration);
+            Set<String> owners = constructor || direct ? new LinkedHashSet<>(Set.of(method.owner))
+                                                       : hierarchy(method.owner, parents);
             if (!constructor && (!direct || staticMethods.get(declaration)))
                 owners.addAll(hierarchy(method.owner, children));
             for (String owner : owners) {
-                int id = methods.find(
-                    owner.equals(method.owner) ? method : new Reference(owner, method.name, method.descriptor));
+                int id = methods.find(owner.equals(method.owner)
+                        ? method
+                        : new Reference(owner, method.name, method.descriptor));
                 if (id < 0 || visited.get(id))
                     continue;
                 visited.set(id);
@@ -100,8 +108,11 @@ public final class DexCallGraph {
                     int caller = block[position % BLOCK_SIZE * 2];
                     edge = block[position % BLOCK_SIZE * 2 + 1];
                     if ((targetId < 0 || caller != targetId) && !selected.get(caller)) {
+                        Reference reference = methods.reference(caller);
+                        if (covered.contains(reference.key()))
+                            continue;
                         selected.set(caller);
-                        remaining.add(methods.reference(caller));
+                        remaining.add(reference);
                     }
                 }
             }
@@ -186,8 +197,8 @@ public final class DexCallGraph {
             offset = u4(92);
             for (int index = 0; index < methods.length; index++) {
                 int entry = offset + index * 8;
-                methods[index] = graph.method(
-                    new Reference(at(types, u2(entry)), at(strings, u4(entry + 4)), at(prototypes, u2(entry + 2))));
+                methods[index] = graph.method(new Reference(
+                    at(types, u2(entry)), at(strings, u4(entry + 4)), at(prototypes, u2(entry + 2))));
             }
             int classes = count(96);
             offset = u4(100);
@@ -379,14 +390,14 @@ public final class DexCallGraph {
         private static int[] widths() {
             int[] width = new int[256];
             Arrays.fill(width, 1);
-            for (int opcode : new int[] {
-                     0x02, 0x05, 0x08, 0x13, 0x15, 0x16, 0x19, 0x1a, 0x1c, 0x1f, 0x20, 0x22, 0x23, 0x29, 0xfe, 0xff})
+            for (int opcode : new int[] {0x02, 0x05, 0x08, 0x13, 0x15, 0x16, 0x19, 0x1a, 0x1c, 0x1f, 0x20,
+                     0x22, 0x23, 0x29, 0xfe, 0xff})
                 width[opcode] = 2;
             for (int[] interval : new int[][] {{0x2d, 0x3d}, {0x44, 0x6d}, {0x90, 0xaf}, {0xd0, 0xe2}})
                 for (int opcode = interval[0]; opcode <= interval[1]; opcode++)
                     width[opcode] = 2;
-            for (int opcode :
-                new int[] {0x03, 0x06, 0x09, 0x14, 0x17, 0x1b, 0x24, 0x25, 0x26, 0x2a, 0x2b, 0x2c, 0xfc, 0xfd})
+            for (int opcode : new int[] {
+                     0x03, 0x06, 0x09, 0x14, 0x17, 0x1b, 0x24, 0x25, 0x26, 0x2a, 0x2b, 0x2c, 0xfc, 0xfd})
                 width[opcode] = 3;
             for (int opcode = 0x6e; opcode <= 0x78; opcode++)
                 if (opcode != 0x73)

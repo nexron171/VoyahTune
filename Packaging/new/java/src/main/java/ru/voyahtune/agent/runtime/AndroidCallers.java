@@ -9,8 +9,10 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -25,23 +27,18 @@ public final class AndroidCallers {
     private DexCallGraph graph = new DexCallGraph();
     private final Set<ClassLoader> loaders = Collections.newSetFromMap(new IdentityHashMap<>());
     private final Set<String> files = new LinkedHashSet<>();
-    private final Set<Executable> deoptimized = new LinkedHashSet<>();
+    private final Map<Class<?>, Set<Integer>> deoptimized = new IdentityHashMap<>();
     private final Set<Class<?>> deoptimizedInitializers = Collections.newSetFromMap(new IdentityHashMap<>());
-    private final Map<Executable, PreparedCallers> prepared = new HashMap<>();
+    private final Map<Executable, PreparedCallers> prepared = new IdentityHashMap<>();
+    private final Set<String> covered = new HashSet<>();
+    private long indexRevision;
 
     private static final class PreparedCallers {
         final List<Executable> methods = new ArrayList<>();
         final Set<Class<?>> initializers = Collections.newSetFromMap(new IdentityHashMap<>());
+        List<DexCallGraph.Reference> coverage = List.of();
+        long indexRevision;
     }
-    private static final class CallerClass {
-        final DexCallGraph.Reference method;
-        final Class<?> owner;
-        CallerClass(DexCallGraph.Reference method, Class<?> owner) {
-            this.method = method;
-            this.owner = owner;
-        }
-    }
-
     private final Map<String, Set<Class<?>>> resolvedClasses = new HashMap<>();
     private boolean bootRead;
 
@@ -71,33 +68,53 @@ public final class AndroidCallers {
                     source(path);
         }
         PreparedCallers result = new PreparedCallers();
-        List<CallerClass> resolved = new ArrayList<>();
-        Set<Class<?>> methodOwners = Collections.newSetFromMap(new IdentityHashMap<>());
-        Set<Class<?>> constructorOwners = Collections.newSetFromMap(new IdentityHashMap<>());
-        for (DexCallGraph.Reference caller : graph.callers(reference(target))) {
+        result.indexRevision = indexRevision;
+        result.coverage = graph.callers(reference(target), covered);
+        Map<Class<?>, List<DexCallGraph.Reference>> methodOwners = new IdentityHashMap<>();
+        Map<Class<?>, List<DexCallGraph.Reference>> constructorOwners = new IdentityHashMap<>();
+        for (DexCallGraph.Reference caller : result.coverage) {
             for (Class<?> type : resolve(caller.owner)) {
                 if (caller.name.equals("<clinit>")) {
                     if (!deoptimizedInitializers.contains(type))
                         result.initializers.add(type);
                     continue;
                 }
-                resolved.add(new CallerClass(caller, type));
-                if (caller.name.equals("<init>"))
-                    constructorOwners.add(type);
-                else
-                    methodOwners.add(type);
+                Map<Class<?>, List<DexCallGraph.Reference>> owners =
+                    caller.name.equals("<init>") ? constructorOwners : methodOwners;
+                owners.computeIfAbsent(type, ignored -> new ArrayList<>()).add(caller);
             }
         }
-        ReflectionAccess.prepareMembers(methodOwners, constructorOwners);
-        for (CallerClass caller : resolved) {
-            for (Executable candidate : members(caller.owner, caller.method.name)) {
-                if ((candidate instanceof Constructor<?> || candidate.getName().equals(caller.method.name))
-                    && matches(candidate, caller.method) && !Modifier.isAbstract(candidate.getModifiers())
-                    && !Modifier.isNative(candidate.getModifiers()) && !deoptimized.contains(candidate))
-                    result.methods.add(candidate);
-            }
-        }
+        prepareMembers(result, methodOwners, 0);
+        prepareMembers(result, constructorOwners, 2);
         prepared.put(target, result);
+    }
+
+    private void prepareMembers(
+        PreparedCallers result, Map<Class<?>, List<DexCallGraph.Reference>> owners, int kind) {
+        Class<?>[] classes = owners.keySet().toArray(new Class<?>[ 0 ]);
+        for (int offset = 0; offset < classes.length; offset += 256) {
+            Class<?>[] batch = Arrays.copyOfRange(classes, offset, Math.min(classes.length, offset + 256));
+            Object[][] groups = ReflectionAccess.declaredMembers(batch, kind);
+            for (int group = 0; group < batch.length; group++) {
+                Map<String, List<Executable>> names = new HashMap<>();
+                for (Object member : groups[group]) {
+                    Executable method = (Executable) member;
+                    if (!Modifier.isAbstract(method.getModifiers())
+                        && !Modifier.isNative(method.getModifiers())) {
+                        String name = kind == 2 ? "<init>" : method.getName();
+                        names.computeIfAbsent(name, ignored -> new ArrayList<>()).add(method);
+                    }
+                }
+                Set<Integer> previous = deoptimized.getOrDefault(batch[group], Set.of());
+                for (DexCallGraph.Reference caller : owners.get(batch[group])) {
+                    for (Executable method : names.getOrDefault(caller.name, List.of())) {
+                        int index = HookBridge.dexMethodIndex(method);
+                        if (!previous.contains(index) && graph.matchesDefinition(caller, index))
+                            result.methods.add(method);
+                    }
+                }
+            }
+        }
     }
 
     public synchronized void installed(Executable target) {
@@ -107,13 +124,34 @@ public final class AndroidCallers {
         for (Executable caller : callers.methods) {
             if (!HookBridge.deoptimize(caller))
                 throw new IllegalStateException("Compiled caller could not be invalidated: " + caller);
-            deoptimized.add(caller);
+            rememberDeoptimized(caller);
         }
         for (Class<?> owner : callers.initializers) {
             if (!HookBridge.deoptimizeClassInitializer(owner))
-                throw new IllegalStateException("Static initializer could not be invalidated: " + owner.getName());
+                throw new IllegalStateException(
+                    "Static initializer could not be invalidated: " + owner.getName());
             deoptimizedInitializers.add(owner);
         }
+        if (!Modifier.isNative(target.getModifiers())) {
+            // The original backup may itself contain inlined recursive or subsequently hooked calls.
+            if (!HookBridge.deoptimize(target))
+                throw new IllegalStateException("Hook original could not be invalidated");
+            rememberDeoptimized(target);
+        }
+        if (callers.indexRevision == indexRevision) {
+            // Every reverse path through these callers was invalidated in this index revision.
+            for (DexCallGraph.Reference caller : callers.coverage)
+                covered.add(caller.key());
+            if (!Modifier.isNative(target.getModifiers()))
+                covered.add(reference(target).key());
+        }
+    }
+
+    private void rememberDeoptimized(Executable method) {
+        int index = HookBridge.dexMethodIndex(method);
+        if (index < 0)
+            throw new IllegalStateException("Invalidated method has no DEX identity");
+        deoptimized.computeIfAbsent(method.getDeclaringClass(), ignored -> new HashSet<>()).add(index);
     }
 
     public synchronized void releaseIndex() {
@@ -121,22 +159,14 @@ public final class AndroidCallers {
         graph = new DexCallGraph();
         files.clear();
         loaders.clear();
-        resolvedClasses.clear();
+        invalidateResolution();
         bootRead = false;
     }
 
-    private boolean matches(Executable method, DexCallGraph.Reference caller) {
-        try {
-            return graph.matchesDefinition(caller, HookBridge.dexMethodIndex(method));
-        } catch (UnsatisfiedLinkError hostRuntime) {
-            return reference(method).key().equals(caller.key());
-        }
-    }
-
-    private static Executable[] members(Class<?> type, String name) {
-        if (name.equals("<init>"))
-            return ReflectionAccess.allConstructors(type);
-        return ReflectionAccess.allMethods(type);
+    private void invalidateResolution() {
+        resolvedClasses.clear();
+        covered.clear();
+        indexRevision++;
     }
 
     private Set<Class<?>> resolve(String descriptor) {
@@ -159,8 +189,9 @@ public final class AndroidCallers {
     private void inventory(ClassLoader loader, Set<ClassLoader> visited) throws Exception {
         if (loader == null || !visited.add(loader))
             return;
-        if (loaders.add(loader))
-            resolvedClasses.clear();
+        if (loaders.add(loader)) {
+            invalidateResolution();
+        }
         if (loaders.size() > 32)
             throw new IllegalStateException("Caller classloader limit exceeded");
         inventory(loader.getParent(), visited);
@@ -189,7 +220,7 @@ public final class AndroidCallers {
         String path = file.getCanonicalPath();
         if (!files.add(path))
             return;
-        resolvedClasses.clear();
+        invalidateResolution();
         if (files.size() > 128)
             throw new IllegalStateException("Caller DEX source limit exceeded");
         if (name.endsWith(".dex")) {
@@ -236,7 +267,8 @@ public final class AndroidCallers {
         StringBuilder prototype = new StringBuilder("(");
         for (Class<?> parameter : method.getParameterTypes())
             prototype.append(descriptor(parameter));
-        prototype.append(')').append(method instanceof Method ? descriptor(((Method) method).getReturnType()) : "V");
+        prototype.append(')').append(
+            method instanceof Method ? descriptor(((Method) method).getReturnType()) : "V");
         return new DexCallGraph.Reference(descriptor(method.getDeclaringClass()),
             method instanceof Constructor<?> ? "<init>" : method.getName(), prototype.toString());
     }
