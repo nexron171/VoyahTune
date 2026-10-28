@@ -30,7 +30,8 @@ import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.diagnostics.metrics.SystemMetricsReader;
 import ru.big.town.restoremode.integration.GlobalVars;
 import ru.big.town.restoremode.integration.config.SplitConfigSync;
-import ru.big.town.restoremode.integration.hooks.HookStatusContract;
+import ru.big.town.restoremode.diagnostics.runtime.SystemDiagnosticsReader;
+import ru.big.town.restoremode.diagnostics.runtime.SystemDiagnosticsView;
 import ru.big.town.restoremode.settings.core.SettingsSection;
 import ru.big.town.restoremode.settings.core.SettingsSectionFragment;
 import ru.big.town.restoremode.settings.ui.controls.SettingsControls;
@@ -53,7 +54,9 @@ public final class OtherSettingsFragment extends SettingsSectionFragment {
 
     private static final long SYSTEM_METRICS_INTERVAL_MS = SystemMetricsReader.INTERVAL_MS;
 
-    private TextView textRamStatus, textCpuStatus, textHookStatus;
+    private TextView textRamStatus, textCpuStatus;
+    private SystemDiagnosticsView systemDiagnostics;
+    private SystemDiagnosticsReader diagnosticsReader;
 
     private boolean sectionResumed;
 
@@ -671,8 +674,8 @@ public final class OtherSettingsFragment extends SettingsSectionFragment {
     private void updateSystemMetricsPolling() {
         boolean shouldRun =
                 sectionResumed
-                        && textRamStatus != null
-                        && textRamStatus.isShown()
+                        && ((textRamStatus != null && textRamStatus.isShown())
+                                || (systemDiagnostics != null && systemDiagnostics.isShown()))
                         && !requireActivity().isFinishing();
         if (shouldRun == systemMetricsActive) {
             return;
@@ -687,9 +690,6 @@ public final class OtherSettingsFragment extends SettingsSectionFragment {
             if (textCpuStatus != null) {
                 textCpuStatus.setText("Измерение…");
             }
-            if (textHookStatus != null) {
-                textHookStatus.setText("Чтение состояния…");
-            }
             uiHandler.post(systemMetricsTick);
         }
     }
@@ -699,19 +699,14 @@ public final class OtherSettingsFragment extends SettingsSectionFragment {
             return;
         }
         final long generation = systemMetricsGeneration;
-        final Context application = requireContext().getApplicationContext();
+        final boolean readDiagnostics = systemDiagnostics != null && systemDiagnostics.isShown();
         try {
             systemMetricsExecutor.execute(
                     () -> {
                         final SystemMetricsReader.Snapshot snapshot =
                                 systemMetricsReader.read(generation);
-                        String hookPayload =
-                                application
-                                        .getSharedPreferences(
-                                                HookStatusContract.PREFERENCES_NAME,
-                                                Context.MODE_PRIVATE)
-                                        .getString(HookStatusContract.PAYLOAD_KEY, null);
-                        final String hookStatus = HookStatusContract.renderForUi(hookPayload);
+                        final SystemDiagnosticsReader.Result diagnostics =
+                                readDiagnostics ? diagnosticsReader.read() : null;
                         uiHandler.post(
                                 () -> {
                                     if (!systemMetricsActive
@@ -749,8 +744,8 @@ public final class OtherSettingsFragment extends SettingsSectionFragment {
                                                                         "%.0f%%",
                                                                         snapshot.cpuPercent));
                                     }
-                                    if (textHookStatus != null) {
-                                        textHookStatus.setText(hookStatus);
+                                    if (systemDiagnostics != null && diagnostics != null) {
+                                        systemDiagnostics.render(diagnostics);
                                     }
                                     uiHandler.postDelayed(
                                             systemMetricsTick, SYSTEM_METRICS_INTERVAL_MS);
@@ -764,6 +759,7 @@ public final class OtherSettingsFragment extends SettingsSectionFragment {
     public void onCreate(Bundle state) {
         super.onCreate(state);
         systemMetricsReader = new SystemMetricsReader(requireContext().getApplicationContext());
+        diagnosticsReader = new SystemDiagnosticsReader(requireContext());
     }
 
     @Override
@@ -789,7 +785,9 @@ public final class OtherSettingsFragment extends SettingsSectionFragment {
         if (settingView(R.id.textRamStatus) != null) {
             textRamStatus = settingView(R.id.textRamStatus);
             textCpuStatus = settingView(R.id.textCpuStatus);
-            textHookStatus = settingView(R.id.textHookStatus);
+        }
+        if (settingView(R.id.systemDiagnostics) != null) {
+            systemDiagnostics = settingView(R.id.systemDiagnostics);
         }
         bindClick(R.id.buttonCloseAll, this::onButtonCloseAll);
         bindClick(R.id.buttonGrantInstall, this::onButtonGrantInstall);
@@ -805,8 +803,8 @@ public final class OtherSettingsFragment extends SettingsSectionFragment {
         if (isDescendant(row, textCpuStatus)) {
             textCpuStatus = null;
         }
-        if (isDescendant(row, textHookStatus)) {
-            textHookStatus = null;
+        if (isDescendant(row, systemDiagnostics)) {
+            systemDiagnostics = null;
         }
         for (int index = 0; index < lightDiagnosticsRows.length; index++) {
             if (isDescendant(row, lightDiagnosticsRows[index])) {

@@ -10,15 +10,17 @@ import (
 )
 
 type agentStatus struct {
-	Identity  processIdentity `json:"identity"`
-	Target    string          `json:"target"`
-	State     string          `json:"state"`
-	Reason    string          `json:"reason,omitempty"`
-	UID       uint32          `json:"uid,omitempty"`
-	NativeID  string          `json:"nativeId,omitempty"`
-	RuntimeID string          `json:"runtimeId,omitempty"`
-	Revision  int64           `json:"revision,omitempty"`
-	Modules   []string        `json:"modules,omitempty"`
+	UpdatedUptime int64           `json:"updatedUptime"`
+	Architecture  string          `json:"architecture,omitempty"`
+	Identity      processIdentity `json:"identity"`
+	Target        string          `json:"target"`
+	State         string          `json:"state"`
+	Reason        string          `json:"reason,omitempty"`
+	UID           uint32          `json:"uid,omitempty"`
+	NativeID      string          `json:"nativeId,omitempty"`
+	RuntimeID     string          `json:"runtimeId,omitempty"`
+	Revision      int64           `json:"revision,omitempty"`
+	Modules       []string        `json:"modules,omitempty"`
 }
 
 type loaderStatus struct {

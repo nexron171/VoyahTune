@@ -16,6 +16,7 @@ import ru.big.town.common.DriveSelectionPolicy;
 import ru.big.town.common.SmartSaveSettings;
 import ru.big.town.restoremode.BuildConfig;
 import ru.big.town.restoremode.integration.hooks.HookStatusContract;
+import ru.big.town.restoremode.diagnostics.runtime.RuntimeStatusContract;
 import ru.big.town.restoremode.trips.location.TripLocationPermission;
 import ru.big.town.restoremode.vehicle.ApolloSettings;
 import ru.big.town.restoremode.vehicle.DriveSelectionPreferences;
@@ -246,6 +247,23 @@ public class SettingsContentProvider extends ContentProvider {
             health.putBoolean("ready", sharedPreferences != null);
             health.putString("version", BuildConfig.VERSION_NAME);
             return health;
+        }
+        if (RuntimeStatusContract.METHOD_PUBLISH.equals(method)) {
+            if (Binder.getCallingUid() != 0) {
+                throw new SecurityException("Runtime status requires the root loader");
+            }
+            Bundle result = new Bundle();
+            boolean valid = getContext() != null && RuntimeStatusContract.isValidPayload(arg);
+            boolean stored = valid && getContext()
+                    .getSharedPreferences(RuntimeStatusContract.PREFERENCES_NAME, Context.MODE_PRIVATE)
+                    .edit()
+                    .putString(RuntimeStatusContract.PAYLOAD_KEY, arg)
+                    .putInt(RuntimeStatusContract.BOOT_COUNT_KEY,
+                            android.provider.Settings.Global.getInt(getContext().getContentResolver(),
+                                    android.provider.Settings.Global.BOOT_COUNT, -1))
+                    .commit();
+            result.putBoolean("stored", stored);
+            return result;
         }
         if (!HookStatusContract.METHOD_PUBLISH.equals(method)) {
             return super.call(method, arg, extras);

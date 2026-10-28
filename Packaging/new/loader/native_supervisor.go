@@ -48,6 +48,11 @@ type nativeSupervisor struct {
 
 func (manager *nativeSupervisor) report(agent nativeAgentConfig, identity processIdentity, state, reason string, ack *agentwire.Status, modules []string) {
 	value := agentStatus{Identity: identity, Target: agent.Target, State: state, Reason: reason}
+	value.UpdatedUptime, _ = uptimeSeconds(manager.procRoot)
+	if identity.PID > 0 {
+		architecture, _ := remoteattach.DetectArchitecture(manager.procRoot, identity.PID)
+		value.Architecture = string(architecture)
+	}
 	if ack != nil {
 		value.UID = ack.UID
 		value.NativeID = ack.NativeID
@@ -456,10 +461,19 @@ func (manager *nativeSupervisor) run(ctx context.Context, configurationError err
 		}
 	}
 	publisher := statusPublisher{path: filepath.Join(manager.stateDirectory, "status.json"), publicPath: filepath.Join(manager.stateDirectory, "hook-status.v1")}
+	diagnostics := diagnosticsPublisher{command: androidCommand}
 	publish := func(state string) {
 		now, _ := uptimeSeconds(manager.procRoot)
-		if err := publisher.publish(context.Background(), loaderStatus{Schema: 1, Boot: manager.boot, Loader: self, UpdatedUptime: now, State: state, Agents: manager.status.snapshot(manager.procRoot)}); err != nil {
+		snapshot := loaderStatus{Schema: 1, Boot: manager.boot, Loader: self, UpdatedUptime: now, State: state, Agents: manager.status.snapshot(manager.procRoot)}
+		if err := publisher.publish(context.Background(), snapshot); err != nil {
 			log.Printf("publish native status: %v", err)
+		}
+		reason := ""
+		if configurationError != nil {
+			reason = configurationError.Error()
+		}
+		if err := diagnostics.publish(context.Background(), snapshot, manager.config.Code, reason); err != nil {
+			log.Printf("publish runtime diagnostics: %v", err)
 		}
 	}
 	if configurationError != nil {
