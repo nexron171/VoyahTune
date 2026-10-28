@@ -59,14 +59,8 @@ def main():
     OUTPUT.mkdir(parents=True, exist_ok=True)
     shutil.copytree(runtime, OUTPUT / "runtime", dirs_exist_ok=True)
     shutil.copytree(SOLUTION / "system", OUTPUT / "system", dirs_exist_ok=True)
-    # VoyEmu checks Enforcing; its system_server JIT mapping cannot be patched under that policy.
     boot = OUTPUT / "system/voyahtune.load.rc"
-    boot.write_text(
-        "on early-init\n    setprop dalvik.vm.usejit false\n\n"
-        + boot.read_text().replace(
-            "/system/bin/setenforce 0", "/system/bin/setenforce 1"
-        )
-    )
+    boot.write_text(boot.read_text().replace("/system/bin/setenforce 0", "/system/bin/setenforce 1"))
     shutil.copyfile(
         REPOSITORY / "Packaging/system/privapp-permissions-ru.big.town.anative.xml",
         OUTPUT / "whitelist.xml",

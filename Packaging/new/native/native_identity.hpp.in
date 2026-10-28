@@ -1,0 +1,5 @@
+#pragma once
+
+namespace voyahtune {
+inline constexpr const char kCompiledNativeRuntimeId[] = "native-@VOYAHTUNE_NATIVE_HASH@";
+}

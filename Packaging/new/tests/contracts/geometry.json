@@ -1,0 +1,293 @@
+{
+  "schema": 1,
+  "cases": [
+    {
+      "id": "geometry.stale-clear",
+      "contract": "geometry.lifecycle",
+      "agents": [
+        "windows",
+        "client.<package>"
+      ],
+      "reference": "vd-stability.test.js",
+      "input": {
+        "events": [
+          "off",
+          "on",
+          "off",
+          "advance"
+        ]
+      },
+      "expected": {
+        "pending": 0,
+        "geometryAttached": false
+      }
+    },
+    {
+      "id": "geometry.reload-coalesce",
+      "contract": "geometry.lifecycle",
+      "agents": [
+        "windows",
+        "client.<package>"
+      ],
+      "reference": "vd-stability.test.js",
+      "input": {
+        "events": [
+          "reload",
+          "reload",
+          "reload",
+          "flush"
+        ]
+      },
+      "expected": {
+        "settingsSnapshots": 1,
+        "traversals": 1
+      }
+    },
+    {
+      "id": "geometry.bad-snapshot",
+      "contract": "geometry.lifecycle",
+      "agents": [
+        "windows",
+        "client.<package>"
+      ],
+      "reference": "vd-stability.test.js",
+      "input": {
+        "initialDpi": 160,
+        "nextDpi": "invalid"
+      },
+      "expected": {
+        "dpi": 160,
+        "partialApplied": false
+      }
+    },
+    {
+      "id": "geometry.window-mutation-error",
+      "contract": "geometry.lifecycle",
+      "agents": [
+        "windows",
+        "client.<package>"
+      ],
+      "reference": "vd-stability.test.js",
+      "input": {
+        "failure": "compute-frame"
+      },
+      "expected": {
+        "stockFrameRestored": true,
+        "sharedFieldsRestored": true
+      }
+    },
+    {
+      "id": "geometry.client-disable",
+      "contract": "geometry.lifecycle",
+      "agents": [
+        "windows",
+        "client.<package>"
+      ],
+      "reference": "../agents/app-client.js",
+      "input": {
+        "events": [
+          "fullscreen-on",
+          "fullscreen-off"
+        ]
+      },
+      "expected": {
+        "originalWidthRestored": true,
+        "dialogMutated": false
+      }
+    },
+    {
+      "id": "geometry.mapkit-dpi",
+      "contract": "geometry.lifecycle",
+      "agents": [
+        "windows",
+        "client.<package>"
+      ],
+      "reference": "../agents/app-client.js",
+      "input": {
+        "package": "ru.yandex.yandexmaps",
+        "dpi": 240,
+        "baseline": 1.0
+      },
+      "expected": {
+        "scaleFactor": 1.5,
+        "surfaceUpscaled": false
+      }
+    },
+    {
+      "id": "geometry.fullscreen-applied",
+      "contract": "geometry.window-state",
+      "agents": [
+        "windows"
+      ],
+      "reference": "vd-stability.test.js",
+      "input": {
+        "events": [
+          "layout"
+        ],
+        "fullscreen": true,
+        "originalRequest": [
+          1780,
+          675
+        ]
+      },
+      "expected": {
+        "requestedSize": [
+          1920,
+          675
+        ],
+        "sharedAttributeWidth": 1780,
+        "stableFrame": [
+          0,
+          0,
+          1920,
+          720
+        ],
+        "contentFrame": [
+          0,
+          45,
+          1920,
+          720
+        ],
+        "originalComputes": 1,
+        "hotPathSettingsReads": 0
+      }
+    },
+    {
+      "id": "geometry.window-identity",
+      "contract": "geometry.window-state",
+      "agents": [
+        "windows"
+      ],
+      "reference": "vd-stability.test.js",
+      "input": {
+        "events": [
+          "layout-two-same-hash",
+          "disable"
+        ],
+        "originalWidths": [
+          640,
+          800
+        ]
+      },
+      "expected": {
+        "restoredWidths": [
+          640,
+          800
+        ],
+        "windowRecords": 0
+      }
+    },
+    {
+      "id": "geometry.wm-lock-missing",
+      "contract": "geometry.window-state",
+      "agents": [
+        "windows"
+      ],
+      "reference": "vd-stability.test.js",
+      "input": {
+        "events": [
+          "fullscreen-on",
+          "disable"
+        ],
+        "wmLockAvailable": false
+      },
+      "expected": {
+        "cleanupComplete": false,
+        "ready": false
+      }
+    },
+    {
+      "id": "geometry.snapshot-atomic",
+      "contract": "geometry.window-state",
+      "agents": [
+        "windows"
+      ],
+      "reference": "vd-stability.test.js",
+      "input": {
+        "events": [
+          "config-valid",
+          "config-invalid"
+        ],
+        "initial": {
+          "dpi": 240,
+          "lift": 2,
+          "fullscreen": [
+            "app.maps"
+          ]
+        }
+      },
+      "expected": {
+        "snapshot": {
+          "dpi": 240,
+          "lift": 2,
+          "fullscreen": [
+            "app.maps"
+          ]
+        },
+        "partialApplied": false
+      }
+    },
+    {
+      "id": "geometry.repeat-screen-events",
+      "contract": "geometry.window-state",
+      "agents": [
+        "windows"
+      ],
+      "reference": "vd-stability.test.js",
+      "input": {
+        "events": [
+          "off",
+          "off",
+          "on",
+          "on",
+          "flush"
+        ]
+      },
+      "expected": {
+        "duplicateReplacements": 0,
+        "duplicateTimers": 0
+      }
+    },
+    {
+      "id": "geometry.relayout-original",
+      "contract": "geometry.window-state",
+      "agents": [
+        "windows"
+      ],
+      "reference": "vd-stability.test.js",
+      "input": {
+        "events": [
+          "layout",
+          "request-width-1200",
+          "layout",
+          "disable"
+        ],
+        "originalWidth": 1780
+      },
+      "expected": {
+        "restoredWidth": 1200,
+        "remainingRecords": 0
+      }
+    },
+    {
+      "id": "geometry.partial-restore",
+      "contract": "geometry.window-state",
+      "agents": [
+        "windows"
+      ],
+      "reference": "vd-stability.test.js",
+      "input": {
+        "events": [
+          "layout",
+          "disable"
+        ],
+        "failRestoreField": 0
+      },
+      "expected": {
+        "otherFieldsRestored": true,
+        "ready": false,
+        "cleanupComplete": false
+      }
+    }
+  ]
+}

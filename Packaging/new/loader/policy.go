@@ -1,11 +1,9 @@
 package main
 
-import "fmt"
-
 type attemptRecord struct {
 	Boot          string          `json:"boot"`
 	Identity      processIdentity `json:"identity"`
-	ScriptHash    string          `json:"scriptHash"`
+	CodeID        string          `json:"codeId"`
 	State         string          `json:"state"`
 	LastError     string          `json:"lastError,omitempty"`
 	Attempts      int             `json:"attempts"`
@@ -13,7 +11,6 @@ type attemptRecord struct {
 	LastAttach    int64           `json:"lastAttach"`
 	RapidRestarts int             `json:"rapidRestarts"`
 	Blocked       bool            `json:"blocked"`
-	Injector      processIdentity `json:"injector"`
 }
 
 func (record attemptRecord) failureReason() string {
@@ -23,19 +20,19 @@ func (record attemptRecord) failureReason() string {
 	return "attempt budget consumed or backoff pending"
 }
 
-func observeTarget(previous attemptRecord, boot string, identity processIdentity, hash string, now int64, crashLimit int) attemptRecord {
+func observeTarget(previous attemptRecord, boot string, identity processIdentity, codeID string, now int64, crashLimit int) attemptRecord {
 	if previous.Boot != boot {
-		return attemptRecord{Boot: boot, Identity: identity, ScriptHash: hash}
+		return attemptRecord{Boot: boot, Identity: identity, CodeID: codeID}
 	}
 	if previous.Identity == identity {
-		// An eternalized script cannot be replaced safely inside the same live process.
-		if previous.ScriptHash != hash && previous.State == "active" {
+		// Resident code cannot be replaced safely inside a live process.
+		if previous.CodeID != codeID && previous.State == "active" {
 			previous.State = "restart-required"
 		}
 		return previous
 	}
-	next := attemptRecord{Boot: boot, Identity: identity, ScriptHash: hash}
-	if previous.ScriptHash == hash {
+	next := attemptRecord{Boot: boot, Identity: identity, CodeID: codeID}
+	if previous.CodeID == codeID {
 		next.Blocked = previous.Blocked
 		if previous.Identity.PID > 0 && now >= previous.LastAttach && now-previous.LastAttach < 60 {
 			next.RapidRestarts = previous.RapidRestarts + 1
@@ -62,32 +59,4 @@ func retryDelay(attempt int) int64 {
 	default:
 		return 30
 	}
-}
-
-type healthObservation struct {
-	Identity     processIdentity
-	LastObserved int64
-	LastHealthy  int64
-	GraceUntil   int64
-}
-
-func (observation *healthObservation) expired(identity processIdentity, now, pulse int64) bool {
-	if observation.Identity != identity {
-		*observation = healthObservation{Identity: identity, GraceUntil: now + 15}
-	} else if (now < observation.LastObserved || now-observation.LastObserved >= 15) && observation.GraceUntil == 0 {
-		// A suspended agent may resume after the supervisor; allow its timer one bounded grace.
-		observation.GraceUntil = now + 15
-		observation.LastHealthy = 0
-	}
-	observation.LastObserved = now
-	if pulse > 0 && pulse <= now && now-pulse < 15 {
-		observation.LastHealthy = now
-		observation.GraceUntil = 0
-		return false
-	}
-	return now >= observation.GraceUntil && now-observation.LastHealthy >= 15
-}
-
-func identityToken(boot string, identity processIdentity) string {
-	return fmt.Sprintf("%s:%d:%s", boot, identity.PID, identity.StartTicks)
 }

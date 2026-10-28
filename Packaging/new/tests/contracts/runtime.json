@@ -1,0 +1,709 @@
+{
+  "schema": 1,
+  "cases": [
+    {
+      "id": "runtime.ready-before-exit",
+      "contract": "runtime.readiness",
+      "agents": [],
+      "reference": "../loader/loader_test.go + migration lifecycle requirement",
+      "input": {
+        "events": [
+          "module-ready"
+        ]
+      },
+      "expected": {
+        "state": "injecting",
+        "activePublished": false
+      }
+    },
+    {
+      "id": "runtime.success",
+      "contract": "runtime.readiness",
+      "agents": [],
+      "reference": "../loader/loader_test.go + migration lifecycle requirement",
+      "input": {
+        "events": [
+          "module-ready",
+          "helper-exit-0",
+          "identity-same"
+        ]
+      },
+      "expected": {
+        "state": "active",
+        "activePublished": true
+      }
+    },
+    {
+      "id": "runtime.exit-error",
+      "contract": "runtime.readiness",
+      "agents": [],
+      "reference": "../loader/loader_test.go + migration lifecycle requirement",
+      "input": {
+        "events": [
+          "module-ready",
+          "helper-exit-7"
+        ]
+      },
+      "expected": {
+        "state": "failed",
+        "activePublished": false
+      }
+    },
+    {
+      "id": "runtime.no-ready",
+      "contract": "runtime.readiness",
+      "agents": [],
+      "reference": "../loader/loader_test.go + migration lifecycle requirement",
+      "input": {
+        "events": [
+          "helper-exit-0"
+        ]
+      },
+      "expected": {
+        "state": "failed",
+        "activePublished": false
+      }
+    },
+    {
+      "id": "runtime.pid-reuse",
+      "contract": "runtime.readiness",
+      "agents": [],
+      "reference": "../loader/loader_test.go + migration lifecycle requirement",
+      "input": {
+        "events": [
+          "module-ready",
+          "identity-changed",
+          "helper-exit-0"
+        ]
+      },
+      "expected": {
+        "state": "failed",
+        "activePublished": false
+      }
+    },
+    {
+      "id": "runtime.partial-failure",
+      "contract": "runtime.readiness",
+      "agents": [],
+      "reference": "../loader/loader_test.go + migration lifecycle requirement",
+      "input": {
+        "events": [
+          "module-1-ready",
+          "module-2-error",
+          "helper-exit-0"
+        ]
+      },
+      "expected": {
+        "state": "failed",
+        "activePublished": false
+      }
+    },
+    {
+      "id": "runtime.idle",
+      "contract": "runtime.quiesce",
+      "agents": [],
+      "reference": "migration lifecycle requirement",
+      "input": {
+        "events": [
+          "quiesce"
+        ]
+      },
+      "expected": {
+        "state": "quiesced",
+        "inFlight": 0,
+        "newWorkAccepted": false
+      }
+    },
+    {
+      "id": "runtime.wait",
+      "contract": "runtime.quiesce",
+      "agents": [],
+      "reference": "migration lifecycle requirement",
+      "input": {
+        "events": [
+          "begin",
+          "quiesce"
+        ]
+      },
+      "expected": {
+        "state": "quiescing",
+        "inFlight": 1,
+        "newWorkAccepted": false
+      }
+    },
+    {
+      "id": "runtime.drained",
+      "contract": "runtime.quiesce",
+      "agents": [],
+      "reference": "migration lifecycle requirement",
+      "input": {
+        "events": [
+          "begin",
+          "quiesce",
+          "complete"
+        ]
+      },
+      "expected": {
+        "state": "quiesced",
+        "inFlight": 0,
+        "newWorkAccepted": false
+      }
+    },
+    {
+      "id": "runtime.repeat",
+      "contract": "runtime.quiesce",
+      "agents": [],
+      "reference": "migration lifecycle requirement",
+      "input": {
+        "events": [
+          "begin",
+          "quiesce",
+          "quiesce",
+          "complete",
+          "complete"
+        ]
+      },
+      "expected": {
+        "state": "quiesced",
+        "inFlight": 0,
+        "newWorkAccepted": false
+      }
+    },
+    {
+      "id": "runtime.cancel-client",
+      "contract": "runtime.quiesce",
+      "agents": [],
+      "reference": "migration lifecycle requirement",
+      "input": {
+        "events": [
+          "begin",
+          "quiesce",
+          "cancel-client"
+        ]
+      },
+      "expected": {
+        "state": "quiescing",
+        "inFlight": 1,
+        "newWorkAccepted": false
+      }
+    },
+    {
+      "id": "runtime.target-worker",
+      "contract": "runtime.quiesce",
+      "agents": [],
+      "reference": "migration lifecycle requirement",
+      "input": {
+        "events": [
+          "begin-helper",
+          "begin-target-worker",
+          "quiesce",
+          "complete-helper"
+        ]
+      },
+      "expected": {
+        "state": "quiescing",
+        "inFlight": 1,
+        "newWorkAccepted": false
+      }
+    },
+    {
+      "id": "runtime.boot-scope",
+      "contract": "runtime.identity",
+      "agents": [],
+      "reference": "../loader/loader_test.go + migration lifecycle requirement",
+      "input": {
+        "oldBoot": true
+      },
+      "expected": {
+        "reuseReady": false,
+        "attachAllowed": true
+      }
+    },
+    {
+      "id": "runtime.same-process",
+      "contract": "runtime.identity",
+      "agents": [],
+      "reference": "../loader/loader_test.go + migration lifecycle requirement",
+      "input": {
+        "sameBoot": true,
+        "samePid": true,
+        "sameTicks": true,
+        "sameRuntime": true
+      },
+      "expected": {
+        "reuseReady": true,
+        "attachAllowed": false
+      }
+    },
+    {
+      "id": "runtime.pid-reused",
+      "contract": "runtime.identity",
+      "agents": [],
+      "reference": "../loader/loader_test.go + migration lifecycle requirement",
+      "input": {
+        "sameBoot": true,
+        "samePid": true,
+        "sameTicks": false
+      },
+      "expected": {
+        "reuseReady": false,
+        "attachAllowed": true
+      }
+    },
+    {
+      "id": "runtime.code-replaced",
+      "contract": "runtime.identity",
+      "agents": [],
+      "reference": "../loader/loader_test.go + migration lifecycle requirement",
+      "input": {
+        "sameBoot": true,
+        "samePid": true,
+        "sameTicks": true,
+        "sameRuntime": false
+      },
+      "expected": {
+        "state": "restart-required",
+        "attachAllowed": false
+      }
+    },
+    {
+      "id": "runtime.install-block",
+      "contract": "runtime.identity",
+      "agents": [],
+      "reference": "../loader/loader_test.go + migration lifecycle requirement",
+      "input": {
+        "installBlock": true,
+        "loaderRestarted": true
+      },
+      "expected": {
+        "state": "quiesced",
+        "attachAllowed": false
+      }
+    },
+    {
+      "id": "runtime.original-static",
+      "contract": "runtime.original-call",
+      "agents": [],
+      "reference": "migration callback requirement",
+      "input": {
+        "kind": "static",
+        "arguments": [
+          2,
+          3
+        ]
+      },
+      "expected": {
+        "value": 5,
+        "originalCalls": 1,
+        "error": null,
+        "sameException": false
+      }
+    },
+    {
+      "id": "runtime.original-instance",
+      "contract": "runtime.original-call",
+      "agents": [],
+      "reference": "migration callback requirement",
+      "input": {
+        "kind": "instance",
+        "arguments": [
+          7
+        ]
+      },
+      "expected": {
+        "value": 12,
+        "originalCalls": 1,
+        "error": null,
+        "sameException": false
+      }
+    },
+    {
+      "id": "runtime.original-void",
+      "contract": "runtime.original-call",
+      "agents": [],
+      "reference": "migration callback requirement",
+      "input": {
+        "kind": "void",
+        "arguments": [
+          "saved"
+        ]
+      },
+      "expected": {
+        "value": null,
+        "originalCalls": 1,
+        "error": null,
+        "sameException": false,
+        "remembered": "saved"
+      }
+    },
+    {
+      "id": "runtime.original-exception",
+      "contract": "runtime.original-call",
+      "agents": [],
+      "reference": "migration callback requirement",
+      "input": {
+        "kind": "exception",
+        "arguments": []
+      },
+      "expected": {
+        "value": null,
+        "originalCalls": 1,
+        "error": "original-failure",
+        "sameException": true
+      }
+    },
+    {
+      "id": "runtime.original-missing-receiver",
+      "contract": "runtime.original-call",
+      "agents": [],
+      "reference": "migration callback requirement",
+      "input": {
+        "kind": "missing-receiver",
+        "arguments": []
+      },
+      "expected": {
+        "value": null,
+        "originalCalls": 0,
+        "error": "Instance callback has no receiver",
+        "sameException": false
+      }
+    },
+    {
+      "id": "runtime.bootstrap-loaded-only",
+      "contract": "runtime.bootstrap",
+      "agents": [],
+      "reference": "migration bootstrap requirement",
+      "input": {
+        "libraryLoaded": true,
+        "javaReady": false
+      },
+      "expected": {
+        "ready": false,
+        "state": "starting"
+      }
+    },
+    {
+      "id": "runtime.bootstrap-classloader-late",
+      "contract": "runtime.bootstrap",
+      "agents": [],
+      "reference": "migration bootstrap requirement",
+      "input": {
+        "classesReadyAt": 500,
+        "deadline": 1000
+      },
+      "expected": {
+        "ready": true,
+        "initializations": 1
+      }
+    },
+    {
+      "id": "runtime.bootstrap-classloader-timeout",
+      "contract": "runtime.bootstrap",
+      "agents": [],
+      "reference": "migration bootstrap requirement",
+      "input": {
+        "classesReadyAt": 1500,
+        "deadline": 1000
+      },
+      "expected": {
+        "ready": false,
+        "remainingHooks": 0
+      }
+    },
+    {
+      "id": "runtime.bootstrap-init-error",
+      "contract": "runtime.bootstrap",
+      "agents": [],
+      "reference": "migration bootstrap requirement",
+      "input": {
+        "javaInitError": true
+      },
+      "expected": {
+        "ready": false,
+        "state": "failed"
+      }
+    },
+    {
+      "id": "runtime.bootstrap-same-process-again",
+      "contract": "runtime.bootstrap",
+      "agents": [],
+      "reference": "migration bootstrap requirement",
+      "input": {
+        "initializations": 2,
+        "sameIdentity": true
+      },
+      "expected": {
+        "runtimeInstances": 1,
+        "duplicateHooks": 0
+      }
+    },
+    {
+      "id": "runtime.module-install-rollback",
+      "contract": "runtime.modules",
+      "agents": [],
+      "reference": "migration module lifecycle requirement",
+      "input": {
+        "installModules": [
+          "one",
+          "two"
+        ],
+        "failModule": "two"
+      },
+      "expected": {
+        "ready": false,
+        "remainingHooks": 0,
+        "remainingListeners": 0
+      }
+    },
+    {
+      "id": "runtime.module-disable-cleanup",
+      "contract": "runtime.modules",
+      "agents": [],
+      "reference": "migration module lifecycle requirement",
+      "input": {
+        "events": [
+          "enable",
+          "schedule",
+          "disable",
+          "advance"
+        ]
+      },
+      "expected": {
+        "effectsAfterDisable": [],
+        "listeners": 0,
+        "timers": 0
+      }
+    },
+    {
+      "id": "runtime.module-live-config",
+      "contract": "runtime.modules",
+      "agents": [],
+      "reference": "migration module lifecycle requirement",
+      "input": {
+        "revisions": [
+          1,
+          2,
+          2
+        ]
+      },
+      "expected": {
+        "appliedRevisions": [
+          1,
+          2
+        ],
+        "bootstrapCount": 1
+      }
+    },
+    {
+      "id": "runtime.module-stale-callback",
+      "contract": "runtime.modules",
+      "agents": [],
+      "reference": "migration module lifecycle requirement",
+      "input": {
+        "events": [
+          "schedule-v1",
+          "configure-v2",
+          "run-v1"
+        ]
+      },
+      "expected": {
+        "effects": []
+      }
+    },
+    {
+      "id": "runtime.module-changed-dex",
+      "contract": "runtime.modules",
+      "agents": [],
+      "reference": "migration module lifecycle requirement",
+      "input": {
+        "events": [
+          "ready-v1",
+          "files-v2"
+        ]
+      },
+      "expected": {
+        "state": "restart-required",
+        "bootstrapCount": 1
+      }
+    },
+    {
+      "id": "runtime.attach-cancel-attach",
+      "contract": "runtime.attach",
+      "agents": [],
+      "reference": "migration native attach requirement",
+      "input": {
+        "cancelAt": "attach"
+      },
+      "expected": {
+        "state": "failed",
+        "activePublished": false,
+        "traceeRestored": true,
+        "detached": true,
+        "retryWhileUncertain": false
+      }
+    },
+    {
+      "id": "runtime.attach-cancel-save-registers",
+      "contract": "runtime.attach",
+      "agents": [],
+      "reference": "migration native attach requirement",
+      "input": {
+        "cancelAt": "save-registers"
+      },
+      "expected": {
+        "state": "failed",
+        "activePublished": false,
+        "traceeRestored": true,
+        "detached": true,
+        "retryWhileUncertain": false
+      }
+    },
+    {
+      "id": "runtime.attach-cancel-remote-load",
+      "contract": "runtime.attach",
+      "agents": [],
+      "reference": "migration native attach requirement",
+      "input": {
+        "cancelAt": "remote-load"
+      },
+      "expected": {
+        "state": "failed",
+        "activePublished": false,
+        "traceeRestored": true,
+        "detached": true,
+        "retryWhileUncertain": false
+      }
+    },
+    {
+      "id": "runtime.attach-cancel-worker-start",
+      "contract": "runtime.attach",
+      "agents": [],
+      "reference": "migration native attach requirement",
+      "input": {
+        "cancelAt": "worker-start"
+      },
+      "expected": {
+        "state": "failed",
+        "activePublished": false,
+        "traceeRestored": true,
+        "detached": true,
+        "retryWhileUncertain": false
+      }
+    },
+    {
+      "id": "runtime.attach-cancel-java-init",
+      "contract": "runtime.attach",
+      "agents": [],
+      "reference": "migration native attach requirement",
+      "input": {
+        "cancelAt": "java-init"
+      },
+      "expected": {
+        "state": "failed",
+        "activePublished": false,
+        "traceeRestored": true,
+        "detached": true,
+        "retryWhileUncertain": false
+      }
+    },
+    {
+      "id": "runtime.attach-cancel-hook-install",
+      "contract": "runtime.attach",
+      "agents": [],
+      "reference": "migration native attach requirement",
+      "input": {
+        "cancelAt": "hook-install"
+      },
+      "expected": {
+        "state": "failed",
+        "activePublished": false,
+        "traceeRestored": true,
+        "detached": true,
+        "retryWhileUncertain": false
+      }
+    },
+    {
+      "id": "runtime.control-wrong-uid",
+      "contract": "runtime.control",
+      "agents": [],
+      "reference": "migration root control requirement",
+      "input": {
+        "peerUid": 10001
+      },
+      "expected": {
+        "accepted": false,
+        "admissionChanged": false
+      }
+    },
+    {
+      "id": "runtime.control-stale-boot",
+      "contract": "runtime.control",
+      "agents": [],
+      "reference": "migration root control requirement",
+      "input": {
+        "peerUid": 0,
+        "bootMatches": false
+      },
+      "expected": {
+        "accepted": false,
+        "admissionChanged": false
+      }
+    },
+    {
+      "id": "runtime.control-stale-loader",
+      "contract": "runtime.control",
+      "agents": [],
+      "reference": "migration root control requirement",
+      "input": {
+        "peerUid": 0,
+        "loaderIdentityMatches": false
+      },
+      "expected": {
+        "accepted": false,
+        "admissionChanged": false
+      }
+    },
+    {
+      "id": "runtime.control-bad-protocol",
+      "contract": "runtime.control",
+      "agents": [],
+      "reference": "migration root control requirement",
+      "input": {
+        "peerUid": 0,
+        "schema": 99
+      },
+      "expected": {
+        "accepted": false,
+        "admissionChanged": false
+      }
+    },
+    {
+      "id": "runtime.frida-resident",
+      "contract": "runtime.backend-exclusion",
+      "agents": [],
+      "reference": "migration single backend requirement",
+      "input": {
+        "residentBackend": "frida",
+        "requestedBackend": "java"
+      },
+      "expected": {
+        "state": "restart-required",
+        "attachCalls": 0
+      }
+    },
+    {
+      "id": "runtime.no-fallback",
+      "contract": "runtime.backend-exclusion",
+      "agents": [],
+      "reference": "migration single backend requirement",
+      "input": {
+        "requestedBackend": "java",
+        "attachFailed": true
+      },
+      "expected": {
+        "fridaCommands": 0,
+        "state": "failed"
+      }
+    }
+  ]
+}

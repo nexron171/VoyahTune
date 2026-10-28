@@ -1,0 +1,172 @@
+{
+  "schema": 1,
+  "cases": [
+    {
+      "id": "cluster.default",
+      "contract": "cluster.guidance",
+      "agents": [
+        "cluster"
+      ],
+      "reference": "cluster-navigation.test.js",
+      "input": {
+        "events": [
+          [
+            "send",
+            "GUIDING"
+          ]
+        ]
+      },
+      "expected": {
+        "guideStates": [
+          "GUIDING"
+        ],
+        "sourceUnchanged": true
+      }
+    },
+    {
+      "id": "cluster.disable",
+      "contract": "cluster.guidance",
+      "agents": [
+        "cluster"
+      ],
+      "reference": "cluster-navigation.test.js",
+      "input": {
+        "events": [
+          [
+            "send",
+            "GUIDING"
+          ],
+          [
+            "enabled",
+            false
+          ],
+          [
+            "send",
+            "GUIDING"
+          ]
+        ]
+      },
+      "expected": {
+        "guideStates": [
+          "GUIDING",
+          "MAN_STOP",
+          "MAN_STOP"
+        ],
+        "sourceUnchanged": true
+      }
+    },
+    {
+      "id": "cluster.fresh-enable",
+      "contract": "cluster.guidance",
+      "agents": [
+        "cluster"
+      ],
+      "reference": "cluster-navigation.test.js",
+      "input": {
+        "events": [
+          [
+            "enabled",
+            false
+          ],
+          [
+            "enabled",
+            true
+          ]
+        ]
+      },
+      "expected": {
+        "guideStates": [
+          "MAN_STOP"
+        ],
+        "sourceUnchanged": true
+      }
+    },
+    {
+      "id": "cluster.reenable",
+      "contract": "cluster.guidance",
+      "agents": [
+        "cluster"
+      ],
+      "reference": "cluster-navigation.test.js",
+      "input": {
+        "events": [
+          [
+            "enabled",
+            false
+          ],
+          [
+            "enabled",
+            true
+          ],
+          [
+            "send",
+            "GUIDING"
+          ]
+        ]
+      },
+      "expected": {
+        "guideStates": [
+          "MAN_STOP",
+          "GUIDING"
+        ],
+        "sourceUnchanged": true
+      }
+    },
+    {
+      "id": "cluster.unit-0",
+      "contract": "cluster.distance",
+      "agents": [
+        "cluster"
+      ],
+      "reference": "cluster-navigation.test.js",
+      "input": {
+        "meters": 0
+      },
+      "expected": {
+        "unit": "м"
+      }
+    },
+    {
+      "id": "cluster.unit-999",
+      "contract": "cluster.distance",
+      "agents": [
+        "cluster"
+      ],
+      "reference": "cluster-navigation.test.js",
+      "input": {
+        "meters": 999
+      },
+      "expected": {
+        "unit": "м"
+      }
+    },
+    {
+      "id": "cluster.unit-1000",
+      "contract": "cluster.distance",
+      "agents": [
+        "cluster"
+      ],
+      "reference": "cluster-navigation.test.js",
+      "input": {
+        "meters": 1000
+      },
+      "expected": {
+        "unit": "км"
+      }
+    },
+    {
+      "id": "cluster.unit-1500",
+      "contract": "cluster.distance",
+      "agents": [
+        "cluster"
+      ],
+      "reference": "cluster-navigation.test.js",
+      "input": {
+        "meters": 1500
+      },
+      "expected": {
+        "unit": "км"
+      }
+    }
+  ]
+}

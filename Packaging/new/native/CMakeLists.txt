@@ -1,0 +1,68 @@
+cmake_minimum_required(VERSION 3.22.1)
+project(voyahtune_native_runtime LANGUAGES C CXX ASM)
+
+if(NOT ANDROID_ABI MATCHES "^(arm64-v8a|armeabi-v7a)$")
+    message(FATAL_ERROR "VoyahTune native agents require Android ARM or ARM64")
+endif()
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(LSPLANT_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+set(DOBBY_DEBUG OFF CACHE BOOL "" FORCE)
+set(DOBBY_BUILD_TEST OFF CACHE BOOL "" FORCE)
+set(DOBBY_BUILD_EXAMPLE OFF CACHE BOOL "" FORCE)
+set(Plugin.SymbolResolver OFF CACHE BOOL "" FORCE)
+set(Plugin.ImportTableReplace OFF CACHE BOOL "" FORCE)
+
+set(VOYAHTUNE_NATIVE_DEPENDENCIES "${CMAKE_CURRENT_SOURCE_DIR}/../cache/native-sources"
+    CACHE PATH "Pinned native dependency checkouts")
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+set(VOYAHTUNE_LSPLANT_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/lsplant-source")
+execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/prepare_native_dependencies.py"
+    --directory "${VOYAHTUNE_NATIVE_DEPENDENCIES}" --stage-lsplant --output "${VOYAHTUNE_LSPLANT_SOURCE}"
+    RESULT_VARIABLE LSPLANT_STAGE_RESULT ERROR_VARIABLE LSPLANT_STAGE_ERROR)
+if(NOT LSPLANT_STAGE_RESULT EQUAL 0)
+    message(FATAL_ERROR "Cannot stage pinned LSPlant patches: ${LSPLANT_STAGE_ERROR}")
+endif()
+add_subdirectory("${VOYAHTUNE_LSPLANT_SOURCE}/lsplant/src/main/jni" lsplant EXCLUDE_FROM_ALL)
+target_include_directories(lsplant_static PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+add_subdirectory("${VOYAHTUNE_NATIVE_DEPENDENCIES}/Dobby" dobby EXCLUDE_FROM_ALL)
+
+file(GLOB XDL_SOURCES CONFIGURE_DEPENDS "${VOYAHTUNE_NATIVE_DEPENDENCIES}/xDL/xdl/src/main/cpp/*.c")
+add_library(voyahtune_xdl STATIC ${XDL_SOURCES})
+target_compile_features(voyahtune_xdl PRIVATE c_std_17)
+target_include_directories(voyahtune_xdl PUBLIC "${VOYAHTUNE_NATIVE_DEPENDENCIES}/xDL/xdl/src/main/cpp/include")
+
+add_library(voyahtune-hooks STATIC hook_bridge.cpp reflection_bridge.cpp)
+target_include_directories(voyahtune-hooks PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}")
+target_link_libraries(voyahtune-hooks PUBLIC lsplant_static dobby_static voyahtune_xdl log dl)
+target_compile_options(voyahtune-hooks PRIVATE -Wall -Wextra -Werror)
+
+file(GLOB RUNTIME_INPUTS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/*.hpp" "${CMAKE_CURRENT_SOURCE_DIR}/*.h" "${CMAKE_CURRENT_SOURCE_DIR}/*.hpp.in")
+list(APPEND RUNTIME_INPUTS "${CMAKE_CURRENT_SOURCE_DIR}/dependencies.lock.json" "${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt")
+list(SORT RUNTIME_INPUTS)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${RUNTIME_INPUTS})
+set(RUNTIME_FINGERPRINT "")
+foreach(INPUT IN LISTS RUNTIME_INPUTS)
+    file(READ "${INPUT}" CONTENT)
+    get_filename_component(NAME "${INPUT}" NAME)
+    string(APPEND RUNTIME_FINGERPRINT "${NAME}\n${CONTENT}\n")
+endforeach()
+string(SHA256 VOYAHTUNE_NATIVE_HASH "${RUNTIME_FINGERPRINT}")
+configure_file(native_identity.hpp.in native_identity.hpp @ONLY)
+file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/native-id.txt" CONTENT "native-${VOYAHTUNE_NATIVE_HASH}\n")
+
+add_library(voyahtune-bootstrap OBJECT bootstrap.cpp jni_runtime.cpp)
+target_link_libraries(voyahtune-bootstrap PUBLIC voyahtune-hooks)
+target_compile_options(voyahtune-bootstrap PRIVATE -Wall -Wextra -Werror -fvisibility=hidden)
+
+add_library(voyahtune-agent SHARED $<TARGET_OBJECTS:voyahtune-bootstrap>)
+if(ANDROID_ABI STREQUAL "armeabi-v7a")
+    set_target_properties(voyahtune-agent PROPERTIES OUTPUT_NAME voyahtune-agent-arm)
+else()
+    set_target_properties(voyahtune-agent PROPERTIES OUTPUT_NAME voyahtune-agent-arm64)
+endif()
+target_link_libraries(voyahtune-agent PRIVATE voyahtune-hooks)
+target_link_options(voyahtune-agent PRIVATE -Wl,--exclude-libs,ALL)

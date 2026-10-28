@@ -1,0 +1,1007 @@
+{
+  "schema": 1,
+  "cases": [
+    {
+      "id": "drive.acc-ECO",
+      "contract": "drive.acc-reset",
+      "agents": [
+        "acc"
+      ],
+      "reference": "acc-restore.test.js",
+      "input": {
+        "mode": "ECO",
+        "energyEnabled": 1,
+        "energy": "REV",
+        "maintenance": 1,
+        "frames": [
+          2,
+          2
+        ]
+      },
+      "expected": {
+        "selected": [
+          1,
+          2,
+          1
+        ],
+        "energy": 3,
+        "maintenance": 2,
+        "originalCalls": 2,
+        "sendCalls": 1,
+        "dispatchCalls": 1,
+        "stockBundleUnchanged": true,
+        "otherBcmWork": true
+      }
+    },
+    {
+      "id": "drive.reset-ECO",
+      "contract": "drive.vehicle-reset",
+      "agents": [
+        "drive-reset"
+      ],
+      "reference": "drive-reset.test.js",
+      "input": {
+        "mode": "ECO",
+        "air": {
+          "untouched": true
+        }
+      },
+      "expected": {
+        "selected": [
+          1,
+          2,
+          1
+        ],
+        "originalCalls": 1,
+        "sendCalls": 1,
+        "ambient": 19,
+        "retain": 1,
+        "airUnchanged": true,
+        "stockBundleUnchanged": true,
+        "recoveryPresent": true
+      }
+    },
+    {
+      "id": "drive.acc-COMFORT",
+      "contract": "drive.acc-reset",
+      "agents": [
+        "acc"
+      ],
+      "reference": "acc-restore.test.js",
+      "input": {
+        "mode": "COMFORT",
+        "energyEnabled": 1,
+        "energy": "REV",
+        "maintenance": 1,
+        "frames": [
+          2,
+          2
+        ]
+      },
+      "expected": {
+        "selected": [
+          2,
+          2,
+          2
+        ],
+        "energy": 3,
+        "maintenance": 2,
+        "originalCalls": 2,
+        "sendCalls": 1,
+        "dispatchCalls": 1,
+        "stockBundleUnchanged": true,
+        "otherBcmWork": true
+      }
+    },
+    {
+      "id": "drive.reset-COMFORT",
+      "contract": "drive.vehicle-reset",
+      "agents": [
+        "drive-reset"
+      ],
+      "reference": "drive-reset.test.js",
+      "input": {
+        "mode": "COMFORT",
+        "air": {
+          "untouched": true
+        }
+      },
+      "expected": {
+        "selected": [
+          2,
+          2,
+          2
+        ],
+        "originalCalls": 1,
+        "sendCalls": 1,
+        "ambient": 19,
+        "retain": 1,
+        "airUnchanged": true,
+        "stockBundleUnchanged": true,
+        "recoveryPresent": true
+      }
+    },
+    {
+      "id": "drive.acc-SPORT",
+      "contract": "drive.acc-reset",
+      "agents": [
+        "acc"
+      ],
+      "reference": "acc-restore.test.js",
+      "input": {
+        "mode": "SPORT",
+        "energyEnabled": 1,
+        "energy": "REV",
+        "maintenance": 1,
+        "frames": [
+          2,
+          2
+        ]
+      },
+      "expected": {
+        "selected": [
+          3,
+          3,
+          3
+        ],
+        "energy": 3,
+        "maintenance": 2,
+        "originalCalls": 2,
+        "sendCalls": 1,
+        "dispatchCalls": 1,
+        "stockBundleUnchanged": true,
+        "otherBcmWork": true
+      }
+    },
+    {
+      "id": "drive.reset-SPORT",
+      "contract": "drive.vehicle-reset",
+      "agents": [
+        "drive-reset"
+      ],
+      "reference": "drive-reset.test.js",
+      "input": {
+        "mode": "SPORT",
+        "air": {
+          "untouched": true
+        }
+      },
+      "expected": {
+        "selected": [
+          3,
+          3,
+          3
+        ],
+        "originalCalls": 1,
+        "sendCalls": 1,
+        "ambient": 19,
+        "retain": 1,
+        "airUnchanged": true,
+        "stockBundleUnchanged": true,
+        "recoveryPresent": true
+      }
+    },
+    {
+      "id": "drive.acc-OUTING",
+      "contract": "drive.acc-reset",
+      "agents": [
+        "acc"
+      ],
+      "reference": "acc-restore.test.js",
+      "input": {
+        "mode": "OUTING",
+        "energyEnabled": 1,
+        "energy": "REV",
+        "maintenance": 1,
+        "frames": [
+          2,
+          2
+        ]
+      },
+      "expected": {
+        "selected": [
+          4,
+          2,
+          3
+        ],
+        "energy": 3,
+        "maintenance": 2,
+        "originalCalls": 2,
+        "sendCalls": 1,
+        "dispatchCalls": 1,
+        "stockBundleUnchanged": true,
+        "otherBcmWork": true
+      }
+    },
+    {
+      "id": "drive.reset-OUTING",
+      "contract": "drive.vehicle-reset",
+      "agents": [
+        "drive-reset"
+      ],
+      "reference": "drive-reset.test.js",
+      "input": {
+        "mode": "OUTING",
+        "air": {
+          "untouched": true
+        }
+      },
+      "expected": {
+        "selected": [
+          4,
+          2,
+          3
+        ],
+        "originalCalls": 1,
+        "sendCalls": 1,
+        "ambient": 19,
+        "retain": 1,
+        "airUnchanged": true,
+        "stockBundleUnchanged": true,
+        "recoveryPresent": true
+      }
+    },
+    {
+      "id": "drive.acc-INDIVIDUAL",
+      "contract": "drive.acc-reset",
+      "agents": [
+        "acc"
+      ],
+      "reference": "acc-restore.test.js",
+      "input": {
+        "mode": "INDIVIDUAL",
+        "energyEnabled": 1,
+        "energy": "REV",
+        "maintenance": 1,
+        "frames": [
+          2,
+          2
+        ]
+      },
+      "expected": {
+        "selected": [
+          5,
+          2,
+          1
+        ],
+        "energy": 3,
+        "maintenance": 2,
+        "originalCalls": 2,
+        "sendCalls": 1,
+        "dispatchCalls": 1,
+        "stockBundleUnchanged": true,
+        "otherBcmWork": true
+      }
+    },
+    {
+      "id": "drive.reset-INDIVIDUAL",
+      "contract": "drive.vehicle-reset",
+      "agents": [
+        "drive-reset"
+      ],
+      "reference": "drive-reset.test.js",
+      "input": {
+        "mode": "INDIVIDUAL",
+        "air": {
+          "untouched": true
+        }
+      },
+      "expected": {
+        "selected": [
+          5,
+          2,
+          1
+        ],
+        "originalCalls": 1,
+        "sendCalls": 1,
+        "ambient": 19,
+        "retain": 1,
+        "airUnchanged": true,
+        "stockBundleUnchanged": true,
+        "recoveryPresent": true
+      }
+    },
+    {
+      "id": "drive.acc-SNOW",
+      "contract": "drive.acc-reset",
+      "agents": [
+        "acc"
+      ],
+      "reference": "acc-restore.test.js",
+      "input": {
+        "mode": "SNOW",
+        "energyEnabled": 1,
+        "energy": "REV",
+        "maintenance": 1,
+        "frames": [
+          2,
+          2
+        ]
+      },
+      "expected": {
+        "selected": [
+          6,
+          2,
+          2
+        ],
+        "energy": 3,
+        "maintenance": 2,
+        "originalCalls": 2,
+        "sendCalls": 1,
+        "dispatchCalls": 1,
+        "stockBundleUnchanged": true,
+        "otherBcmWork": true
+      }
+    },
+    {
+      "id": "drive.reset-SNOW",
+      "contract": "drive.vehicle-reset",
+      "agents": [
+        "drive-reset"
+      ],
+      "reference": "drive-reset.test.js",
+      "input": {
+        "mode": "SNOW",
+        "air": {
+          "untouched": true
+        }
+      },
+      "expected": {
+        "selected": [
+          6,
+          2,
+          2
+        ],
+        "originalCalls": 1,
+        "sendCalls": 1,
+        "ambient": 19,
+        "retain": 1,
+        "airUnchanged": true,
+        "stockBundleUnchanged": true,
+        "recoveryPresent": false
+      }
+    },
+    {
+      "id": "drive.acc-invalid-0",
+      "contract": "drive.reset-fallback",
+      "agents": [
+        "acc"
+      ],
+      "reference": "acc-restore.test.js",
+      "input": {
+        "module": "acc",
+        "options": {
+          "mode": "bad"
+        }
+      },
+      "expected": {
+        "sendCalls": 1,
+        "stockBundlePreserved": true
+      }
+    },
+    {
+      "id": "drive.reset-invalid-0",
+      "contract": "drive.reset-fallback",
+      "agents": [
+        "drive-reset"
+      ],
+      "reference": "drive-reset.test.js",
+      "input": {
+        "module": "drive-reset",
+        "options": {
+          "mode": "bad"
+        }
+      },
+      "expected": {
+        "sendCalls": 1,
+        "stockBundlePreserved": true
+      }
+    },
+    {
+      "id": "drive.acc-invalid-1",
+      "contract": "drive.reset-fallback",
+      "agents": [
+        "acc"
+      ],
+      "reference": "acc-restore.test.js",
+      "input": {
+        "module": "acc",
+        "options": {
+          "mode": "__proto__"
+        }
+      },
+      "expected": {
+        "sendCalls": 1,
+        "stockBundlePreserved": true
+      }
+    },
+    {
+      "id": "drive.reset-invalid-1",
+      "contract": "drive.reset-fallback",
+      "agents": [
+        "drive-reset"
+      ],
+      "reference": "drive-reset.test.js",
+      "input": {
+        "module": "drive-reset",
+        "options": {
+          "mode": "__proto__"
+        }
+      },
+      "expected": {
+        "sendCalls": 1,
+        "stockBundlePreserved": true
+      }
+    },
+    {
+      "id": "drive.acc-invalid-2",
+      "contract": "drive.reset-fallback",
+      "agents": [
+        "acc"
+      ],
+      "reference": "acc-restore.test.js",
+      "input": {
+        "module": "acc",
+        "options": {
+          "queryError": true
+        }
+      },
+      "expected": {
+        "sendCalls": 1,
+        "stockBundlePreserved": true
+      }
+    },
+    {
+      "id": "drive.reset-invalid-2",
+      "contract": "drive.reset-fallback",
+      "agents": [
+        "drive-reset"
+      ],
+      "reference": "drive-reset.test.js",
+      "input": {
+        "module": "drive-reset",
+        "options": {
+          "queryError": true
+        }
+      },
+      "expected": {
+        "sendCalls": 1,
+        "stockBundlePreserved": true
+      }
+    },
+    {
+      "id": "drive.acc-invalid-3",
+      "contract": "drive.reset-fallback",
+      "agents": [
+        "acc"
+      ],
+      "reference": "acc-restore.test.js",
+      "input": {
+        "module": "acc",
+        "options": {
+          "nullCursor": true
+        }
+      },
+      "expected": {
+        "sendCalls": 1,
+        "stockBundlePreserved": true
+      }
+    },
+    {
+      "id": "drive.reset-invalid-3",
+      "contract": "drive.reset-fallback",
+      "agents": [
+        "drive-reset"
+      ],
+      "reference": "drive-reset.test.js",
+      "input": {
+        "module": "drive-reset",
+        "options": {
+          "nullCursor": true
+        }
+      },
+      "expected": {
+        "sendCalls": 1,
+        "stockBundlePreserved": true
+      }
+    },
+    {
+      "id": "drive.acc-invalid-4",
+      "contract": "drive.reset-fallback",
+      "agents": [
+        "acc"
+      ],
+      "reference": "acc-restore.test.js",
+      "input": {
+        "module": "acc",
+        "options": {
+          "empty": true
+        }
+      },
+      "expected": {
+        "sendCalls": 1,
+        "stockBundlePreserved": true
+      }
+    },
+    {
+      "id": "drive.reset-invalid-4",
+      "contract": "drive.reset-fallback",
+      "agents": [
+        "drive-reset"
+      ],
+      "reference": "drive-reset.test.js",
+      "input": {
+        "module": "drive-reset",
+        "options": {
+          "empty": true
+        }
+      },
+      "expected": {
+        "sendCalls": 1,
+        "stockBundlePreserved": true
+      }
+    },
+    {
+      "id": "drive.acc-invalid-5",
+      "contract": "drive.reset-fallback",
+      "agents": [
+        "acc"
+      ],
+      "reference": "acc-restore.test.js",
+      "input": {
+        "module": "acc",
+        "options": {
+          "columns": 6
+        }
+      },
+      "expected": {
+        "sendCalls": 1,
+        "stockBundlePreserved": true
+      }
+    },
+    {
+      "id": "drive.reset-invalid-5",
+      "contract": "drive.reset-fallback",
+      "agents": [
+        "drive-reset"
+      ],
+      "reference": "drive-reset.test.js",
+      "input": {
+        "module": "drive-reset",
+        "options": {
+          "columns": 6
+        }
+      },
+      "expected": {
+        "sendCalls": 1,
+        "stockBundlePreserved": true
+      }
+    },
+    {
+      "id": "drive.acc-invalid-6",
+      "contract": "drive.reset-fallback",
+      "agents": [
+        "acc"
+      ],
+      "reference": "acc-restore.test.js",
+      "input": {
+        "module": "acc",
+        "options": {
+          "maintenance": null
+        }
+      },
+      "expected": {
+        "sendCalls": 1,
+        "stockBundlePreserved": true
+      }
+    },
+    {
+      "id": "drive.reset-invalid-6",
+      "contract": "drive.reset-fallback",
+      "agents": [
+        "drive-reset"
+      ],
+      "reference": "drive-reset.test.js",
+      "input": {
+        "module": "drive-reset",
+        "options": {
+          "maintenance": null
+        }
+      },
+      "expected": {
+        "sendCalls": 1,
+        "stockBundlePreserved": true
+      }
+    },
+    {
+      "id": "drive.acc-invalid-7",
+      "contract": "drive.reset-fallback",
+      "agents": [
+        "acc"
+      ],
+      "reference": "acc-restore.test.js",
+      "input": {
+        "module": "acc",
+        "options": {
+          "maintenance": 8
+        }
+      },
+      "expected": {
+        "sendCalls": 1,
+        "stockBundlePreserved": true
+      }
+    },
+    {
+      "id": "drive.reset-invalid-7",
+      "contract": "drive.reset-fallback",
+      "agents": [
+        "drive-reset"
+      ],
+      "reference": "drive-reset.test.js",
+      "input": {
+        "module": "drive-reset",
+        "options": {
+          "maintenance": 8
+        }
+      },
+      "expected": {
+        "sendCalls": 1,
+        "stockBundlePreserved": true
+      }
+    },
+    {
+      "id": "drive.acc-invalid-8",
+      "contract": "drive.reset-fallback",
+      "agents": [
+        "acc"
+      ],
+      "reference": "acc-restore.test.js",
+      "input": {
+        "module": "acc",
+        "options": {
+          "mode": "INDIVIDUAL",
+          "individualError": true
+        }
+      },
+      "expected": {
+        "sendCalls": 1,
+        "stockBundlePreserved": true
+      }
+    },
+    {
+      "id": "drive.reset-invalid-8",
+      "contract": "drive.reset-fallback",
+      "agents": [
+        "drive-reset"
+      ],
+      "reference": "drive-reset.test.js",
+      "input": {
+        "module": "drive-reset",
+        "options": {
+          "mode": "INDIVIDUAL",
+          "individualError": true
+        }
+      },
+      "expected": {
+        "sendCalls": 1,
+        "stockBundlePreserved": true
+      }
+    },
+    {
+      "id": "drive.vehicle-user-ECO",
+      "contract": "drive.vehicle-air",
+      "agents": [
+        "vehicle-air"
+      ],
+      "reference": "vehicle-drive-hook.test.js",
+      "input": {
+        "action": "user-menu",
+        "mode": 1
+      },
+      "expected": {
+        "savedModes": [
+          "ECO"
+        ],
+        "sendCalls": 2,
+        "error": null
+      }
+    },
+    {
+      "id": "drive.vehicle-user-COMFORT",
+      "contract": "drive.vehicle-air",
+      "agents": [
+        "vehicle-air"
+      ],
+      "reference": "vehicle-drive-hook.test.js",
+      "input": {
+        "action": "user-menu",
+        "mode": 2
+      },
+      "expected": {
+        "savedModes": [
+          "COMFORT"
+        ],
+        "sendCalls": 2,
+        "error": null
+      }
+    },
+    {
+      "id": "drive.vehicle-user-SPORT",
+      "contract": "drive.vehicle-air",
+      "agents": [
+        "vehicle-air"
+      ],
+      "reference": "vehicle-drive-hook.test.js",
+      "input": {
+        "action": "user-menu",
+        "mode": 3
+      },
+      "expected": {
+        "savedModes": [
+          "SPORT"
+        ],
+        "sendCalls": 2,
+        "error": null
+      }
+    },
+    {
+      "id": "drive.vehicle-user-OUTING",
+      "contract": "drive.vehicle-air",
+      "agents": [
+        "vehicle-air"
+      ],
+      "reference": "vehicle-drive-hook.test.js",
+      "input": {
+        "action": "user-menu",
+        "mode": 4
+      },
+      "expected": {
+        "savedModes": [
+          "OUTING"
+        ],
+        "sendCalls": 2,
+        "error": null
+      }
+    },
+    {
+      "id": "drive.vehicle-user-INDIVIDUAL",
+      "contract": "drive.vehicle-air",
+      "agents": [
+        "vehicle-air"
+      ],
+      "reference": "vehicle-drive-hook.test.js",
+      "input": {
+        "action": "user-menu",
+        "mode": 5
+      },
+      "expected": {
+        "savedModes": [
+          "INDIVIDUAL"
+        ],
+        "sendCalls": 2,
+        "error": null
+      }
+    },
+    {
+      "id": "drive.vehicle-user-SNOW",
+      "contract": "drive.vehicle-air",
+      "agents": [
+        "vehicle-air"
+      ],
+      "reference": "vehicle-drive-hook.test.js",
+      "input": {
+        "action": "user-menu",
+        "mode": 6
+      },
+      "expected": {
+        "savedModes": [
+          "SNOW"
+        ],
+        "sendCalls": 2,
+        "error": null
+      }
+    },
+    {
+      "id": "drive.vehicle-rejected",
+      "contract": "drive.vehicle-air",
+      "agents": [
+        "vehicle-air"
+      ],
+      "reference": "vehicle-drive-hook.test.js",
+      "input": {
+        "action": "user-menu",
+        "mode": 2,
+        "failure": "rejected"
+      },
+      "expected": {
+        "savedModes": [],
+        "sendCalls": 2,
+        "error": null
+      }
+    },
+    {
+      "id": "drive.vehicle-provider-error",
+      "contract": "drive.vehicle-air",
+      "agents": [
+        "vehicle-air"
+      ],
+      "reference": "vehicle-drive-hook.test.js",
+      "input": {
+        "action": "user-menu",
+        "mode": 2,
+        "failure": "provider-error"
+      },
+      "expected": {
+        "savedModes": [],
+        "sendCalls": 2,
+        "error": null
+      }
+    },
+    {
+      "id": "drive.vehicle-binder-error",
+      "contract": "drive.vehicle-air",
+      "agents": [
+        "vehicle-air"
+      ],
+      "reference": "vehicle-drive-hook.test.js",
+      "input": {
+        "action": "user-menu",
+        "mode": 2,
+        "failure": "binder-error"
+      },
+      "expected": {
+        "savedModes": [],
+        "sendCalls": 1,
+        "error": "Binder failed"
+      }
+    },
+    {
+      "id": "drive.power-hold-normal",
+      "contract": "drive.power-hold",
+      "agents": [
+        "drive-reset"
+      ],
+      "reference": "power-hold-bridge.test.js",
+      "input": {},
+      "expected": {
+        "outcome": 6,
+        "activationCalls": 1
+      }
+    },
+    {
+      "id": "drive.power-hold-engine-opt-in",
+      "contract": "drive.power-hold",
+      "agents": [
+        "drive-reset"
+      ],
+      "reference": "power-hold-bridge.test.js",
+      "input": {
+        "engineExtender": true
+      },
+      "expected": {
+        "outcome": 6,
+        "activationCalls": 1
+      }
+    },
+    {
+      "id": "drive.power-hold-not-parking",
+      "contract": "drive.power-hold",
+      "agents": [
+        "drive-reset"
+      ],
+      "reference": "power-hold-bridge.test.js",
+      "input": {
+        "parking": false
+      },
+      "expected": {
+        "outcome": 2,
+        "activationCalls": 0
+      }
+    },
+    {
+      "id": "drive.power-hold-low-soc",
+      "contract": "drive.power-hold",
+      "agents": [
+        "drive-reset"
+      ],
+      "reference": "power-hold-bridge.test.js",
+      "input": {
+        "soc": 14
+      },
+      "expected": {
+        "outcome": 3,
+        "activationCalls": 0
+      }
+    },
+    {
+      "id": "drive.power-hold-unknown-soc",
+      "contract": "drive.power-hold",
+      "agents": [
+        "drive-reset"
+      ],
+      "reference": "power-hold-bridge.test.js",
+      "input": {
+        "soc": -1
+      },
+      "expected": {
+        "outcome": 4,
+        "activationCalls": 0
+      }
+    },
+    {
+      "id": "drive.power-hold-invalid-soc",
+      "contract": "drive.power-hold",
+      "agents": [
+        "drive-reset"
+      ],
+      "reference": "power-hold-bridge.test.js",
+      "input": {
+        "soc": 255
+      },
+      "expected": {
+        "outcome": 4,
+        "activationCalls": 0
+      }
+    },
+    {
+      "id": "drive.power-hold-uninitialized",
+      "contract": "drive.power-hold",
+      "agents": [
+        "drive-reset"
+      ],
+      "reference": "power-hold-bridge.test.js",
+      "input": {
+        "uninitialized": true
+      },
+      "expected": {
+        "outcome": 4,
+        "activationCalls": 0
+      }
+    },
+    {
+      "id": "drive.power-hold-deadline",
+      "contract": "drive.power-hold",
+      "agents": [
+        "drive-reset"
+      ],
+      "reference": "power-hold-bridge.test.js",
+      "input": {
+        "slowValidation": true
+      },
+      "expected": {
+        "outcome": 5,
+        "activationCalls": 0
+      }
+    },
+    {
+      "id": "drive.power-hold-active",
+      "contract": "drive.power-hold",
+      "agents": [
+        "drive-reset"
+      ],
+      "reference": "power-hold-bridge.test.js",
+      "input": {
+        "status": 1
+      },
+      "expected": {
+        "outcome": 7,
+        "activationCalls": 0
+      }
+    },
+    {
+      "id": "drive.power-hold-lost-reply",
+      "contract": "drive.power-hold",
+      "agents": [
+        "drive-reset"
+      ],
+      "reference": "power-hold-bridge.test.js",
+      "input": {
+        "lostReply": true
+      },
+      "expected": {
+        "outcome": 8,
+        "activationCalls": 1
+      }
+    }
+  ]
+}

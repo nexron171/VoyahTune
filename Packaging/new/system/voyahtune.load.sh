@@ -8,6 +8,11 @@ chmod 755 /data/local/bin
 chmod 711 /data/local/open_voyah /data/local/open_voyah/new
 chown 2000:2000 /data/local/tmp
 chmod 771 /data/local/tmp
-while [ -e /data/local/bin/voyahtune-update.block ]; do sleep 10; done
-"$RUNTIME/voyahtune-loader" --runtime-dir "$RUNTIME" --check
+[ ! -L "$RUNTIME" ] && [ ! -L /data/local/bin ] || exit 1
+chcon u:object_r:system_file:s0 /data/local/bin "$RUNTIME"
+for file in "$RUNTIME"/agents.dex "$RUNTIME"/libvoyahtune-agent.so "$RUNTIME"/libvoyahtune-agent-arm.so "$RUNTIME"/voyahtune_*.json; do
+    [ -f "$file" ] || continue
+    [ ! -L "$file" ] || exit 1
+    chcon u:object_r:system_file:s0 "$file"
+done
 exec "$RUNTIME/voyahtune-loader" --runtime-dir "$RUNTIME"

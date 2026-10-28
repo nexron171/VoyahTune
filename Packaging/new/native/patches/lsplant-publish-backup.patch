@@ -1,0 +1,45 @@
+--- a/lsplant/src/main/jni/include/utils/hook_helper.hpp
++++ b/lsplant/src/main/jni/include/utils/hook_helper.hpp
+@@ -1,6 +1,7 @@
+ #pragma once
+ 
+ #include <concepts>
++#include "published_callback.hpp"
+ 
+ #include "jni_helper.hpp"
+ #include "lsplant.hpp"
+@@ -147,7 +148,7 @@
+ 
+ template <typename Ret, typename... Args, char... cs>
+ struct Hooker<Ret(Args...), tstring<cs...>> {
+-    inline static Ret (*backup)(Args...) = nullptr;
++    inline static voyahtune::PublishedCallback<Ret(Args...)> backup;
+ 
+     inline static constexpr std::string_view sym = tstring<cs...>{};
+ };
+@@ -156,7 +157,7 @@
+ struct MemHooker;
+ template <typename Ret, typename This, typename... Args, char... cs>
+ struct MemHooker<Ret(This, Args...), tstring<cs...>> {
+-    inline static MemberFunction<Ret(Args...)> backup;
++    inline static voyahtune::PublishedCallback<Ret(This, Args...)> backup;
+     inline static constexpr std::string_view sym = tstring<cs...>{};
+ };
+ 
+@@ -169,14 +170,8 @@
+ template <HookerType T>
+ inline static bool HookSymNoHandle(const HookHandler &handler, void *original, T &arg) {
+     if (original) {
+-        if constexpr (is_instance_v<decltype(arg.backup), MemberFunction>) {
+-            void *backup = handler.inline_hooker(original, reinterpret_cast<void *>(arg.replace));
+-            arg.backup = reinterpret_cast<typename decltype(arg.backup)::FunType>(backup);
+-        } else {
+-            arg.backup = reinterpret_cast<decltype(arg.backup)>(
+-                handler.inline_hooker(original, reinterpret_cast<void *>(arg.replace)));
+-        }
+-        return true;
++        void* backup = handler.inline_hooker(original, reinterpret_cast<void*>(arg.replace));
++        return arg.backup.Publish(backup);
+     } else {
+         return false;
+     }

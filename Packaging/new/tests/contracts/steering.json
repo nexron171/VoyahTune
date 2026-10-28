@@ -1,0 +1,403 @@
+{
+  "schema": 1,
+  "cases": [
+    {
+      "id": "steering.short",
+      "contract": "steering.press",
+      "agents": [
+        "steering"
+      ],
+      "reference": "agent-policies.test.js",
+      "input": {
+        "short": "short",
+        "long": "long",
+        "events": [
+          [
+            "down",
+            0
+          ],
+          [
+            "up"
+          ]
+        ]
+      },
+      "expected": {
+        "actions": [
+          "short"
+        ],
+        "handledUp": [
+          true
+        ]
+      }
+    },
+    {
+      "id": "steering.long",
+      "contract": "steering.press",
+      "agents": [
+        "steering"
+      ],
+      "reference": "agent-policies.test.js",
+      "input": {
+        "short": "short",
+        "long": "long",
+        "events": [
+          [
+            "down",
+            0
+          ],
+          [
+            "advance",
+            600
+          ],
+          [
+            "up"
+          ]
+        ]
+      },
+      "expected": {
+        "actions": [
+          "long"
+        ],
+        "handledUp": [
+          true
+        ]
+      }
+    },
+    {
+      "id": "steering.repeat",
+      "contract": "steering.press",
+      "agents": [
+        "steering"
+      ],
+      "reference": "agent-policies.test.js",
+      "input": {
+        "short": "short",
+        "long": "long",
+        "events": [
+          [
+            "down",
+            0
+          ],
+          [
+            "down",
+            1
+          ],
+          [
+            "advance",
+            600
+          ],
+          [
+            "up"
+          ]
+        ]
+      },
+      "expected": {
+        "actions": [
+          "long"
+        ],
+        "handledUp": [
+          true
+        ]
+      }
+    },
+    {
+      "id": "steering.short-none",
+      "contract": "steering.press",
+      "agents": [
+        "steering"
+      ],
+      "reference": "agent-policies.test.js",
+      "input": {
+        "short": "none",
+        "long": "long",
+        "events": [
+          [
+            "down",
+            0
+          ],
+          [
+            "up"
+          ]
+        ]
+      },
+      "expected": {
+        "actions": [],
+        "handledUp": [
+          false
+        ]
+      }
+    },
+    {
+      "id": "steering.long-none",
+      "contract": "steering.press",
+      "agents": [
+        "steering"
+      ],
+      "reference": "agent-policies.test.js",
+      "input": {
+        "short": "short",
+        "long": "none",
+        "events": [
+          [
+            "down",
+            0
+          ],
+          [
+            "advance",
+            600
+          ],
+          [
+            "up"
+          ]
+        ]
+      },
+      "expected": {
+        "actions": [],
+        "handledUp": [
+          false
+        ]
+      }
+    },
+    {
+      "id": "steering.route-direct",
+      "contract": "steering.media-decision",
+      "agents": [
+        "steering"
+      ],
+      "reference": "../agents/steering.js",
+      "input": {
+        "command": "next",
+        "keyCode": 87,
+        "provider": {
+          "route": "direct",
+          "keyCode": 87
+        }
+      },
+      "expected": {
+        "route": "direct",
+        "keyCode": 87
+      }
+    },
+    {
+      "id": "steering.route-keymanager",
+      "contract": "steering.media-decision",
+      "agents": [
+        "steering"
+      ],
+      "reference": "../agents/steering.js",
+      "input": {
+        "command": "next",
+        "keyCode": 87,
+        "provider": {
+          "route": "keymanager",
+          "keyCode": 87
+        }
+      },
+      "expected": {
+        "route": "keymanager",
+        "keyCode": 87
+      }
+    },
+    {
+      "id": "steering.route-stale-key",
+      "contract": "steering.media-decision",
+      "agents": [
+        "steering"
+      ],
+      "reference": "../agents/steering.js",
+      "input": {
+        "command": "next",
+        "keyCode": 87,
+        "provider": {
+          "route": "keymanager",
+          "keyCode": 85
+        }
+      },
+      "expected": {
+        "route": "keymanager",
+        "keyCode": 87
+      }
+    },
+    {
+      "id": "steering.route-noop",
+      "contract": "steering.media-decision",
+      "agents": [
+        "steering"
+      ],
+      "reference": "../agents/steering.js",
+      "input": {
+        "command": "next",
+        "keyCode": 87,
+        "provider": {
+          "route": "noop",
+          "keyCode": 87
+        }
+      },
+      "expected": {
+        "route": "noop",
+        "keyCode": 87
+      }
+    },
+    {
+      "id": "steering.route-unknown",
+      "contract": "steering.media-decision",
+      "agents": [
+        "steering"
+      ],
+      "reference": "../agents/steering.js",
+      "input": {
+        "command": "next",
+        "keyCode": 87,
+        "provider": {
+          "route": "bad",
+          "keyCode": 85
+        }
+      },
+      "expected": {
+        "route": "native",
+        "keyCode": 87
+      }
+    },
+    {
+      "id": "steering.route-null",
+      "contract": "steering.media-decision",
+      "agents": [
+        "steering"
+      ],
+      "reference": "../agents/steering.js",
+      "input": {
+        "command": "next",
+        "keyCode": 87,
+        "provider": null
+      },
+      "expected": {
+        "route": "native",
+        "keyCode": 87
+      }
+    },
+    {
+      "id": "steering.sequence-keymanager",
+      "contract": "steering.media-sequence",
+      "agents": [
+        "steering"
+      ],
+      "reference": "../agents/steering.js",
+      "input": {
+        "route": "keymanager",
+        "keyCode": 87,
+        "events": [
+          [
+            "down",
+            0
+          ],
+          [
+            "down",
+            1
+          ],
+          [
+            "up",
+            0
+          ]
+        ]
+      },
+      "expected": {
+        "providerCalls": 1,
+        "mediaDispatches": 1,
+        "originalKeyEvents": 0
+      }
+    },
+    {
+      "id": "steering.sequence-direct",
+      "contract": "steering.media-sequence",
+      "agents": [
+        "steering"
+      ],
+      "reference": "../agents/steering.js",
+      "input": {
+        "route": "direct",
+        "keyCode": 87,
+        "events": [
+          [
+            "down",
+            0
+          ],
+          [
+            "down",
+            1
+          ],
+          [
+            "up",
+            0
+          ]
+        ]
+      },
+      "expected": {
+        "providerCalls": 1,
+        "mediaDispatches": 0,
+        "originalKeyEvents": 0
+      }
+    },
+    {
+      "id": "steering.sequence-native",
+      "contract": "steering.media-sequence",
+      "agents": [
+        "steering"
+      ],
+      "reference": "../agents/steering.js",
+      "input": {
+        "route": "native",
+        "keyCode": 87,
+        "events": [
+          [
+            "down",
+            0
+          ],
+          [
+            "down",
+            1
+          ],
+          [
+            "up",
+            0
+          ]
+        ]
+      },
+      "expected": {
+        "providerCalls": 1,
+        "mediaDispatches": 0,
+        "originalKeyEvents": 3
+      }
+    },
+    {
+      "id": "steering.sequence-noop",
+      "contract": "steering.media-sequence",
+      "agents": [
+        "steering"
+      ],
+      "reference": "../agents/steering.js",
+      "input": {
+        "route": "noop",
+        "keyCode": 87,
+        "events": [
+          [
+            "down",
+            0
+          ],
+          [
+            "down",
+            1
+          ],
+          [
+            "up",
+            0
+          ]
+        ]
+      },
+      "expected": {
+        "providerCalls": 1,
+        "mediaDispatches": 0,
+        "originalKeyEvents": 0
+      }
+    }
+  ]
+}

@@ -1,0 +1,96 @@
+--- a/lsplant/src/main/jni/art/runtime/thread.hpp
++++ b/lsplant/src/main/jni/art/runtime/thread.hpp
+@@ -1,10 +1,16 @@
+ #pragma once
+ 
+ #include "common.hpp"
++#include "art/runtime/obj_ptr.hpp"
+ 
+ namespace lsplant::art {
++namespace mirror { class Class; }
+ 
+ class Thread {
++    CREATE_MEM_FUNC_SYMBOL_ENTRY(ObjPtr<mirror::Class>, DecodeJObject, Thread *thiz, jobject value) {
++        return DecodeJObjectSym(thiz, value);
++    }
++
+     CREATE_FUNC_SYMBOL_ENTRY(Thread *, CurrentFromGdb) {
+         if (CurrentFromGdbSym) [[likely]]
+             return CurrentFromGdbSym();
+@@ -13,6 +19,8 @@
+     }
+ 
+ public:
++    mirror::Class *DecodeClass(jclass owner) { return DecodeJObject(this, owner).Ptr(); }
++
+     static Thread *Current() { return CurrentFromGdb(); }
+ 
+     static bool Init(const HookHandler &handler) {
+@@ -20,6 +28,7 @@
+             [[unlikely]] {
+             return false;
+         }
++        if (!RETRIEVE_MEM_FUNC_SYMBOL(DecodeJObject, "_ZNK3art6Thread13DecodeJObjectEP8_jobject")) return false;
+         return true;
+     }
+ };
+--- a/lsplant/src/main/jni/art/mirror/class.hpp
++++ b/lsplant/src/main/jni/art/mirror/class.hpp
+@@ -14,6 +14,10 @@
+ 
+ class Class {
+ private:
++    CREATE_MEM_FUNC_SYMBOL_ENTRY(ArtMethod *, FindClassInitializer, Class *thiz, size_t pointer_size) {
++        return FindClassInitializerSym(thiz, pointer_size);
++    }
++
+     CREATE_MEM_FUNC_SYMBOL_ENTRY(const char *, GetDescriptor, Class *thiz, std::string *storage) {
+         if (GetDescriptorSym) [[likely]]
+             return GetDescriptorSym(thiz, storage);
+@@ -100,7 +104,11 @@
+     inline static uint8_t initialized_status = 0;
+ 
+ public:
++    ArtMethod *Initializer() { return FindClassInitializer(this, sizeof(void *)); }
++
+     static bool Init(const HookHandler &handler) {
++        if (!RETRIEVE_MEM_FUNC_SYMBOL(FindClassInitializer,
++            "_ZN3art6mirror5Class20FindClassInitializerENS_11PointerSizeE")) return false;
+         if (!RETRIEVE_MEM_FUNC_SYMBOL(GetDescriptor,
+                                       "_ZN3art6mirror5Class13GetDescriptorEPNSt3__112"
+                                       "basic_stringIcNS2_11char_traitsIcEENS2_9allocatorIcEEEE")) {
+--- a/lsplant/src/main/jni/include/lsplant.hpp
++++ b/lsplant/src/main/jni/include/lsplant.hpp
+@@ -152,6 +152,9 @@
+ [[nodiscard, maybe_unused, gnu::visibility("default")]] bool Deoptimize(JNIEnv *env,
+                                                                         jobject method);
+ 
++// Invalidate a class initializer without executing it or requiring a reflected Method.
++[[nodiscard, gnu::visibility("default")]] bool DeoptimizeClassInitializer(JNIEnv *env, jclass owner);
++
+ /// \brief Get the registered native function pointer of a native function. It helps user to hook
+ /// native methods directly by backing up the native function pointer this function returns and
+ /// env->registerNatives another native function pointer.
+--- a/lsplant/src/main/jni/lsplant.cc
++++ b/lsplant/src/main/jni/lsplant.cc
+@@ -841,6 +841,20 @@
+     return ClassLinker::SetEntryPointsToInterpreter(art_method);
+ }
+ 
++bool DeoptimizeClassInitializer(JNIEnv *, jclass owner) {
++    if (owner == nullptr) return false;
++    Thread *self = Thread::Current();
++    if (self == nullptr) return false;
++    ScopedGCCriticalSection section(self, art::gc::kGcCauseDebugger, art::gc::kCollectorTypeDebugger);
++    ScopedSuspendAll suspend("VoyahTune class initializer", false);
++    Class *type = self->DecodeClass(owner);
++    if (type == nullptr) return false;
++    ArtMethod *method = type->Initializer();
++    if (method == nullptr) return true;
++    RecordDeoptimized(type->GetClassDef(), method);
++    return ClassLinker::SetEntryPointsToInterpreter(method);
++}
++
+ [[maybe_unused]] void *GetNativeFunction(JNIEnv *env, jobject method) {
+     if (!method || !JNI_IsInstanceOf(env, method, executable)) {
+         LOGE("method is not an executable");

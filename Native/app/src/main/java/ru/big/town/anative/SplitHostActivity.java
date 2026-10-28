@@ -983,7 +983,7 @@ public class SplitHostActivity extends Activity {
                         TAG,
                         "injectTouch недоступен (нет INJECT_EVENTS у Native): "
                                 + e.getMessage()
-                                + " — ввод в VD требует root+Frida-в-system_server или роутинга WM"
+                                + " — ввод в VD требует разрешений и маршрутизации WM"
                                 + " для trusted-дисплея");
             }
         } finally {

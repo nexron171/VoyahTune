@@ -1,209 +1,167 @@
 {
-  "schema": 1,
+  "schema": 2,
   "prioritySeconds": 45,
   "agents": [
     {
       "id": "acc",
       "target": "com.qinggan.canbus.service",
-      "script": "acc-restore.js",
-      "ready": [
-        "[acc-restore] hook ready v2"
-      ],
-      "lifetime": "eternalized",
       "maxAttempts": 4,
       "timeoutSeconds": 35,
       "priority": true,
-      "health": "voyahtune_acc_restore.health",
-      "crashLimit": 3
+      "crashLimit": 3,
+      "modules": [
+        "acc"
+      ]
     },
     {
       "id": "drive-reset",
       "target": "com.qinggan.app.vehiclesetting",
-      "script": "drive-reset.js",
-      "ready": [
-        "[drive-reset] hook ready v2"
-      ],
-      "lifetime": "eternalized",
       "maxAttempts": 4,
       "timeoutSeconds": 35,
-      "health": "voyahtune_drive_reset.health",
-      "crashLimit": 3
+      "crashLimit": 3,
+      "modules": [
+        "drive-reset"
+      ]
     },
     {
       "id": "vehicle-air",
       "target": "com.qinggan.app.vehicle",
-      "script": "drive-reset.js",
-      "ready": [
-        "[drive-reset] hook ready v2"
-      ],
-      "lifetime": "eternalized",
       "maxAttempts": 4,
       "timeoutSeconds": 35,
-      "health": "vehicle.health",
-      "crashLimit": 3
+      "crashLimit": 3,
+      "modules": [
+        "vehicle-air"
+      ]
     },
     {
       "id": "apollo",
       "target": "com.qinggan.app.vehiclesetting",
-      "script": "apollo.js",
-      "ready": [
-        "[apollo] hook ready"
-      ],
-      "lifetime": "eternalized",
       "maxAttempts": 1,
       "timeoutSeconds": 35,
-      "condition": "apollo"
+      "condition": "apollo",
+      "modules": [
+        "apollo"
+      ]
     },
     {
       "id": "steering",
       "target": "com.qinggan.keymanager.service",
-      "script": "steering.js",
-      "ready": [
-        "[steering] hook ready v1"
-      ],
-      "lifetime": "eternalized",
       "maxAttempts": 1,
-      "timeoutSeconds": 35
+      "timeoutSeconds": 35,
+      "modules": [
+        "steering"
+      ]
     },
     {
       "id": "launcher",
       "target": "com.qinggan.app.launcher",
-      "script": "launcher.js",
-      "ready": [
-        "[launcher] hook ready v1"
-      ],
-      "lifetime": "eternalized",
       "maxAttempts": 1,
-      "timeoutSeconds": 35
+      "timeoutSeconds": 35,
+      "modules": [
+        "launcher"
+      ]
     },
     {
       "id": "windows",
       "target": "system_server",
-      "script": "windows.js",
-      "ready": [
-        "[windows] hook ready v1"
-      ],
-      "lifetime": "eternalized",
       "maxAttempts": 1,
       "timeoutSeconds": 35,
-      "statusFile": "vd"
+      "modules": [
+        "windows"
+      ]
     },
     {
       "id": "multidisplay",
       "target": "com.qinggan.systemservice",
-      "script": "multidisplay.js",
-      "ready": [
-        "[multidisplay] hook ready v2"
-      ],
-      "lifetime": "eternalized",
       "maxAttempts": 3,
-      "timeoutSeconds": 35
+      "timeoutSeconds": 35,
+      "modules": [
+        "multidisplay"
+      ]
     },
     {
       "id": "keyboard-en",
       "target": "com.qinggan.app.qgime",
-      "script": "keyboard-en.js",
-      "ready": [
-        "[keyboard-en] hook ready v1"
-      ],
-      "lifetime": "eternalized",
       "maxAttempts": 1,
       "timeoutSeconds": 35,
-      "condition": "keyboard-en"
+      "condition": "keyboard-en",
+      "modules": [
+        "keyboard-en"
+      ]
     },
     {
       "id": "keyboard-ru",
       "target": "com.qinggan.app.qgime",
-      "script": "keyboard-ru.js",
-      "ready": [
-        "[keyboard-ru] hook ready v1"
-      ],
-      "lifetime": "eternalized",
       "maxAttempts": 1,
       "timeoutSeconds": 35,
-      "condition": "keyboard-ru"
+      "condition": "keyboard-ru",
+      "modules": [
+        "keyboard-ru"
+      ]
     },
     {
       "id": "phone",
       "target": "com.qinggan.bluetoothphone",
-      "script": "phone-numbers.js",
-      "ready": [
-        "[phone-numbers] hook ready v1"
-      ],
-      "lifetime": "eternalized",
       "maxAttempts": 1,
       "timeoutSeconds": 35,
-      "allow32Bit": true,
-      "crashLimit": 2
+      "crashLimit": 2,
+      "modules": [
+        "phone"
+      ]
     },
     {
       "id": "cluster",
       "target": "com.qinggan.cluster",
-      "script": "cluster-navigation.js",
-      "ready": [
-        "[cluster] hook ready v1"
-      ],
-      "lifetime": "eternalized",
       "maxAttempts": 1,
       "timeoutSeconds": 45,
-      "allow32Bit": true,
-      "crashLimit": 2
+      "crashLimit": 2,
+      "modules": [
+        "cluster"
+      ]
     },
     {
       "id": "rds",
       "target": "com.pateo.rdsapp",
-      "script": "app-client.js",
-      "ready": [
-        "[app-client] hook ready v1",
-        "[rds-restore] hook ready v1"
-      ],
-      "lifetime": "eternalized",
       "maxAttempts": 1,
       "timeoutSeconds": 35,
-      "allow32Bit": true,
-      "crashLimit": 2
+      "crashLimit": 2,
+      "modules": [
+        "rds",
+        "client.com.pateo.rdsapp"
+      ]
     },
     {
       "id": "statusbar",
       "target": "com.qinggan.systemui",
-      "script": "app-client.js",
-      "ready": [
-        "[app-client] hook ready v1",
-        "[carplay-statusbar] hook ready v1"
-      ],
-      "lifetime": "eternalized",
       "maxAttempts": 1,
       "timeoutSeconds": 35,
-      "allow32Bit": true,
-      "crashLimit": 2
+      "crashLimit": 2,
+      "modules": [
+        "statusbar",
+        "client.com.qinggan.systemui"
+      ]
     },
     {
       "id": "yandex-navigation",
       "target": "ru.yandex.yandexnavi",
-      "script": "app-client.js",
-      "ready": [
-        "[app-client] hook ready v1",
-        "[navigation-source] hook ready v1"
-      ],
-      "lifetime": "eternalized",
       "maxAttempts": 1,
       "timeoutSeconds": 35,
-      "allow32Bit": true,
-      "crashLimit": 2
+      "crashLimit": 2,
+      "modules": [
+        "yandex-navigation",
+        "client.ru.yandex.yandexnavi"
+      ]
     },
     {
       "id": "dgis-navigation",
       "target": "ru.dublgis.dgismobile",
-      "script": "app-client.js",
-      "ready": [
-        "[app-client] hook ready v1",
-        "[navigation-source] hook ready v1"
-      ],
-      "lifetime": "eternalized",
       "maxAttempts": 1,
       "timeoutSeconds": 35,
-      "allow32Bit": true,
-      "crashLimit": 2
+      "crashLimit": 2,
+      "modules": [
+        "dgis-navigation",
+        "client.ru.dublgis.dgismobile"
+      ]
     }
   ]
 }

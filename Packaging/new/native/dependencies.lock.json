@@ -1,0 +1,62 @@
+{
+  "schema": 1,
+  "ndk": "27.0.12077973",
+  "cmake": "3.22.1",
+  "api": 30,
+  "javaRelease": 11,
+  "dependencies": [
+    {
+      "path": "LSPlant",
+      "repository": "https://github.com/LSPosed/LSPlant.git",
+      "revision": "7217ac6f41e2bda549e4acb54e632abb03e5ccaf",
+      "license": "LGPL-3.0",
+      "tag": "v6.4",
+      "patches": [
+        {
+          "path": "patches/lsplant-publish-backup.patch",
+          "sha256": "b3c32405a0e45a16f4704d1d2461737df7f527c1ed182f815e7001b81b6480f2",
+          "reason": "Publish ART callback originals with acquire/release before concurrent verifier calls; reject an unavailable inline trampoline."
+        },
+        {
+          "path": "patches/lsplant-class-initializer.patch",
+          "sha256": "d2598ee7c9d3fd8b72d4521eb3b3a387d7c1636360f3c740a2f8bf306577deef",
+          "reason": "Invalidate static-initializer callers by resolved ART symbols under GC/suspend guards without running class initialization."
+        },
+        {
+          "path": "patches/lsplant-retire-backup.patch",
+          "sha256": "637a16537b37d10d5ce35ea47c97fd0efef8dcfc24679fcb06caabae92a87315",
+          "reason": "Retire generated backup metadata and pending JIT/class-initialization references under GC/suspend guards before dropping the JNI root."
+        }
+      ]
+    },
+    {
+      "path": "LSPlant/lsplant/src/main/jni/external/dex_builder",
+      "repository": "https://github.com/LSPosed/DexBuilder.git",
+      "revision": "9d57844a301077abf4c29e061b2458c56a363c8f",
+      "license": "LGPL-3.0"
+    },
+    {
+      "path": "LSPlant/lsplant/src/main/jni/external/dex_builder/external/parallel_hashmap",
+      "repository": "https://github.com/greg7mdp/parallel-hashmap.git",
+      "revision": "65775fa09fecaa65d0b0022ab6bf091c0e509445",
+      "license": "Apache-2.0"
+    },
+    {
+      "path": "Dobby",
+      "repository": "https://github.com/jmpews/Dobby.git",
+      "revision": "0932d69c320e786672361ab53825ba8f4245e9d3",
+      "license": "Apache-2.0",
+      "reason": "ARM64 prototype inline backend; legacy symbol resolver disabled after reproduced SIGBUS on Android 11"
+    },
+    {
+      "path": "xDL",
+      "repository": "https://github.com/hexhacking/xDL.git",
+      "revision": "6ab03d9d8976b5aa2d264f435ea3a4c4c5b3e67c",
+      "license": "MIT",
+      "tag": "v2.4.0"
+    }
+  ],
+  "jdk": 21,
+  "compileApi": 35,
+  "buildTools": "35.0.0"
+}

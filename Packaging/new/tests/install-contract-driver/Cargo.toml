@@ -1,0 +1,12 @@
+[package]
+name = "install-contract-driver"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+release-core = { path = "../../../../Installer/crates/release-core" }
+serde_json = "1"
+tempfile = "3"

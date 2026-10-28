@@ -1,0 +1,88 @@
+--- a/lsplant/src/main/jni/common.hpp
++++ b/lsplant/src/main/jni/common.hpp
+@@ -119,6 +119,7 @@
+     hooked_classes_;
+ 
+ inline SharedHashSet<art::ArtMethod *> deoptimized_methods_set_;
++inline SharedHashMap<art::ArtMethod *, const art::dex::ClassDef *> deoptimized_method_classes_;
+ 
+ inline SharedHashMap<const art::dex::ClassDef *, phmap::flat_hash_set<art::ArtMethod *>>
+     deoptimized_classes_;
+@@ -164,6 +165,9 @@
+ }
+ 
+ inline void RecordDeoptimized(const art::dex::ClassDef *class_def, art::ArtMethod *art_method) {
++    deoptimized_method_classes_.lazy_emplace_l(
++        art_method, [class_def](auto &it) { it.second = class_def; },
++        [art_method, class_def](const auto &ctor) { ctor(art_method, class_def); });
+     { deoptimized_classes_[class_def].emplace(art_method); }
+     deoptimized_methods_set_.insert(art_method);
+ }
+@@ -174,3 +178,21 @@
+ }
+ 
+ }  // namespace lsplant
++
++namespace lsplant {
++inline void ForgetDeoptimizedBackup(art::ArtMethod *backup) {
++    deoptimized_method_classes_.erase_if(backup, [backup](const auto &owner) {
++        deoptimized_classes_.erase_if(owner.second, [backup](auto &entry) {
++            entry.second.erase(backup);
++            return entry.second.empty();
++        });
++        return true;
++    });
++    deoptimized_methods_set_.erase(backup);
++}
++
++inline void ForgetPendingJitBackup(art::ArtMethod *backup) {
++    std::unique_lock lock(jit_movements_lock_);
++    jit_movements_.remove_if([backup](const auto &movement) { return movement.second == backup; });
++}
++}  // namespace lsplant
+--- a/lsplant/src/main/jni/art/mirror/class.hpp
++++ b/lsplant/src/main/jni/art/mirror/class.hpp
+@@ -104,6 +104,19 @@
+     inline static uint8_t initialized_status = 0;
+ 
+ public:
++    static void ForgetBackupMethod(ArtMethod *backup) {
++        std::unique_lock lock(backup_methods_lock_);
++        for (auto thread = backup_methods_.begin(); thread != backup_methods_.end();) {
++            for (auto definition = thread->second.begin(); definition != thread->second.end();) {
++                definition->second.erase(backup);
++                if (definition->second.empty()) definition = thread->second.erase(definition);
++                else ++definition;
++            }
++            if (thread->second.empty()) thread = backup_methods_.erase(thread);
++            else ++thread;
++        }
++    }
++
+     ArtMethod *Initializer() { return FindClassInitializer(this, sizeof(void *)); }
+ 
+     static bool Init(const HookHandler &handler) {
+--- a/lsplant/src/main/jni/lsplant.cc
++++ b/lsplant/src/main/jni/lsplant.cc
+@@ -606,6 +606,10 @@
+                                     art::gc::kCollectorTypeDebugger);
+     ScopedSuspendAll suspend("LSPlant Hook", false);
+     LOGV("Unhooking: target = %p, backup = %p", target, backup);
++    // Generated-class metadata must disappear before its last JNI root is released.
++    ForgetDeoptimizedBackup(backup);
++    Class::ForgetBackupMethod(backup);
++    ForgetPendingJitBackup(backup);
+     auto access_flags = target->GetAccessFlags();
+     target->CopyFrom(backup);
+     target->SetAccessFlags(access_flags);
+@@ -801,8 +805,9 @@
+         return it.second.empty();
+     });
+     auto *backup_method = env->FromReflectedMethod(reflected_backup);
++    const bool restored = DoUnHook(target, backup);
+     env->DeleteGlobalRef(reflected_backup);
+-    if (DoUnHook(target, backup)) {
++    if (restored) {
+         std::apply(
+             [backup_method, target_method_id = env->FromReflectedMethod(target_method)](auto... v) {
+                 ((*v == backup_method && (LOGD("Propagate internal used method because of unhook"),

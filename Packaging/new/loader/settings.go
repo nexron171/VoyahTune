@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"voyahtune/unified-loader/moduleplan"
 )
 
 func androidCommand(ctx context.Context, executable string, arguments ...string) string {
@@ -52,45 +54,18 @@ func keyboardMode(path, boot string, identity processIdentity, readSetting func(
 	if err != nil && !os.IsNotExist(err) {
 		return "", err
 	}
-	if selection.Boot == boot && selection.Identity == identity {
-		return selection.Mode, nil
+	previous := moduleplan.KeyboardSelection{
+		Identity: moduleplan.ProcessIdentity{BootID: selection.Boot, PID: selection.Identity.PID, StartTicks: selection.Identity.StartTicks},
+		Mode:     selection.Mode,
 	}
-	mode := readSetting()
-	if mode != "en" && mode != "ru" {
-		mode = "off"
+	current := moduleplan.ProcessIdentity{BootID: boot, PID: identity.PID, StartTicks: identity.StartTicks}
+	mode := moduleplan.KeyboardMode(&previous, current, readSetting)
+	if previous.Identity == current {
+		return mode, nil
 	}
 	selection = keyboardSelection{boot, identity, mode}
 	if err := writeAtomic(path, selection); err != nil {
 		return "", err
 	}
 	return mode, nil
-}
-
-func dynamicAgents(fullscreen, density string) []agentConfig {
-	excluded := map[string]bool{}
-	for _, name := range []string{"com.qinggan.keymanager.service", "com.qinggan.systemservice", "com.qinggan.app.launcher", "com.qinggan.canbus.service", "com.qinggan.app.vehiclesetting", "com.qinggan.app.vehicle", "com.qinggan.app.qgime", "com.qinggan.app.hiboard", "com.qinggan.cluster", "com.qinggan.bluetoothphone", "com.qinggan.systemui", "com.pateo.rdsapp", "ru.yandex.yandexnavi", "ru.dublgis.dgismobile"} {
-		excluded[name] = true
-	}
-	packages := map[string]bool{}
-	for _, name := range strings.Split(fullscreen, ",") {
-		name = strings.TrimSpace(name)
-		if safeName(name) && strings.Contains(name, ".") && !strings.HasSuffix(name, ".") && !excluded[name] {
-			packages[name] = false
-		}
-	}
-	for _, name := range strings.Split(density, ",") {
-		name = strings.TrimSpace(name)
-		if name == "ru.yandex.yandexmaps" || name == "com.yango.maps.android" {
-			packages[name] = true
-		}
-	}
-	var result []agentConfig
-	for name, mapkit := range packages {
-		markers := []string{"[app-client] hook ready v1"}
-		if mapkit {
-			markers = append(markers, "[mapkit-dpi] hook ready v1")
-		}
-		result = append(result, agentConfig{ID: "client." + name, Target: name, Script: "app-client.js", Ready: markers, Lifetime: "eternalized", MaxAttempts: 1, TimeoutSeconds: 30, CrashLimit: 2, Dynamic: true})
-	}
-	return result
 }

@@ -1,141 +1,123 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"voyahtune/unified-loader/agentwire"
 )
 
-func TestHookHealthRequiresEveryConfiguredAgentAndCurrentProcess(t *testing.T) {
+func nativeHealthFixture(t *testing.T) (string, string, nativeLoaderConfig, loaderStatus, agentwire.Status) {
+	t.Helper()
+	root := t.TempDir()
+	fakeProcess(t, root, 10, "/data/local/bin/voyahtune-new/voyahtune-loader", "100")
+	fakeProcess(t, root, 20, "com.qinggan.canbus.service", "200")
+	testFile(t, filepath.Join(root, "sys/kernel/random/boot_id"), "boot", 0600)
+	testFile(t, filepath.Join(root, "uptime"), "110.00 0.00", 0600)
+	testFile(t, filepath.Join(root, "20/status"), "Uid:\t1000\t1000\t1000\t1000\n", 0600)
+	config := nativeLoaderConfig{Code: nativeCode{NativeID: "native", RuntimeID: "java"}, Agents: []nativeAgentConfig{{ID: "acc", Target: "com.qinggan.canbus.service", Modules: []string{"acc"}}}}
+	snapshot := loaderStatus{Schema: 1, Boot: "boot", Loader: processIdentity{10, "100"}, UpdatedUptime: 109, State: "running", Agents: map[string]agentStatus{
+		"acc": {Identity: processIdentity{20, "200"}, Target: config.Agents[0].Target, State: "active", UID: 1000, NativeID: "native", RuntimeID: "java", Revision: 7, Modules: []string{"acc"}},
+	}}
+	ack := agentwire.Status{Schema: 1, Target: agentwire.Target{BootID: "boot", PID: 20, UID: 1000, StartTicks: "200", NativeID: "native", RuntimeID: "java"}, State: "ready", Revision: 7, Modules: map[string]string{"acc": "active"}}
+	return filepath.Join(root, "status.json"), root, config, snapshot, ack
+}
+
+func TestNativeHealthRequiresCurrentSupervisorAndAgentState(t *testing.T) {
 	for _, scenario := range []struct {
 		name     string
 		mutate   func(*loaderStatus)
 		accepted bool
 	}{
 		{"active", func(*loaderStatus) {}, true},
-		{"failed", func(status *loaderStatus) {
-			status.Agents["acc"] = agentStatus{processIdentity{20, "200"}, "com.qinggan.canbus.service", "failed", "attempt budget consumed"}
-		}, false},
-		{"missing", func(status *loaderStatus) { delete(status.Agents, "acc") }, false},
-		{"empty", func(status *loaderStatus) { status.Agents = nil }, false},
-		{"injecting", func(status *loaderStatus) {
-			agent := status.Agents["acc"]
-			agent.State = "injecting"
-			status.Agents["acc"] = agent
-		}, false},
-		{"restart-required", func(status *loaderStatus) {
-			agent := status.Agents["acc"]
-			agent.State = "restart-required"
-			status.Agents["acc"] = agent
-		}, false},
-		{"unsupported", func(status *loaderStatus) {
-			agent := status.Agents["acc"]
-			agent.State = "unsupported"
-			status.Agents["acc"] = agent
-		}, false},
-		{"mandatory-disabled", func(status *loaderStatus) {
-			agent := status.Agents["acc"]
-			agent.State = "disabled"
-			status.Agents["acc"] = agent
-		}, false},
-		{"live-but-waiting", func(status *loaderStatus) {
-			status.Agents["acc"] = agentStatus{Target: "com.qinggan.canbus.service", State: "waiting"}
-		}, false},
-		{"pid-reused", func(status *loaderStatus) {
-			agent := status.Agents["acc"]
-			agent.Identity.StartTicks = "199"
-			status.Agents["acc"] = agent
-		}, false},
-		{"wrong-target", func(status *loaderStatus) {
-			agent := status.Agents["acc"]
-			agent.Target = "another.process"
-			status.Agents["acc"] = agent
-		}, false},
+		{"missing", func(s *loaderStatus) { delete(s.Agents, "acc") }, false},
+		{"stale-heartbeat", func(s *loaderStatus) { s.UpdatedUptime = 90 }, false},
+		{"loader-reused", func(s *loaderStatus) { s.Loader.StartTicks = "99" }, false},
+		{"loader-quiesced", func(s *loaderStatus) { s.State = "quiesced" }, false},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
-			root := t.TempDir()
-			fakeProcess(t, root, 10, "/data/local/bin/voyahtune-new/voyahtune-loader", "100")
-			fakeProcess(t, root, 20, "com.qinggan.canbus.service", "200")
-			testFile(t, filepath.Join(root, "sys/kernel/random/boot_id"), "boot", 0644)
-			testFile(t, filepath.Join(root, "uptime"), "110.00 0.00", 0644)
-			config := loaderConfig{Agents: []agentConfig{{ID: "acc", Target: "com.qinggan.canbus.service"}}}
-			snapshot := loaderStatus{
-				Schema: 1, Boot: "boot", Loader: processIdentity{10, "100"}, UpdatedUptime: 109, State: "running",
-				Agents: map[string]agentStatus{"acc": {processIdentity{20, "200"}, "com.qinggan.canbus.service", "active", ""}},
-			}
+			path, root, config, snapshot, ack := nativeHealthFixture(t)
 			scenario.mutate(&snapshot)
-			path := filepath.Join(root, "status.json")
 			if err := writeAtomic(path, snapshot); err != nil {
 				t.Fatal(err)
 			}
-			if err := checkHealth(path, root); err != nil {
-				t.Fatal("supervisor fixture must be healthy", err)
-			}
-			err := checkHooks(path, root, config)
+			err := checkNativeHooksWithInspector(path, root, config, func(context.Context, agentwire.Target) (agentwire.Status, error) { return ack, nil })
 			if (err == nil) != scenario.accepted {
 				t.Fatalf("accepted=%t: %v", scenario.accepted, err)
 			}
-			if err != nil && !strings.Contains(err.Error(), "hook acc:") {
-				t.Fatal("missing agent diagnostics", err)
+		})
+	}
+	for _, state := range []string{"failed", "injecting", "restart-required", "unsupported", "disabled", "waiting"} {
+		t.Run(state, func(t *testing.T) {
+			path, root, config, snapshot, ack := nativeHealthFixture(t)
+			status := snapshot.Agents["acc"]
+			status.State = state
+			snapshot.Agents["acc"] = status
+			if err := writeAtomic(path, snapshot); err != nil {
+				t.Fatal(err)
+			}
+			if err := checkNativeHooksWithInspector(path, root, config, func(context.Context, agentwire.Target) (agentwire.Status, error) { return ack, nil }); err == nil {
+				t.Fatal("Unready mandatory agent accepted")
 			}
 		})
 	}
 }
 
-func TestHookHealthAllowsAbsentAppsAndConditionallyDisabledAgents(t *testing.T) {
+func TestNativeHealthRequiresFullLiveAcknowledgement(t *testing.T) {
+	for _, scenario := range []struct {
+		name   string
+		mutate func(*agentwire.Status)
+	}{
+		{"revision", func(s *agentwire.Status) { s.Revision++ }},
+		{"runtime", func(s *agentwire.Status) { s.RuntimeID = "old" }},
+		{"uid", func(s *agentwire.Status) { s.UID++ }},
+		{"schema", func(s *agentwire.Status) { s.Schema = 0 }},
+		{"partial", func(s *agentwire.Status) { delete(s.Modules, "acc") }},
+		{"inactive", func(s *agentwire.Status) { s.Modules["acc"] = "failed" }},
+		{"draining", func(s *agentwire.Status) { s.State = "quiescing" }},
+		{"error", func(s *agentwire.Status) { s.Error = "cleanup uncertain" }},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			path, root, config, snapshot, ack := nativeHealthFixture(t)
+			scenario.mutate(&ack)
+			if err := writeAtomic(path, snapshot); err != nil {
+				t.Fatal(err)
+			}
+			if err := checkNativeHooksWithInspector(path, root, config, func(context.Context, agentwire.Target) (agentwire.Status, error) { return ack, nil }); err == nil {
+				t.Fatal("Invalid live acknowledgement accepted")
+			}
+		})
+	}
+	path, root, config, snapshot, _ := nativeHealthFixture(t)
+	if err := writeAtomic(path, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	err := checkNativeHooksWithInspector(path, root, config, func(context.Context, agentwire.Target) (agentwire.Status, error) {
+		return agentwire.Status{}, errors.New("endpoint unavailable")
+	})
+	if err == nil || !strings.Contains(err.Error(), "endpoint unavailable") {
+		t.Fatal(err)
+	}
+}
+
+func TestNativeHealthAllowsAbsentAndConditionallyDisabledAgents(t *testing.T) {
 	root := t.TempDir()
-	agent := agentConfig{ID: "keyboard-en", Target: "com.qinggan.app.qgime", Condition: "keyboard-en"}
+	agent := nativeAgentConfig{ID: "keyboard-en", Target: "com.qinggan.app.qgime", Condition: "keyboard-en"}
 	status := agentStatus{Target: agent.Target, State: "waiting"}
 	if err := checkAgentStatus(root, agent, status); err != nil {
-		t.Fatal("absent optional app", err)
+		t.Fatal(err)
 	}
 	fakeProcess(t, root, 20, agent.Target, "200")
 	status.Identity = processIdentity{20, "200"}
 	status.State = "disabled"
 	if err := checkAgentStatus(root, agent, status); err != nil {
-		t.Fatal("disabled keyboard lane", err)
+		t.Fatal(err)
 	}
 	status.Identity.StartTicks = "199"
 	if err := checkAgentStatus(root, agent, status); err == nil {
-		t.Fatal("stale disabled state accepted")
+		t.Fatal("Stale disabled identity accepted")
 	}
-}
-
-func TestHookHealthRejectsStaleSupervisorAndFailedDynamicAgent(t *testing.T) {
-	root := t.TempDir()
-	fakeProcess(t, root, 10, "/data/local/bin/voyahtune-new/voyahtune-loader", "100")
-	fakeProcess(t, root, 20, "system_server", "200")
-	fakeProcess(t, root, 30, "com.example.app", "300")
-	testFile(t, filepath.Join(root, "sys/kernel/random/boot_id"), "boot", 0644)
-	testFile(t, filepath.Join(root, "uptime"), "110.00 0.00", 0644)
-	config := loaderConfig{Agents: []agentConfig{{ID: "windows", Target: "system_server"}}}
-	snapshot := loaderStatus{
-		Schema: 1, Boot: "boot", Loader: processIdentity{10, "100"}, UpdatedUptime: 90, State: "running",
-		Agents: map[string]agentStatus{
-			"windows":                {processIdentity{20, "200"}, "system_server", "active", ""},
-			"client.com.example.app": {processIdentity{30, "300"}, "com.example.app", "active", ""},
-		},
-	}
-	path := filepath.Join(root, "status.json")
-	check := func(accepted bool) {
-		t.Helper()
-		if err := writeAtomic(path, snapshot); err != nil {
-			t.Fatal(err)
-		}
-		if err := checkHooks(path, root, config); (err == nil) != accepted {
-			t.Fatalf("accepted=%t: %v", accepted, err)
-		}
-	}
-	check(false)
-	snapshot.UpdatedUptime = 109
-	check(true)
-	agent := snapshot.Agents["client.com.example.app"]
-	agent.State = "failed"
-	snapshot.Agents["client.com.example.app"] = agent
-	check(false)
-	agent.State = "disabled"
-	snapshot.Agents["client.com.example.app"] = agent
-	check(true)
-	snapshot.Loader.StartTicks = "99"
-	check(false)
 }

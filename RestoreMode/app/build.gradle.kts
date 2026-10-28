@@ -148,7 +148,6 @@ abstract class VoyahBuildIdentity : DefaultTask() {
             "runtimeHashes" to runtimeFiles.files.associate { source ->
                 val name = runtimeAliases.get()[source.canonicalPath] ?: when (source.name) {
                     "privapp-permissions-ru.big.town.anative.xml" -> "whitelist.xml"
-                    "frida-inject-16.2.1-android-arm64" -> "frida-inject"
                     else -> source.name
                 }
                 name to MessageDigest.getInstance("SHA-256")
@@ -225,9 +224,12 @@ androidComponents {
             } else {
                 runtimeFiles.from(packaging.resolve("system/privapp-permissions-ru.big.town.anative.xml"))
                 runtimeFiles.from(fileTree(runtime) {
-                    include("agents/*.js", "adapters/**/*.js", "runtime/*.js", "config/*.json", "system/*")
+                    include(
+                        "java/src/main/java/**/*.java", "native/**", "loader/**/*.go", "loader/go.mod",
+                        "config/*.json", "system/*"
+                    )
+                    exclude("**/*_test.go")
                 })
-                runtimeFiles.from(runtime.resolve("tools/frida-inject-16.2.1-android-arm64"))
             }
             component.set(android.namespace!!)
             outputDirectory.set(layout.buildDirectory.dir("generated/voyahIdentity/${variant.name}"))

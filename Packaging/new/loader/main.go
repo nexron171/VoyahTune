@@ -6,41 +6,62 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
+	"time"
+
+	"voyahtune/unified-loader/lifecycle"
 )
 
 func main() {
-	runtimeDirectory := flag.String("runtime-dir", "/data/local/bin/voyahtune-new", "Agent manifest, scripts and injector")
-	stateDirectory := flag.String("state-dir", "/data/local/tmp/voyahtune-new", "Private supervisor records")
-	healthDirectory := flag.String("health-dir", "/data/local/open_voyah/new", "OEM-owned agent health files")
-	check := flag.Bool("check", false, "Validate runtime without starting injection")
-	health := flag.Bool("health", false, "Check the supervisor heartbeat; does not prove OEM hook effects")
-	checkAgentHealth := flag.Bool("check-hooks", false, "Check supervisor and configured hooks in available target processes")
+	runtimeDirectory := flag.String("runtime-dir", "/data/local/bin/voyahtune-new", "Native runtime components and module manifest")
+	stateDirectory := flag.String("state-dir", "/data/local/tmp/voyahtune-new", "Private resident journals and control endpoint")
+	check := flag.Bool("check", false, "Validate native components without injection")
+	health := flag.Bool("health", false, "Check the supervisor heartbeat")
+	hooks := flag.Bool("check-hooks", false, "Check current process identities and complete live Java module ACKs")
+	quiesce := flag.Bool("quiesce", false, "Close admission and wait for helpers and target workers to drain")
+	controlStatus := flag.Bool("control-status", false, "Read authenticated runtime admission state")
+	timeout := flag.Duration("control-timeout", 60*time.Second, "Control wait deadline; cancellation does not reopen admission")
 	flag.Parse()
-	if *health && !*checkAgentHealth {
-		if err := checkHealth(filepath.Join(*stateDirectory, "status.json"), "/proc"); err != nil {
+	if *quiesce || *controlStatus {
+		ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+		defer cancel()
+		var response lifecycle.ControlResponse
+		var err error
+		if *quiesce {
+			response, err = quiesceNativeRuntime(ctx, *runtimeDirectory, *stateDirectory, "/proc")
+		} else {
+			response, err = nativeControl(ctx, *stateDirectory, "/proc", "status")
+		}
+		if err != nil {
+			log.Fatal(err)
+		}
+		if err := writeControlResult(response); err != nil {
 			log.Fatal(err)
 		}
 		return
 	}
-	config, err := loadConfig(*runtimeDirectory)
-	if err != nil {
-		log.Fatal(err)
-	}
-	if *checkAgentHealth {
-		if err := checkHooks(filepath.Join(*stateDirectory, "status.json"), "/proc", config); err != nil {
+	if *health && !*hooks {
+		if err := checkHealth(currentStatusPath(*stateDirectory), "/proc"); err != nil {
 			log.Fatal(err)
 		}
 		return
 	}
-	if *check {
+	config, configurationError := loadNativeConfig(*runtimeDirectory)
+	if *check || *hooks {
+		if configurationError != nil {
+			log.Fatal(configurationError)
+		}
+		if *hooks {
+			if err := checkNativeHooks(currentStatusPath(*stateDirectory), "/proc", config); err != nil {
+				log.Fatal(err)
+			}
+		}
 		return
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	manager := supervisor{runtimeDirectory: *runtimeDirectory, stateDirectory: *stateDirectory, healthDirectory: *healthDirectory, procRoot: "/proc", status: &statusStore{agents: map[string]agentStatus{}}, priorityReady: make(chan struct{}), dynamicDesired: map[string]bool{}}
-	if err := manager.run(ctx, config); err != nil {
+	manager := nativeSupervisor{runtimeDirectory: *runtimeDirectory, stateDirectory: *stateDirectory, procRoot: "/proc", config: config, status: &statusStore{agents: map[string]agentStatus{}}, priorityReady: make(chan struct{})}
+	if err := manager.run(ctx, configurationError); err != nil {
 		log.Fatal(err)
 	}
 }
