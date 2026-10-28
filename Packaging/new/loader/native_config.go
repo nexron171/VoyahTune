@@ -26,7 +26,6 @@ type nativeAgentConfig struct {
 	ID             string   `json:"id"`
 	Target         string   `json:"target"`
 	Modules        []string `json:"modules"`
-	Priority       bool     `json:"priority,omitempty"`
 	Condition      string   `json:"condition,omitempty"`
 	MaxAttempts    int      `json:"maxAttempts"`
 	TimeoutSeconds int      `json:"timeoutSeconds"`
@@ -47,10 +46,9 @@ type nativeCode struct {
 }
 
 type nativeLoaderConfig struct {
-	Schema          int                 `json:"schema"`
-	PrioritySeconds int                 `json:"prioritySeconds"`
-	Agents          []nativeAgentConfig `json:"agents"`
-	Code            nativeCode          `json:"-"`
+	Schema int                 `json:"schema"`
+	Agents []nativeAgentConfig `json:"agents"`
+	Code   nativeCode          `json:"-"`
 }
 
 func readRuntimeJSON(path string, value any) error {
@@ -101,22 +99,15 @@ func loadNativeConfig(directory string) (nativeLoaderConfig, error) {
 	if err := readRuntimeJSON(filepath.Join(directory, "agents.json"), &config); err != nil {
 		return config, err
 	}
-	if config.Schema != 2 || config.PrioritySeconds < 1 || config.PrioritySeconds > 60 || len(config.Agents) == 0 || len(config.Agents) > 64 {
+	if config.Schema != 2 || len(config.Agents) == 0 || len(config.Agents) > 64 {
 		return config, errors.New("invalid native module manifest")
 	}
 	seen := map[string]bool{}
-	priority := 0
 	for _, agent := range config.Agents {
 		if !safeName(agent.ID) || !safeName(agent.Target) || seen[agent.ID] || len(agent.Modules) < 1 || len(agent.Modules) > 4 {
 			return config, fmt.Errorf("invalid native agent definition: %s", agent.ID)
 		}
 		seen[agent.ID] = true
-		if agent.Priority {
-			priority++
-			if agent.ID != "acc" {
-				return config, errors.New("ACC owns startup priority")
-			}
-		}
 		if agent.MaxAttempts < 1 || agent.MaxAttempts > 10 || agent.TimeoutSeconds < 1 || agent.TimeoutSeconds > 60 || agent.CrashLimit < 0 || agent.CrashLimit > 10 {
 			return config, fmt.Errorf("invalid lifecycle bounds: %s", agent.ID)
 		}
@@ -138,9 +129,6 @@ func loadNativeConfig(directory string) (nativeLoaderConfig, error) {
 		if !modules[agent.ID] {
 			return config, fmt.Errorf("agent %s must own its primary module", agent.ID)
 		}
-	}
-	if priority != 1 {
-		return config, errors.New("exactly one ACC startup priority required")
 	}
 	if err := readRuntimeJSON(filepath.Join(directory, "runtime-manifest.json"), &config.Code); err != nil {
 		return config, err

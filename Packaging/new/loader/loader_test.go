@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -9,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 func testFile(t *testing.T, path, body string, mode os.FileMode) {
@@ -43,29 +41,6 @@ func TestIdentityRejectsSecondaryProcessAndPIDReuse(t *testing.T) {
 	current, err := readIdentity(root, 20, "com.qinggan.app.launcher")
 	if err != nil || current == identity {
 		t.Fatal("reused PID accepted")
-	}
-}
-
-func TestPriorityReleaseAndTimeout(t *testing.T) {
-	ready := make(chan struct{})
-	completed := make(chan bool, 1)
-	go func() { completed <- waitPriority(context.Background(), ready, time.Second) }()
-	select {
-	case <-completed:
-		t.Fatal("ordinary agents started before ACC")
-	case <-time.After(10 * time.Millisecond):
-	}
-	close(ready)
-	if !<-completed {
-		t.Fatal("ready ACC did not release other agents")
-	}
-	if !waitPriority(context.Background(), make(chan struct{}), time.Millisecond) {
-		t.Fatal("absent ACC starved other agents")
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if waitPriority(ctx, make(chan struct{}), time.Second) {
-		t.Fatal("cancelled loader started workers")
 	}
 }
 

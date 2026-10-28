@@ -18,19 +18,6 @@ func wait(ctx context.Context, duration time.Duration) bool {
 	}
 }
 
-func waitPriority(ctx context.Context, ready <-chan struct{}, duration time.Duration) bool {
-	timer := time.NewTimer(duration)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-ready:
-		return true
-	case <-timer.C:
-		return true
-	}
-}
-
 func lockFile(path string) (*os.File, error) {
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {

@@ -34,8 +34,6 @@ type nativeSupervisor struct {
 	config           nativeLoaderConfig
 	status           *statusStore
 	engine           residentControl
-	priorityReady    chan struct{}
-	priorityOnce     sync.Once
 	quiesceOnce      sync.Once
 	mutex            sync.Mutex
 	agents           map[string]nativeAgentConfig
@@ -63,9 +61,6 @@ func (manager *nativeSupervisor) report(agent nativeAgentConfig, identity proces
 	manager.status.mutex.Lock()
 	manager.status.agents[agent.ID] = value
 	manager.status.mutex.Unlock()
-	if agent.Priority && state != "waiting" && state != "injecting" {
-		manager.priorityOnce.Do(func() { close(manager.priorityReady) })
-	}
 }
 
 func (manager *nativeSupervisor) definitions(target string) []nativeAgentConfig {
@@ -404,61 +399,18 @@ func (manager *nativeSupervisor) run(ctx context.Context, configurationError err
 			return androidCommand(ctx, "settings", "get", "global", key)
 		}
 	}
-	gate := make(chan struct{})
-	workers.Add(1)
-	go func() {
-		defer workers.Done()
-		if waitPriority(workerContext, manager.priorityReady, time.Duration(manager.config.PrioritySeconds)*time.Second) {
-			close(gate)
-		}
-	}()
-	targets := map[string]bool{}
-	priorityTargets := map[string]bool{}
-	for _, agent := range manager.config.Agents {
-		if agent.Priority {
-			priorityTargets[agent.Target] = true
-		}
-	}
-	start := func(agent nativeAgentConfig) {
-		manager.mutex.Lock()
-		manager.agents[agent.ID] = agent
-		manager.wanted[agent.ID] = true
-		manager.mutex.Unlock()
-		manager.report(agent, processIdentity{}, "waiting", "", nil, nil)
-		if targets[agent.Target] {
-			return
-		}
-		targets[agent.Target] = true
-		workers.Add(1)
-		go func() {
-			defer workers.Done()
-			if !priorityTargets[agent.Target] {
-				select {
-				case <-workerContext.Done():
-					return
-				case <-gate:
-				}
-			}
-			for workerContext.Err() == nil {
-				manager.cycle(workerContext, agent.Target)
-				if !wait(workerContext, time.Second) {
-					return
-				}
-			}
-		}()
-	}
+	targetWorkers := agentWorkers{manager: manager, context: workerContext, group: &workers, targets: map[string]bool{}}
 	blocked := func() bool { return manager.admissionBlock() != nil }
 	if blocked() || configurationError != nil {
 		manager.startQuiesce()
 	}
 	if configurationError == nil && !blocked() {
-		for _, agent := range manager.config.Agents {
-			manager.agents[agent.ID] = agent
-			manager.wanted[agent.ID] = true
-		}
-		for _, agent := range manager.config.Agents {
-			start(agent)
-		}
+		targetWorkers.start(manager.config.Agents)
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			targetWorkers.watchDynamic()
+		}()
 	}
 	publisher := statusPublisher{path: filepath.Join(manager.stateDirectory, "status.json"), publicPath: filepath.Join(manager.stateDirectory, "hook-status.v1")}
 	diagnostics := diagnosticsPublisher{command: androidCommand}
@@ -481,7 +433,7 @@ func (manager *nativeSupervisor) run(ctx context.Context, configurationError err
 	}
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
-	for cycles := 0; ; cycles++ {
+	for {
 		state := "running"
 		if configurationError != nil {
 			state = "failed"
@@ -504,34 +456,6 @@ func (manager *nativeSupervisor) run(ctx context.Context, configurationError err
 		}
 		if err := manager.engine.Sweep(); err != nil {
 			log.Printf("native process reconciliation: %v", err)
-		}
-		if configurationError != nil || manager.engine.Snapshot().Phase != lifecycle.Running || cycles%5 != 0 {
-			continue
-		}
-		select {
-		case <-gate:
-		default:
-			continue
-		}
-		dynamic := nativeDynamicAgents(manager.readSetting(ctx, "voyahtune_fullscreen_apps"), manager.readSetting(ctx, "voyahtune_dpi_packages"))
-		manager.mutex.Lock()
-		for id, agent := range manager.agents {
-			if agent.Dynamic {
-				manager.wanted[id] = false
-			}
-		}
-		manager.mutex.Unlock()
-		for _, agent := range dynamic {
-			manager.mutex.Lock()
-			_, known := manager.agents[agent.ID]
-			count := len(manager.agents)
-			if known {
-				manager.wanted[agent.ID] = true
-			}
-			manager.mutex.Unlock()
-			if !known && count < 128 {
-				start(agent)
-			}
 		}
 	}
 }

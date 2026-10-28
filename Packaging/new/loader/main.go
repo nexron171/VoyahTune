@@ -60,7 +60,13 @@ func main() {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	manager := nativeSupervisor{runtimeDirectory: *runtimeDirectory, stateDirectory: *stateDirectory, procRoot: "/proc", config: config, status: &statusStore{agents: map[string]agentStatus{}}, priorityReady: make(chan struct{})}
+	manager := nativeSupervisor{
+		runtimeDirectory: *runtimeDirectory,
+		stateDirectory:   *stateDirectory,
+		procRoot:         "/proc",
+		config:           config,
+		status:           &statusStore{agents: map[string]agentStatus{}},
+	}
 	if err := manager.run(ctx, configurationError); err != nil {
 		log.Fatal(err)
 	}

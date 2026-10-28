@@ -12,7 +12,13 @@ import (
 func nativeRuntimeFixture(t *testing.T) string {
 	t.Helper()
 	directory := t.TempDir()
-	manifest := map[string]any{"schema": 2, "prioritySeconds": 45, "agents": []any{map[string]any{"id": "acc", "target": "com.qinggan.canbus.service", "modules": []string{"acc"}, "priority": true, "maxAttempts": 4, "timeoutSeconds": 35, "crashLimit": 3}}}
+	manifest := nativeLoaderConfig{
+		Schema: 2,
+		Agents: []nativeAgentConfig{{
+			ID: "acc", Target: "com.qinggan.canbus.service", Modules: []string{"acc"},
+			MaxAttempts: 4, TimeoutSeconds: 35, CrashLimit: 3,
+		}},
+	}
 	data, _ := json.Marshal(manifest)
 	testFile(t, filepath.Join(directory, "agents.json"), string(data), 0644)
 	files := map[string]string{}
@@ -51,6 +57,9 @@ func TestNativeManifestLoadsTypedModuleConfiguration(t *testing.T) {
 func TestNativeManifestRejectsLegacyAndUnsafeInputs(t *testing.T) {
 	for _, change := range []func(map[string]any){
 		func(value map[string]any) { value["schema"] = 1 },
+		func(value map[string]any) { value["prioritySeconds"] = 45 },
+		func(value map[string]any) { value["agents"].([]any)[0].(map[string]any)["priority"] = true },
+		func(value map[string]any) { value["agents"].([]any)[0].(map[string]any)["earlyStart"] = true },
 		func(value map[string]any) { value["agents"].([]any)[0].(map[string]any)["script"] = "acc.js" },
 		func(value map[string]any) {
 			value["agents"].([]any)[0].(map[string]any)["modules"] = []string{"unknown"}
@@ -75,5 +84,30 @@ func TestNativeManifestRejectsLegacyAndUnsafeInputs(t *testing.T) {
 		if _, err := loadNativeConfig(directory); err == nil {
 			t.Fatal("unsafe manifest accepted", manifest)
 		}
+	}
+}
+
+func TestNativeManifestSupportsIndependentAgents(t *testing.T) {
+	directory := nativeRuntimeFixture(t)
+	manifest := `{"schema":2,"agents":[{"id":"launcher","target":"com.qinggan.app.launcher","modules":["launcher"],"maxAttempts":1,"timeoutSeconds":35}]}`
+	testFile(t, filepath.Join(directory, "agents.json"), manifest, 0644)
+	config, err := loadNativeConfig(directory)
+	if err != nil {
+		t.Fatal("independent agent configuration requires ACC", err)
+	}
+	if len(config.Agents) != 1 || config.Agents[0].ID != "launcher" {
+		t.Fatal(config.Agents)
+	}
+}
+
+func TestNativeManifestLoadsPackagedAgents(t *testing.T) {
+	directory := nativeRuntimeFixture(t)
+	manifest, err := os.ReadFile(filepath.Join("..", "config", "agents.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	testFile(t, filepath.Join(directory, "agents.json"), string(manifest), 0644)
+	if _, err := loadNativeConfig(directory); err != nil {
+		t.Fatal("packaged agent configuration cannot be loaded", err)
 	}
 }

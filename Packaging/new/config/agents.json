@@ -1,13 +1,11 @@
 {
   "schema": 2,
-  "prioritySeconds": 45,
   "agents": [
     {
       "id": "acc",
       "target": "com.qinggan.canbus.service",
       "maxAttempts": 4,
       "timeoutSeconds": 35,
-      "priority": true,
       "crashLimit": 3,
       "modules": [
         "acc"

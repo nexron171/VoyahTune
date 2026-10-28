@@ -39,7 +39,18 @@ func supervisorFixture(t *testing.T, agents []nativeAgentConfig) (*nativeSupervi
 	testFile(t, filepath.Join(root, "sys/kernel/random/boot_id"), "boot", 0600)
 	testFile(t, filepath.Join(root, "uptime"), "100 0", 0600)
 	spy := new(residentSpy)
-	manager := &nativeSupervisor{stateDirectory: t.TempDir(), procRoot: root, boot: "boot", engine: spy, status: &statusStore{agents: map[string]agentStatus{}}, priorityReady: make(chan struct{}), agents: map[string]nativeAgentConfig{}, wanted: map[string]bool{}, apolloPath: filepath.Join(root, "apollo.v1"), config: nativeLoaderConfig{Code: nativeCode{NativeID: "native", RuntimeID: "java"}}, readSetting: func(context.Context, string) string { return "off" }}
+	manager := &nativeSupervisor{
+		stateDirectory: t.TempDir(),
+		procRoot:       root,
+		boot:           "boot",
+		engine:         spy,
+		status:         &statusStore{agents: map[string]agentStatus{}},
+		agents:         map[string]nativeAgentConfig{},
+		wanted:         map[string]bool{},
+		apolloPath:     filepath.Join(root, "apollo.v1"),
+		config:         nativeLoaderConfig{Code: nativeCode{NativeID: "native", RuntimeID: "java"}},
+		readSetting:    func(context.Context, string) string { return "off" },
+	}
 	for _, agent := range agents {
 		manager.agents[agent.ID] = agent
 		manager.wanted[agent.ID] = true
