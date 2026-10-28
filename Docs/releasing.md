@@ -10,7 +10,7 @@
 `voyahtune` для stable payload и APK, `installer` для GUI/движка. Beta получает
 согласованный номер с суффиксом `-beta`, например `4.5.0-beta`.
 
-Текущий единый контракт требует Installer **1.8.2**, capability `unified-runtime-v1`
+Текущий единый контракт требует Installer **1.8.4**, capability `unified-runtime-v1`
 и совместимую root-службу. Первый переход на неё выполняется через USB; следующие
 совместимые обновления используют тот же payload через OTA. Общий recipe заменяет
 прежний runtime, удаляет известные устаревшие файлы и перезагружает Android.
@@ -63,7 +63,8 @@ ADB и небольшой remover входят в GUI; payload скачивае�
 Установите:
 
 - Git, POSIX shell и Bash, `zip`, `unzip`, стандартные Unix-утилиты;
-- Node.js 22 с npm и Python 3.12+: нужны для сборки и проверок runtime;
+- Python 3.12+, host C++20 compiler и Rust из `Installer/rust-toolchain.toml` для контрактов runtime;
+- Node.js 22 с npm для desktop GUI;
 - Go 1.23+ для единого загрузчика `Packaging/new/`;
 - JDK 21;
 - Android SDK с Command-line Tools. Gradle отдельно не нужен: проекты используют
@@ -269,8 +270,8 @@ npm --prefix Installer/desktop run build
 
 `requirements.minInstallerVersion` внутри архива и `minimumInstallerVersion`
 в записи каталога должны отражать один минимальный поддерживаемый GUI.
-Для текущего единого контракта это 1.8.1; следующий номер самого Installer
-не повышает минимум автоматически.
+Для native/Java runtime это 1.8.4 из-за нового порядка обслуживания и встроенных
+helpers; последующее повышение версии Installer само по себе не меняет минимум.
 
 `minimumOtaVersion` — базовая версия установленного VoyahTune с совместимой root-службой.
 Если служба обновляется через USB, используйте номер впервые содержащего её релиза.

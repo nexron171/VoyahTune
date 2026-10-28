@@ -3,7 +3,7 @@
 Описание относится к указанным ниже OEM-прошивкам. В едином runtime
 перехваты выбираются адаптерами. [Контракт payload](installer-payload.md).
 
-В релиз входит `Packaging/new/agents/drive-reset.js` для процесса
+В релиз входит `DriveResetModule` из `Packaging/new/java/` для процесса
 `com.qinggan.app.vehiclesetting`. Он ограничен H97X (`AppCommonUtils.is97X()`) и
 двумя методами `VehicleMemoryManager` из VehicleSettings Sport+ 13.1:
 
@@ -48,7 +48,7 @@ Individual дают штатные значения руль=2, педаль=1; 
 маркеры и журнал. Диагностика: `VoyahDriveReset`, `[drive-reset] hook ready v1`,
 `/data/local/tmp/voyahtune_drive_reset.txt`.
 
-Первый вызов при холодном старте может опередить Frida attach. Дополнительная
+Первый вызов при холодном старте может опередить native attach. Дополнительная
 стартовая отправка режимов и однократный проход остальных настроек Native
 привязаны к ACC-циклу. Прямой ACC ON сброс
 в отдельном CanBusService перехватывает отдельный приоритетный агент, описанный в

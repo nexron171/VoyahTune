@@ -276,7 +276,7 @@ Native и выключении опции. PI использует другую 
 - `test_acc_restore_hook.sh`, `test_drive_reset_hook.sh` и
   `test_acc_preferences.py` (8 сценариев Java) — прошли.
   JS/Java-сценарии моделируют поведение, без автомобиля.
-- `node Packaging/new/tests/rds-restore.test.js` — **43** сценария прошли.
+- `python3 Packaging/new/scripts/check_java_agents.py` — обязательные Java/Go/native/Rust контракты, включая RDS.
 - Прежняя проверка текста Power Hold **не прошла**: искала `powerHoldBadge` в прежнем
   `layout-land/activity_main.xml`. Сейчас элемент находится в
   [tile_power_hold.xml](../RestoreMode/app/src/main/res/layout/tile_power_hold.xml)
