@@ -1,5 +1,6 @@
 package ru.voyahtune.agent;
 
+import android.util.Log;
 import java.lang.reflect.Executable;
 import java.lang.reflect.Method;
 
@@ -15,13 +16,22 @@ public final class HookBridge {
         return new HookRegistry.Backend() {
             @Override
             public void prepare(Executable target) throws Exception {
-                if (callers != null)
+                if (callers != null) {
+                    String name = target.getDeclaringClass().getName() + "." + target.getName();
+                    long started = System.nanoTime();
+                    Log.i("VoyahTuneAgent", "Preparing callers: " + name);
                     callers.prepare(target);
+                    long elapsedMillis = (System.nanoTime() - started) / 1_000_000;
+                    Log.i("VoyahTuneAgent", "Callers prepared: " + name + " in " + elapsedMillis + " ms");
+                }
             }
             @Override
             public void installed(Executable target) {
-                if (callers != null)
+                if (callers != null) {
                     callers.installed(target);
+                }
+                Log.i("VoyahTuneAgent", "Hook installed: " + target.getDeclaringClass().getName() + "."
+                    + target.getName());
             }
             @Override
             public Method hook(Executable target, HookRegistry.Dispatch callback, Method callbackMethod) {

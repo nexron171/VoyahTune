@@ -62,7 +62,8 @@ public final class AndroidCallerReuseTest {
             require(4, Calls.construct(3));
         }
         Thread.sleep(500);
-        AndroidCallers callers = new AndroidCallers(AndroidCallerReuseTest.class.getClassLoader());
+        boolean direct = arguments.length > 1 && arguments[1].equals("direct");
+        AndroidCallers callers = direct ? null : new AndroidCallers(AndroidCallerReuseTest.class.getClassLoader());
         try (HookRegistry hooks = new HookRegistry(HookBridge.backend(callers))) {
             Method both = Calls.class.getDeclaredMethod("both", int.class);
             Method onlySecond = Calls.class.getDeclaredMethod("onlySecond", int.class);
@@ -79,7 +80,9 @@ public final class AndroidCallerReuseTest {
                 require(109, (Integer) both.invoke(null, 3));
                 require(5, (Integer) onlySecond.invoke(null, 3));
             }
-            callers.releaseIndex();
+            if (callers != null) {
+                callers.releaseIndex();
+            }
             try (AutoCloseable hook =
                      hooks.install("rebuilt-second", second, call -> (Integer) call.proceed() + 10)) {
                 require(19, (Integer) both.invoke(null, 3));

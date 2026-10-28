@@ -41,6 +41,7 @@ import ru.voyahtune.agent.modules.SteeringModule;
 import ru.voyahtune.agent.modules.VehicleAirModule;
 
 public final class AgentRuntime {
+    private static final boolean USE_DIRECT_HOOKS = true;
     private static volatile AgentRuntime current;
 
     private final String bootId;
@@ -70,8 +71,13 @@ public final class AgentRuntime {
         }
         identity = bootId + ":" + pid + ":" + startTicks + ":" + uid;
         MethodAccess methods = new MethodAccess(SystemServerClasses.android(targetLoader));
-        callers = new AndroidCallers(targetLoader);
-        hooks = new HookRegistry(HookBridge.backend(callers));
+        if (USE_DIRECT_HOOKS) {
+            callers = null;
+            hooks = new HookRegistry(HookBridge.backend());
+        } else {
+            callers = new AndroidCallers(targetLoader);
+            hooks = new HookRegistry(HookBridge.backend(callers));
+        }
         executor = Executors.newSingleThreadScheduledExecutor(task -> {
             Thread thread = new Thread(task, "VoyahTuneAgent");
             thread.setDaemon(true);
@@ -214,7 +220,7 @@ public final class AgentRuntime {
         } catch (Throwable failure) {
             return runtime.statusValue(null, runtime.describeFailure(failure)).toString();
         } finally {
-            runtime.callers.releaseIndex();
+            runtime.releaseCallerIndex();
         }
     }
 
@@ -236,13 +242,19 @@ public final class AgentRuntime {
             }
         } finally {
             runtime.executor.shutdownNow();
-            runtime.callers.releaseIndex();
+            runtime.releaseCallerIndex();
         }
         if (failure != null) {
             runtime.quiesceFailure = failure;
             return runtime.statusValue("restart-required", runtime.describeFailure(failure)).toString();
         }
         return status();
+    }
+
+    private void releaseCallerIndex() {
+        if (callers != null) {
+            callers.releaseIndex();
+        }
     }
 
     public static String status() throws Exception {
