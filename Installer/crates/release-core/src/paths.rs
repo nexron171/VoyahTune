@@ -41,3 +41,40 @@ pub fn safe_path(name: &str) -> bool {
                 )
         })
 }
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::{fs, os::unix::fs::symlink};
+
+    #[test]
+    fn destination_link_or_linked_parent_cannot_reach_a_write() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().canonicalize().unwrap();
+        fs::create_dir(root.join("owned")).unwrap();
+        fs::create_dir(root.join("external")).unwrap();
+        symlink(root.join("external"), root.join("owned/link")).unwrap();
+        assert!(no_links(&root.join("owned/link/agents.dex")).is_err());
+        assert!(no_links(&root.join("owned/link")).is_err());
+        assert!(no_links(&root.join("owned/missing/agents.dex")).is_ok());
+    }
+}
+
+pub fn no_links(path: &std::path::Path) -> std::io::Result<()> {
+    let mut current = std::path::PathBuf::new();
+    for part in path.components() {
+        current.push(part);
+        match std::fs::symlink_metadata(&current) {
+            Ok(m) if m.file_type().is_symlink() => {
+                return Err(std::io::Error::other(format!(
+                    "Ссылка в целевом пути {}",
+                    current.display()
+                )))
+            }
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
+}

@@ -33,18 +33,6 @@
       "phase": "files"
     },
     {
-      "artifact": "voyahtune-new-voyahtune-loader",
-      "destination": "/data/local/bin/voyahtune-new/voyahtune-loader",
-      "mode": 493,
-      "phase": "files"
-    },
-    {
-      "artifact": "voyahtune-new-frida-inject",
-      "destination": "/data/local/bin/voyahtune-new/frida-inject",
-      "mode": 493,
-      "phase": "files"
-    },
-    {
       "artifact": "voyahtune.load.sh",
       "destination": "/system/etc/init.voyahtune.load.sh",
       "mode": 493,
@@ -55,6 +43,60 @@
       "destination": "/system/etc/init/voyahtune.load.rc",
       "mode": 420,
       "phase": "boot-hooks"
+    },
+    {
+      "artifact": "voyahtune-new-voyahtune-loader",
+      "destination": "/data/local/bin/voyahtune-new/voyahtune-loader",
+      "mode": 493,
+      "phase": "files"
+    },
+    {
+      "artifact": "voyahtune-new-voyahtune-inject",
+      "destination": "/data/local/bin/voyahtune-new/voyahtune-inject",
+      "mode": 493,
+      "phase": "files"
+    },
+    {
+      "artifact": "voyahtune-new-voyahtune-inject-arm",
+      "destination": "/data/local/bin/voyahtune-new/voyahtune-inject-arm",
+      "mode": 493,
+      "phase": "files"
+    },
+    {
+      "artifact": "voyahtune-new-libvoyahtune-agent.so",
+      "destination": "/data/local/bin/voyahtune-new/libvoyahtune-agent.so",
+      "mode": 420,
+      "phase": "files"
+    },
+    {
+      "artifact": "voyahtune-new-libvoyahtune-agent-arm.so",
+      "destination": "/data/local/bin/voyahtune-new/libvoyahtune-agent-arm.so",
+      "mode": 420,
+      "phase": "files"
+    },
+    {
+      "artifact": "voyahtune-new-agents.dex",
+      "destination": "/data/local/bin/voyahtune-new/agents.dex",
+      "mode": 420,
+      "phase": "files"
+    },
+    {
+      "artifact": "voyahtune-new-agents.json",
+      "destination": "/data/local/bin/voyahtune-new/agents.json",
+      "mode": 420,
+      "phase": "files"
+    },
+    {
+      "artifact": "voyahtune-new-runtime-manifest.json",
+      "destination": "/data/local/bin/voyahtune-new/runtime-manifest.json",
+      "mode": 420,
+      "phase": "files"
+    },
+    {
+      "artifact": "voyahtune-new-stop-loader.sh",
+      "destination": "/data/local/bin/voyahtune-new/stop-loader.sh",
+      "mode": 493,
+      "phase": "files"
     }
   ],
   "packages": [
@@ -87,6 +129,20 @@
     "/data/local/bin/steeringwheelkeys.js",
     "/data/local/bin/vd_bypass.js",
     "/data/local/bin/voyahtune-hook-manifest.json",
+    "/data/local/bin/voyahtune-new/acc-restore.js",
+    "/data/local/bin/voyahtune-new/apollo.js",
+    "/data/local/bin/voyahtune-new/app-client.js",
+    "/data/local/bin/voyahtune-new/cluster-navigation.js",
+    "/data/local/bin/voyahtune-new/drive-reset.js",
+    "/data/local/bin/voyahtune-new/frida-inject",
+    "/data/local/bin/voyahtune-new/frida-inject-arm",
+    "/data/local/bin/voyahtune-new/keyboard-en.js",
+    "/data/local/bin/voyahtune-new/keyboard-ru.js",
+    "/data/local/bin/voyahtune-new/launcher.js",
+    "/data/local/bin/voyahtune-new/multidisplay.js",
+    "/data/local/bin/voyahtune-new/phone-numbers.js",
+    "/data/local/bin/voyahtune-new/steering.js",
+    "/data/local/bin/voyahtune-new/windows.js",
     "/data/local/bin/voyahtune_acc_restore.js",
     "/data/local/bin/voyahtune_drive_reset.js",
     "/data/local/bin/voyahtune_keyboard_en_config.json",

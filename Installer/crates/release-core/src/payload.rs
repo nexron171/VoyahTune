@@ -31,28 +31,32 @@ pub const RESTORE: &str = "ru.big.town.restoremode";
 pub const RUNYN: &str = "big.town.runyn";
 pub const NATIVE_PATH: &str = "/system/priv-app/Native/Native.apk";
 pub const WHITELIST: &str = "/system/etc/permissions/privapp-permissions-ru.big.town.anative.xml";
-pub const RUNTIME_NAMES: &[&str] = &[
-    "load.bin",
-    "loaderFrida",
-    "injects.json",
-    "clusternavi.js",
-    "phone-num.js",
-    "steeringwheelkeys.js",
-    "launcherdock.js",
-    "multidisplay.js",
-    "vd_bypass.js",
-    "app_client.js",
-    "apollo_tech.js",
-    "voyahtune_drive_reset.js",
-    "voyahtune_acc_restore.js",
-    "keyboard_lock_en.js",
-    "keyboard_ru.js",
-    "voyahtune_keyboard_en_config.json",
-    "voyahtune_keyboard_ru_config.json",
-    "voyahtune_skb_qwerty_ru.json",
-    "frida-inject",
-    "voyahtune.load.rc",
-    "voyahtune.load.sh",
+pub const NATIVE_RUNTIME_ROLES: &[(&str, &str, u32)] = &[
+    ("voyahtune-new-voyahtune-loader", "voyahtune-loader", 0o755),
+    ("voyahtune-new-voyahtune-inject", "voyahtune-inject", 0o755),
+    (
+        "voyahtune-new-voyahtune-inject-arm",
+        "voyahtune-inject-arm",
+        0o755,
+    ),
+    (
+        "voyahtune-new-libvoyahtune-agent-arm.so",
+        "libvoyahtune-agent-arm.so",
+        0o644,
+    ),
+    (
+        "voyahtune-new-libvoyahtune-agent.so",
+        "libvoyahtune-agent.so",
+        0o644,
+    ),
+    ("voyahtune-new-agents.dex", "agents.dex", 0o644),
+    ("voyahtune-new-agents.json", "agents.json", 0o644),
+    (
+        "voyahtune-new-runtime-manifest.json",
+        "runtime-manifest.json",
+        0o644,
+    ),
+    ("voyahtune-new-stop-loader.sh", "stop-loader.sh", 0o755),
 ];
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -352,14 +356,13 @@ impl Payload {
 }
 
 pub fn destination(name: &str) -> Option<(String, u32)> {
+    if let Some((_, filename, mode)) = NATIVE_RUNTIME_ROLES
+        .iter()
+        .find(|(role, _, _)| *role == name)
+    {
+        return Some((format!("/data/local/bin/voyahtune-new/{filename}"), *mode));
+    }
     match name {
-        "voyahtune-new-voyahtune-loader" => Some((
-            "/data/local/bin/voyahtune-new/voyahtune-loader".into(),
-            0o755,
-        )),
-        "voyahtune-new-frida-inject" => {
-            Some(("/data/local/bin/voyahtune-new/frida-inject".into(), 0o755))
-        }
         "native.apk" => Some((NATIVE_PATH.into(), 0o644)),
         "voyahtune-updater" => Some(("/data/local/bin/voyahtune-updater".into(), 0o755)),
         "voyahtune-updater.apk" => Some((
@@ -373,14 +376,6 @@ pub fn destination(name: &str) -> Option<(String, u32)> {
         "whitelist.xml" => Some((WHITELIST.into(), 0o644)),
         "voyahtune.load.rc" => Some(("/system/etc/init/voyahtune.load.rc".into(), 0o644)),
         "voyahtune.load.sh" => Some(("/system/etc/init.voyahtune.load.sh".into(), 0o755)),
-        name if RUNTIME_NAMES.contains(&name) => Some((
-            format!("/data/local/bin/{name}"),
-            if ["load.bin", "loaderFrida", "frida-inject"].contains(&name) {
-                0o755
-            } else {
-                0o644
-            },
-        )),
         _ => None,
     }
 }
@@ -645,6 +640,16 @@ mod tests {
     fn only_owned_destinations() {
         assert!(destination("/system/bin/sh").is_none());
         assert!(destination("../../bin/sh").is_none());
-        assert_eq!(destination("load.bin").unwrap().1, 0o755);
+        assert!(destination("load.bin").is_none());
+        assert_eq!(
+            destination("voyahtune-new-voyahtune-inject").unwrap().1,
+            0o755
+        );
+        assert_eq!(
+            destination("voyahtune-new-libvoyahtune-agent.so")
+                .unwrap()
+                .1,
+            0o644
+        );
     }
 }

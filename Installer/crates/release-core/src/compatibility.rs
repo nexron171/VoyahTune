@@ -29,7 +29,7 @@ impl Default for Requirements {
 impl Requirements {
     pub fn unified() -> Self {
         Self {
-            min_installer_version: "1.8.3".into(),
+            min_installer_version: "1.8.4".into(),
             required_capabilities: CAPABILITIES
                 .iter()
                 .map(|capability| capability.to_string())

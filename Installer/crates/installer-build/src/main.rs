@@ -318,7 +318,22 @@ fn base_payload(root: &Path) -> Result<(installer_core::recipe::Recipe, serde_js
             "voyahtune.updater.rc" => "Packaging/system/voyahtune.updater.rc",
             "voyahtune-ota-bootstrap.json" => "Updater/build/bootstrap.json",
             "voyahtune-new-voyahtune-loader" => "Packaging/new/build/runtime/voyahtune-loader",
-            "voyahtune-new-frida-inject" => "Packaging/new/build/runtime/frida-inject",
+            "voyahtune-new-voyahtune-inject" => "Packaging/new/build/runtime/voyahtune-inject",
+            "voyahtune-new-voyahtune-inject-arm" => {
+                "Packaging/new/build/runtime/voyahtune-inject-arm"
+            }
+            "voyahtune-new-libvoyahtune-agent-arm.so" => {
+                "Packaging/new/build/runtime/libvoyahtune-agent-arm.so"
+            }
+            "voyahtune-new-libvoyahtune-agent.so" => {
+                "Packaging/new/build/runtime/libvoyahtune-agent.so"
+            }
+            "voyahtune-new-agents.dex" => "Packaging/new/build/runtime/agents.dex",
+            "voyahtune-new-agents.json" => "Packaging/new/build/runtime/agents.json",
+            "voyahtune-new-runtime-manifest.json" => {
+                "Packaging/new/build/runtime/runtime-manifest.json"
+            }
+            "voyahtune-new-stop-loader.sh" => "Packaging/new/build/runtime/stop-loader.sh",
             "voyahtune.load.sh" => "Packaging/new/system/voyahtune.load.sh",
             "voyahtune.load.rc" => "Packaging/new/system/voyahtune.load.rc",
             "init.logcat.original.sh" => "Packaging/system/init.logcat.original.sh",
@@ -350,7 +365,14 @@ fn discover_unified(root: &Path) -> Result<(installer_core::recipe::Recipe, serd
     }
     let runtime_roles = [
         "voyahtune-new-voyahtune-loader",
-        "voyahtune-new-frida-inject",
+        "voyahtune-new-voyahtune-inject",
+        "voyahtune-new-voyahtune-inject-arm",
+        "voyahtune-new-libvoyahtune-agent-arm.so",
+        "voyahtune-new-libvoyahtune-agent.so",
+        "voyahtune-new-agents.dex",
+        "voyahtune-new-agents.json",
+        "voyahtune-new-runtime-manifest.json",
+        "voyahtune-new-stop-loader.sh",
         "voyahtune.load.sh",
         "voyahtune.load.rc",
     ];
@@ -522,8 +544,50 @@ mod tests {
                 "files",
             ),
             (
-                "voyahtune-new-frida-inject",
-                "/data/local/bin/voyahtune-new/frida-inject",
+                "voyahtune-new-voyahtune-inject",
+                "/data/local/bin/voyahtune-new/voyahtune-inject",
+                0o755,
+                "files",
+            ),
+            (
+                "voyahtune-new-voyahtune-inject-arm",
+                "/data/local/bin/voyahtune-new/voyahtune-inject-arm",
+                0o755,
+                "files",
+            ),
+            (
+                "voyahtune-new-libvoyahtune-agent-arm.so",
+                "/data/local/bin/voyahtune-new/libvoyahtune-agent-arm.so",
+                0o644,
+                "files",
+            ),
+            (
+                "voyahtune-new-libvoyahtune-agent.so",
+                "/data/local/bin/voyahtune-new/libvoyahtune-agent.so",
+                0o644,
+                "files",
+            ),
+            (
+                "voyahtune-new-agents.dex",
+                "/data/local/bin/voyahtune-new/agents.dex",
+                0o644,
+                "files",
+            ),
+            (
+                "voyahtune-new-agents.json",
+                "/data/local/bin/voyahtune-new/agents.json",
+                0o644,
+                "files",
+            ),
+            (
+                "voyahtune-new-runtime-manifest.json",
+                "/data/local/bin/voyahtune-new/runtime-manifest.json",
+                0o644,
+                "files",
+            ),
+            (
+                "voyahtune-new-stop-loader.sh",
+                "/data/local/bin/voyahtune-new/stop-loader.sh",
                 0o755,
                 "files",
             ),
@@ -591,40 +655,42 @@ mod tests {
         fs::write(&overlay_path, serde_json::to_vec(&missing_loader).unwrap()).unwrap();
         assert!(discover_unified(&root).is_err());
         let mut changed = overlay;
-        let added = serde_json::json!({"artifact":"voyahtune-new-extra.js",
-            "destination":"/data/local/bin/voyahtune-new/extra.js","mode":0o644,"phase":"files"});
+        let added = serde_json::json!({"artifact":"voyahtune-new-extra.json",
+            "destination":"/data/local/bin/voyahtune-new/extra.json","mode":0o644,"phase":"files"});
         changed["files"].as_array_mut().unwrap().push(added);
         changed["artifacts"]
             .as_array_mut()
             .unwrap()
             .push(serde_json::json!({
-            "name":"voyahtune-new-extra.js","source":"Packaging/new/build/runtime/extra.js"}));
+            "name":"voyahtune-new-extra.json","source":"Packaging/new/build/runtime/extra.json"}));
         fs::write(&overlay_path, serde_json::to_vec(&changed).unwrap()).unwrap();
         let (recipe, sources) = discover_unified(&root).unwrap();
         assert!(recipe
             .files
             .iter()
-            .any(|file| file.artifact == "voyahtune-new-extra.js"));
+            .any(|file| file.artifact == "voyahtune-new-extra.json"));
         assert!(sources["artifacts"]
             .as_array()
             .unwrap()
             .iter()
-            .any(|source| source["name"] == "voyahtune-new-extra.js"));
+            .any(|source| source["name"] == "voyahtune-new-extra.json"));
         changed["files"].as_array_mut().unwrap().pop();
         changed["artifacts"].as_array_mut().unwrap().pop();
         changed["removeFiles"]
             .as_array_mut()
             .unwrap()
-            .push(serde_json::json!("/data/local/bin/voyahtune-new/extra.js"));
+            .push(serde_json::json!(
+                "/data/local/bin/voyahtune-new/extra.json"
+            ));
         fs::write(&overlay_path, serde_json::to_vec(&changed).unwrap()).unwrap();
         let (recipe, _) = discover_unified(&root).unwrap();
         assert!(!recipe
             .files
             .iter()
-            .any(|file| file.artifact == "voyahtune-new-extra.js"));
+            .any(|file| file.artifact == "voyahtune-new-extra.json"));
         assert!(recipe
             .remove_files
-            .contains(&"/data/local/bin/voyahtune-new/extra.js".into()));
+            .contains(&"/data/local/bin/voyahtune-new/extra.json".into()));
         changed["removeFiles"]
             .as_array_mut()
             .unwrap()
