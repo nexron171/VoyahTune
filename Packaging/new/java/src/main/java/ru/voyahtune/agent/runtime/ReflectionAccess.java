@@ -33,7 +33,15 @@ public final class ReflectionAccess {
 
     public static Method[] methods(Class<?> owner) {
         Method[] cached = METHODS.get(owner);
-        return cached == null ? owner.getDeclaredMethods() : cached;
+        if (cached != null) {
+            return cached;
+        }
+        try {
+            return owner.getDeclaredMethods();
+        } catch (NoClassDefFoundError unresolvedSignature) {
+            // ART can enumerate members without resolving unrelated OEM signatures.
+            return allMethods(owner);
+        }
     }
 
     public static Method[] allMethods(Class<?> owner) {
