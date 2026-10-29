@@ -33,7 +33,7 @@ pub use release_core::catalog::{
 pub struct CachedPayload {
     pub version: String,
     pub path: PathBuf,
-    pub manifest_sha256: String,
+    pub payload_sha256: String,
     pub deletable: bool,
 }
 #[derive(Debug, Clone, Serialize)]
@@ -197,8 +197,8 @@ impl Cache {
             }
             if let Ok(p) = Payload::load(&path) {
                 list.push(CachedPayload {
+                    payload_sha256: p.identity()?,
                     version: p.manifest.release_version,
-                    manifest_sha256: payload::sha256(&path.join("manifest.json"))?,
                     path,
                     deletable: true,
                 });
@@ -294,7 +294,7 @@ impl Cache {
         let receipt = self.root.join("receipts").join(&release.payload.sha256);
         if let Ok(payload) = Payload::open(&target) {
             if fs::read_to_string(&receipt).ok().as_deref()
-                == Some(&payload::sha256(&target.join("manifest.json"))?)
+                == Some(&Payload::load(&target)?.identity()?)
             {
                 cancelled(cancel)?;
                 verify_release(&payload, release)?;
@@ -348,10 +348,10 @@ impl Cache {
             total: 0,
         });
         cancelled(cancel)?;
-        if !stage.path().join("manifest.json").is_file() {
+        if !stage.path().join("common/restore_mode.apk").is_file() {
             return Err(Error::new(
                 "PAYLOAD_FORMAT",
-                "Архив не подходит для GUI-установщика: отсутствует manifest.json",
+                "Архив не подходит для GUI-установщика: отсутствует common/restore_mode.apk",
             )
             .detail("В каталоге должен быть указан installer payload ZIP, а не классический комплект со скриптами.")
             .retry("Обновите список после исправления архива на сервере и скачайте релиз заново."));
@@ -363,7 +363,7 @@ impl Cache {
                 "Это ресурсы удаления, а не установки",
             ));
         }
-        if payload.manifest.schema != 4 {
+        if payload.manifest.schema != payload::PAYLOAD_FORMAT {
             return Err(Error::new(
                 "PAYLOAD_SCHEMA",
                 "Импорт ZIP требует новый единый payload. Старую папку можно открыть отдельно.",
@@ -376,9 +376,7 @@ impl Cache {
         let target = folder.join(digest);
         if target.exists() {
             if let Ok(p) = Payload::open(&target) {
-                if payload::sha256(&target.join("manifest.json"))?
-                    == payload::sha256(&stage.path().join("manifest.json"))?
-                {
+                if Payload::load(&target)?.identity()? == payload.identity()? {
                     return Ok(p);
                 }
             }
@@ -393,7 +391,7 @@ impl Cache {
         fs::create_dir_all(self.root.join("receipts"))?;
         fs::write(
             self.root.join("receipts").join(target.file_name().unwrap()),
-            payload::sha256(&target.join("manifest.json"))?,
+            Payload::load(&target)?.identity()?,
         )?;
         progress(Progress {
             stage: "ready".into(),
@@ -759,7 +757,7 @@ mod tests {
             .err()
             .unwrap();
         assert_eq!(error.code, "PAYLOAD_FORMAT");
-        assert!(error.message.contains("manifest.json"));
+        assert!(error.message.contains("common/restore_mode.apk"));
     }
 
     #[test]

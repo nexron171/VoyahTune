@@ -9,9 +9,8 @@ import tempfile
 from pathlib import Path
 
 from android_toolchain import SETTINGS, go_android_environment, sdk_directory
-from bundle import bundle
+from bundle import bundle, loader_overlay
 from prepare_native_dependencies import prepare
-from prepare_release_inputs import prepare as prepare_recipe
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -54,18 +53,22 @@ def main():
             go_environment = go_android_environment(sdk, abi=abi)
             go_environment["SOURCE_DATE_EPOCH"] = environment["SOURCE_DATE_EPOCH"]
             packages = [("voyahtune-inject" if abi == "arm64-v8a" else "voyahtune-inject-arm", "./cmd/voyahtune-inject")]
-            if abi == "arm64-v8a":
-                packages.append(("voyahtune-loader", "."))
             for name, package in packages:
                 run(os.environ.get("GO_BIN", "go"), "-C", ROOT / "loader", "build", "-trimpath", "-buildvcs=false",
                     "-buildmode=pie", "-o", components / name, package, environment=go_environment)
+        overlay = loader_overlay(components, Path(temporary))
+        loader_environment = go_android_environment(sdk, abi="arm64-v8a")
+        loader_environment["SOURCE_DATE_EPOCH"] = environment["SOURCE_DATE_EPOCH"]
+        run(os.environ.get("GO_BIN", "go"), "-C", ROOT / "loader", "build", "-trimpath",
+            "-buildvcs=false", "-buildmode=pie", "-overlay", overlay,
+            "-o", components / "voyahtune-loader", ".", environment=loader_environment)
         bundle(build / "runtime", components)
     system = build / "system"
     if system.exists():
         shutil.rmtree(system)
     shutil.copytree(ROOT / "system", system)
-    shutil.copyfile(ROOT / "config/install-layout.json", build / "install-layout.json")
-    prepare_recipe()
+    for obsolete in ("release-inputs.json", "install-layout.json"):
+        (build / obsolete).unlink(missing_ok=True)
     print(build / "runtime")
 
 

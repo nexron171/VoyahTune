@@ -28,11 +28,7 @@ use std::{
 struct Cli {
     #[arg(long, global = true, help = "Папка bundle, содержащая payload и adb")]
     bundle: Option<PathBuf>,
-    #[arg(
-        long,
-        global = true,
-        help = "Внешняя папка payload или её manifest.json"
-    )]
+    #[arg(long, global = true, help = "Внешний каталог payload")]
     payload: Option<PathBuf>,
     #[command(subcommand)]
     command: Commands,

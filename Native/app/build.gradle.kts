@@ -77,13 +77,15 @@ abstract class VoyahBuildIdentity : DefaultTask() {
     abstract val runtimeFiles: ConfigurableFileCollection
     @get:InputFiles @get:PathSensitive(PathSensitivity.NONE)
     abstract val recipeFiles: ConfigurableFileCollection
+    @get:Input abstract val payloadFormat: Property<Int>
+    @get:Input abstract val minimumInstallerVersion: Property<String>
     @get:Input abstract val runtimeAliases: MapProperty<String, String>
     @get:OutputDirectory abstract val outputDirectory: DirectoryProperty
     @TaskAction fun generate() {
         val dir = outputDirectory.get().asFile
         dir.mkdirs()
         dir.resolve("voyahtune-build.json").writeText(groovy.json.JsonOutput.toJson(mapOf(
-            "schema" to 3, "product" to "VoyahTune", "component" to component.get(),
+            "schema" to 3, "payloadFormat" to payloadFormat.get(), "minimumInstallerVersion" to minimumInstallerVersion.get(), "product" to "VoyahTune", "component" to component.get(),
             "infrastructure" to infrastructure.get(),
             "releaseVersion" to releaseVersion.get(),
             "buildRevision" to revision.get(),
@@ -110,6 +112,8 @@ androidComponents {
             // Signed APK identity retains the existing shared Android contract.
             infrastructure.set("unified")
             val runtime = packaging.resolve("new")
+            payloadFormat.set(providers.gradleProperty("voyahPayloadFormat").map { it.toInt() }.orElse(5))
+            minimumInstallerVersion.set(providers.gradleProperty("voyahMinimumInstallerVersion").orElse("1.8.5"))
             runtimeAliases.convention(emptyMap())
             val recipePath = providers.gradleProperty("voyahInstallRecipe").orNull
             if (recipePath != null) {

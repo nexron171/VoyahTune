@@ -34,15 +34,12 @@ type nativeAgentConfig struct {
 }
 
 type nativeCode struct {
-	Schema              int               `json:"schema"`
-	Runtime             string            `json:"runtime"`
-	AndroidAPI          int               `json:"androidApi"`
-	NativeID            string            `json:"nativeId"`
-	RuntimeID           string            `json:"runtimeId"`
-	NativeContract      string            `json:"nativeContract,omitempty"`
-	NativeRestorePolicy string            `json:"nativeRestorePolicy,omitempty"`
-	InstallRoot         string            `json:"installRoot,omitempty"`
-	SHA256              map[string]string `json:"sha256"`
+	Schema     int               `json:"schema"`
+	Runtime    string            `json:"runtime"`
+	AndroidAPI int               `json:"androidApi"`
+	NativeID   string            `json:"nativeId"`
+	RuntimeID  string            `json:"runtimeId"`
+	SHA256     map[string]string `json:"sha256"`
 }
 
 type nativeLoaderConfig struct {
@@ -87,7 +84,11 @@ func readRuntimeJSON(path string, value any) error {
 }
 
 func loadNativeConfig(directory string) (nativeLoaderConfig, error) {
-	var config nativeLoaderConfig
+	return loadNativeConfigWithCode(directory, embeddedNativeCode)
+}
+
+func loadNativeConfigWithCode(directory string, code nativeCode) (nativeLoaderConfig, error) {
+	config := nativeLoaderConfig{Schema: 2, Agents: compiledAgents(), Code: code}
 	info, err := os.Lstat(directory)
 	if err != nil {
 		return config, err
@@ -96,44 +97,6 @@ func loadNativeConfig(directory string) (nativeLoaderConfig, error) {
 	if !ok || stat.Uid != uint32(os.Geteuid()) || !info.IsDir() || info.Mode().Perm()&0022 != 0 {
 		return config, errors.New("runtime directory must not be a symlink or writable by other users")
 	}
-	if err := readRuntimeJSON(filepath.Join(directory, "agents.json"), &config); err != nil {
-		return config, err
-	}
-	if config.Schema != 2 || len(config.Agents) == 0 || len(config.Agents) > 64 {
-		return config, errors.New("invalid native module manifest")
-	}
-	seen := map[string]bool{}
-	for _, agent := range config.Agents {
-		if !safeName(agent.ID) || !safeName(agent.Target) || seen[agent.ID] || len(agent.Modules) < 1 || len(agent.Modules) > 4 {
-			return config, fmt.Errorf("invalid native agent definition: %s", agent.ID)
-		}
-		seen[agent.ID] = true
-		if agent.MaxAttempts < 1 || agent.MaxAttempts > 10 || agent.TimeoutSeconds < 1 || agent.TimeoutSeconds > 60 || agent.CrashLimit < 0 || agent.CrashLimit > 10 {
-			return config, fmt.Errorf("invalid lifecycle bounds: %s", agent.ID)
-		}
-		switch agent.Condition {
-		case "", "apollo", "keyboard-en", "keyboard-ru":
-		default:
-			return config, errors.New("unknown module condition")
-		}
-		if agent.Condition != "" && agent.Condition != agent.ID {
-			return config, errors.New("module condition must match its owner")
-		}
-		modules := map[string]bool{}
-		for _, module := range agent.Modules {
-			if modules[module] || (module != agent.ID && module != "client."+agent.Target) || !knownModule(module, agent.Target) {
-				return config, fmt.Errorf("invalid module %s for %s", module, agent.ID)
-			}
-			modules[module] = true
-		}
-		if !modules[agent.ID] {
-			return config, fmt.Errorf("agent %s must own its primary module", agent.ID)
-		}
-	}
-	if err := readRuntimeJSON(filepath.Join(directory, "runtime-manifest.json"), &config.Code); err != nil {
-		return config, err
-	}
-	code := config.Code
 	if code.Schema != 2 || code.Runtime != "unified" || code.AndroidAPI != 30 || len(code.SHA256) < 3 || len(code.SHA256) > 64 {
 		return config, errors.New("invalid native runtime component metadata")
 	}
@@ -183,18 +146,6 @@ func loadNativeConfig(directory string) (nativeLoaderConfig, error) {
 		}
 	}
 	return config, nil
-}
-
-func knownModule(id, target string) bool {
-	if id == "client."+target {
-		return true
-	}
-	switch id {
-	case "acc", "drive-reset", "vehicle-air", "apollo", "steering", "launcher", "windows", "multidisplay", "keyboard-en", "keyboard-ru", "phone", "cluster", "rds", "statusbar", "yandex-navigation", "dgis-navigation":
-		return true
-	default:
-		return false
-	}
 }
 
 func safeName(value string) bool {

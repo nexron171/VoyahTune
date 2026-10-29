@@ -1,136 +1,51 @@
 #!/usr/bin/env python3
-"""Runtime mode and data-preserving Light cleanup on isolated fake devices."""
-import json, unittest
-from integration import InstallerTests, PAYLOAD
+"""Unified installation over old mode flags with data-preserving migration."""
+
+import unittest
+
+from integration import InstallerTests
+
 
 class ModeTests(InstallerTests):
- def no_writes(self,calls):
-  for c in calls:
-   self.assertNotIn(c['args'][0],['push','install','uninstall','reboot','remount'])
-   self.assertFalse(any(s in (c['script'] or '') for s in ['settings put','settings delete','rm -','chmod ','chown ','mv -']))
- def assert_light_clean(self):
-  manifest=json.loads((PAYLOAD/'manifest.json').read_text())
-  for f in manifest['recipe']['files']:
-   if 'light' not in f['variants']:
-    self.assertFalse((self.device/f['destination'].lstrip('/')).exists(),f['destination'])
-  for path in ['data/local/bin/fullscreen_client.js','data/local/bin/voyahtune-hook-manifest.json','data/local/tmp/voyahtune-hook-status.v1']:
-   self.assertFalse((self.device/path).exists(),path)
- def test_all_previous_modes_allow_both_actions_without_writes(self):
-  self.seed_apps()
-  for flag in [None,'light','full','invalid']:
-   self.state['settings']={} if flag is None else {'voyahtune_install_mode':flag};self.write_state()
-   for action in ['light','full']:
-    with self.subTest(flag=flag,action=action):self.plan(action)
-  self.state['failShell']='settings get global voyahtune_install_mode';self.write_state()
-  self.plan('light');self.no_writes(self.calls())
- def test_full_light_and_repeat_preserve_data_and_shared_apks(self):
-  installed=[]
-  for action in ['full','light','light','full','remove','light']:
-   with self.subTest(action=action):
-    if installed and action!='remove':
-     for package in ['ru.big.town.anative','ru.big.town.restoremode']:
-      for parent in ['data/user/0','data/user_de/0']:
-       p=self.device/parent/package/'settings-marker';p.parent.mkdir(parents=True,exist_ok=True);p.write_text('keep')
-    self.read_state();self.state['settings']['voyahtune_user_test']='keep';self.write_state()
-    plan=self.plan(action);start=len(self.calls())
-    self.apply(plan);settings=self.read_state()['settings']
-    if action=='remove':self.assertNotIn('voyahtune_install_mode',settings)
-    else:
-     self.assertEqual(settings['voyahtune_install_mode'],action)
-     # Observe the flag at the actual reboot boundary, not only after postflight.
-     self.assertEqual(self.state['modeAtReboot'][-1],action)
-     calls=self.calls()[start:]
-     write=next(i for i,c in enumerate(calls) if f'settings put global voyahtune_install_mode {action}' in (c['script'] or ''))
-     read=next(i for i,c in enumerate(calls) if i>write and 'settings get global voyahtune_install_mode' in (c['script'] or ''))
-     reboot=max(i for i,c in enumerate(calls) if c['args']==['reboot'])
-     self.assertLess(write,read);self.assertLess(read,reboot)
-     stop=next(i for i,c in enumerate(calls) if 'am force-stop ru.big.town.anative && am force-stop ru.big.town.restoremode' in (c['script'] or ''))
-     self.assertLess(stop,write)
-     self.assertTrue(all(i<write for i,c in enumerate(calls) if c['args'][0] in ['push','install']))
-     if installed:self.assert_app_data(True)
-     if action=='light':self.assert_light_clean()
-     installed.append(tuple((self.device/p).read_bytes() for p in ['system/priv-app/Native/Native.apk','data/app/ru.big.town.restoremode/base.apk']))
-     self.assertEqual(settings['voyahtune_user_test'],'keep')
-  self.assertTrue(all(apks==installed[0] for apks in installed))
- def test_legacy_light_soft_cleanup_preserves_settings_and_dns(self):
-  self.seed_apps();self.state['settings']={'voyahtune_install_mode':'full','voyahtune_dock1':'com.example.player','voyahtune_keyboard_mode':'ru','voyahtune_fullscreen_apps':'com.example.player','open_voyah_apollo_master':'1'};self.write_state()
-  expected=dict(self.state['settings']);expected['voyahtune_install_mode']='light'
-  (self.device/'system/etc/init.logcat.sh').write_text('#!/system/bin/sh\n# init.logcat.sh Open Voyah:\n/system/bin/logcat -v threadtime\n')
-  for path in ['data/local/bin/load.bin','data/local/bin/frida-inject','data/local/bin/fullscreen_client.js','data/local/bin/voyahtune-hook-manifest.json','data/local/tmp/voyahtune-hook-status.v1']:(self.device/path).write_text('old Full')
-  dns=self.device/'data/local/open_voyah/qgdns/original';dns.parent.mkdir(parents=True);dns.write_text('saved DNS')
-  self.apply(self.plan('light'));self.assert_app_data(True);self.assert_light_clean()
-  self.assertEqual(self.read_state()['settings'],expected);self.assertEqual(dns.read_text(),'saved DNS')
-  self.assertNotIn('Open Voyah:',(self.device/'system/etc/init.logcat.sh').read_text())
-  self.assertFalse(any('pm uninstall' in (c['script'] or '') for c in self.calls()))
- def test_full_without_existing_loader_does_not_stop_missing_service(self):
-  self.seed_apps();self.state['settings']['voyahtune_install_mode']='light'
-  self.state['loader']='';self.state['failShell']='setprop ctl.stop voyahtune_load';self.write_state()
-  result=self.apply(self.plan('full'))
-  self.assertNotIn('diagnostic-warning',result.stdout)
-  self.assertFalse(any('setprop ctl.stop voyahtune_load' in (c['script'] or '') for c in self.calls()))
-  self.assertEqual(self.read_state()['settings']['voyahtune_install_mode'],'full')
- def test_unknown_mode_light_updates_without_question(self):
-  self.seed_apps();self.state['settings'].clear();self.write_state()
-  self.apply(self.plan('light'));self.assert_app_data(True);self.assert_light_clean()
-  self.assertEqual(self.read_state()['settings']['voyahtune_install_mode'],'light')
- def test_soft_cleanup_failure_stops_before_apks_commit_and_reboot(self):
-  self.seed_apps();self.state['settings']['voyahtune_install_mode']='full';self.state['failShell']='ACTIVE_RC=/system/etc/init/voyahtune.load.rc';self.write_state()
-  native=(self.device/'system/priv-app/Native/Native.apk').read_bytes()
-  result=self.apply(self.plan('light'),okay=False);self.assertNotEqual(result.returncode,0)
-  self.assert_app_data(True);self.assertEqual(self.read_state()['settings']['voyahtune_install_mode'],'full')
-  self.assertEqual(native,(self.device/'system/priv-app/Native/Native.apk').read_bytes())
-  self.assertFalse(any(c['args'][0] in ['install','reboot'] for c in self.calls()))
-  self.assertFalse(any('setprop ctl.start voyahtune_load' in (c['script'] or '') for c in self.calls()))
- def test_failed_mode_write_cannot_report_success(self):
-  for action in ['full','light']:
-   with self.subTest(action=action):
-    self.read_state();previous='light' if action=='full' else 'full'
-    self.state['settings']['voyahtune_install_mode']=previous
-    self.state['ignoreModeWrite']=True;self.write_state()
-    plan=self.plan(action);start=len(self.calls())
-    result=self.apply(plan,okay=False)
-    self.assertNotEqual(result.returncode,0);self.assertIn('MODE_WRITE_FAILED',result.stdout)
-    self.assertEqual(self.read_state()['settings']['voyahtune_install_mode'],previous)
-    self.assertFalse(any(c['args']==['reboot'] for c in self.calls()[start:]))
-    self.assertNotIn('operation-completed',result.stdout)
- def test_mode_command_and_readback_errors_block_final_reboot(self):
-  for action in ['full','light']:
-   for failure in ['failModeWrite','failModeReadAfterWrite','modeReadbackAfterWrite']:
-    with self.subTest(action=action,failure=failure):
-     self.read_state()
-     for key in ['failModeWrite','failModeReadAfterWrite','modeReadbackAfterWrite','modeWriteAttempted']:
-      self.state.pop(key,None)
-     self.state['settings'].pop('voyahtune_install_mode',None)
-     self.state[failure]='invalid' if failure=='modeReadbackAfterWrite' else True
-     self.write_state();plan=self.plan(action);start=len(self.calls())
-     result=self.apply(plan,okay=False)
-     self.assertNotEqual(result.returncode,0)
-     self.assertNotIn('operation-completed',result.stdout)
-     self.assertFalse(any(c['args']==['reboot'] for c in self.calls()[start:]))
-     self.assertTrue(self.read_state()['modeWriteAttempted'])
-     if failure=='modeReadbackAfterWrite':self.assertIn('MODE_WRITE_FAILED',result.stdout)
- def test_failure_before_mode_commit_keeps_previous_mode(self):
-  self.state['settings']['voyahtune_install_mode']='full';self.state['installError']='INSTALL_FAILED_INSUFFICIENT_STORAGE';self.write_state()
-  result=self.apply(self.plan('light'),okay=False);self.assertNotEqual(result.returncode,0)
-  self.assertEqual(self.read_state()['settings']['voyahtune_install_mode'],'full')
- def test_remove_failed_flag_delete_does_not_claim_success(self):
-  self.state['settings']['voyahtune_install_mode']='full';self.state['ignoreModeDelete']=True;self.write_state()
-  result=self.apply(self.plan('remove'),okay=False);self.assertIn('MODE_WRITE_FAILED',result.stdout)
-  self.assertEqual(self.read_state()['settings']['voyahtune_install_mode'],'full')
- def test_failure_after_commit_keeps_committed_mode(self):
-  self.state['failReboot']=True;self.write_state()
-  result=self.apply(self.plan('light'),okay=False)
-  self.assertNotEqual(result.returncode,0);self.assertEqual(self.read_state()['settings']['voyahtune_install_mode'],'light')
- def test_force_stop_failure_does_not_commit_mode(self):
-  self.state['failForceStop']='ru.big.town.anative';self.write_state()
-  result=self.apply(self.plan('light'),okay=False)
-  self.assertNotEqual(result.returncode,0)
-  self.assertNotIn('voyahtune_install_mode',self.read_state()['settings'])
-  self.assertFalse(any(c['args'][0] in ['install','reboot'] for c in self.calls()))
+    def test_previous_mode_flags_allow_installation_without_plan_writes(self):
+        self.seed_apps()
+        for flag in [None, "light", "full", "invalid"]:
+            with self.subTest(flag=flag):
+                self.state["settings"] = {} if flag is None else {"voyahtune_install_mode": flag}
+                self.write_state()
+                self.plan("install")
+        self.assertFalse(any(call["args"][0] in ["push", "install", "uninstall", "reboot", "remount"] for call in self.calls()))
+
+    def test_unified_install_preserves_data_and_removes_legacy_manifests(self):
+        self.seed_apps()
+        self.state["settings"]["voyahtune_install_mode"] = "full"
+        self.write_state()
+        runtime = self.device / "data/local/bin/voyahtune-new"
+        runtime.mkdir(parents=True, exist_ok=True)
+        for name in ["agents.json", "runtime-manifest.json"]:
+            (runtime / name).write_text("legacy runtime configuration")
+        self.apply(self.plan("install"))
+        self.assert_app_data(True)
+        self.assertTrue((runtime / "voyahtune-loader").is_file())
+        self.assertTrue((runtime / "voyahtune-inject-arm").is_file())
+        self.assertFalse((runtime / "agents.json").exists())
+        self.assertFalse((runtime / "runtime-manifest.json").exists())
+
+    def test_failed_package_install_preserves_data_and_blocks_final_reboot(self):
+        self.seed_apps()
+        self.state["settings"]["voyahtune_install_mode"] = "light"
+        self.state["installError"] = "INSTALL_FAILED_INSUFFICIENT_STORAGE"
+        self.write_state()
+        result = self.apply(self.plan("install"), okay=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assert_app_data(True)
+        self.assertFalse(any(call["args"] == ["reboot"] for call in self.calls()))
+        self.assertNotIn("operation-completed", result.stdout)
+
 
 def load_tests(loader, tests, pattern):
- suite=unittest.TestSuite()
- for name in ModeTests.__dict__:
-  if name.startswith('test_') and (not loader.testNamePatterns or any(__import__('fnmatch').fnmatchcase(name,p) for p in loader.testNamePatterns)):suite.addTest(ModeTests(name))
- return suite
-if __name__=='__main__':unittest.main(verbosity=2)
+    return unittest.TestSuite(ModeTests(name) for name in ModeTests.__dict__ if name.startswith("test_"))
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 
-import hashlib
-import json
 import os
 import shutil
 import subprocess
@@ -37,13 +35,6 @@ def main():
         ], env=dict(os.environ, JAVA_HOME=str(java)), check=True)
         shutil.copyfile(dex / "classes.dex", destination / "agents.dex")
         (destination / "agents.dex").chmod(0o644)
-    digest = hashlib.sha256((destination / "agents.dex").read_bytes()).hexdigest()
-    (destination / "manifest.json").write_text(json.dumps({
-        "schema": 1, "infrastructure": "unified", "component": "java-agents",
-        "behaviorContracts": "passed", "sha256": {"agents.dex": digest},
-        "androidExecution": "requires-separate-validation",
-    }, indent=2) + "\n")
-    print(destination / "agents.dex")
 
 
 if __name__ == "__main__":

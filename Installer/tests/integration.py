@@ -143,10 +143,7 @@ class InstallerTests(unittest.TestCase):
         )
 
     def artifact(self, name):
-        manifest = json.loads((PAYLOAD / "manifest.json").read_text())
-        return PAYLOAD / next(
-            a["path"] for a in manifest["artifacts"] if a["name"] == name
-        )
+        return PAYLOAD / "common" / name
 
     def different_key_apks(self):
         # Generate signature-mismatch fixtures from the tested payload; no historic

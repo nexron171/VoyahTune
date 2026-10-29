@@ -25,7 +25,7 @@ export interface Request {
 }
 export interface Plan {
   releaseVersion?: string;
-  manifestSha256?: string;
+  payloadSha256?: string;
   request: Request;
   operation: string;
   warnings: string[];

@@ -585,9 +585,15 @@ esac
                 {"name":"runyn.apk","path":"runyn.apk","sha256":"0".repeat(64),"size":1}
             ]
         });
-        fs::write(directory.path().join("manifest.json"), manifest.to_string()).unwrap();
+        for artifact in manifest["artifacts"].as_array().unwrap() {
+            fs::write(
+                directory.path().join(artifact["path"].as_str().unwrap()),
+                "test APK",
+            )
+            .unwrap();
+        }
         let payload = Payload {
-            root: directory.path().into(),
+            root: directory.path().canonicalize().unwrap(),
             manifest: serde_json::from_value(manifest).unwrap(),
         };
         let captured = Arc::new(std::sync::Mutex::new(Vec::new()));

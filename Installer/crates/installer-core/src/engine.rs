@@ -176,8 +176,7 @@ impl Engine {
         report["cunbaRestorationRequested"] = json!(self.restore_cunba);
         report["releaseVersion"] = json!(self.payload.manifest.release_version);
         report["installerVersion"] = json!(crate::compatibility::INSTALLER_VERSION);
-        report["manifestSha256"] =
-            json!(payload::sha256(&self.payload.root.join("manifest.json"))?);
+        report["payloadSha256"] = json!(self.payload.identity()?);
         report["payloadManifest"] = json!(self.payload.manifest);
         if let Ok(bytes) = fs::read(self.operation.dir.join("mode.json")) {
             report["mode"] = serde_json::from_slice(&bytes)?;

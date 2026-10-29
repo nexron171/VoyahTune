@@ -85,8 +85,67 @@ pub struct Recipe {
 }
 impl Default for Recipe {
     fn default() -> Self {
-        serde_json::from_str(include_str!("default-recipe.json"))
-            .expect("default installation recipe")
+        let names = [
+            "native.apk",
+            "whitelist.xml",
+            "voyahtune-updater",
+            "voyahtune.updater.rc",
+            "voyahtune-ota-bootstrap.json",
+            "voyahtune.load.sh",
+            "voyahtune.load.rc",
+        ];
+        let files = names
+            .into_iter()
+            .chain(
+                payload::NATIVE_RUNTIME_ROLES
+                    .iter()
+                    .map(|(name, _, _)| *name),
+            )
+            .map(|name| {
+                let (destination, mode) =
+                    payload::destination(name).expect("compiled installation destination");
+                let phase = if ["voyahtune.load.sh", "voyahtune.load.rc"].contains(&name) {
+                    Phase::BootHooks
+                } else {
+                    Phase::Files
+                };
+                CopyFile {
+                    artifact: name.into(),
+                    destination,
+                    mode,
+                    phase,
+                }
+            })
+            .collect();
+        Self {
+            schema: 3,
+            engine: "qinggan-v3".into(),
+            files,
+            packages: vec![
+                InstallPackage {
+                    artifact: "restore_mode.apk".into(),
+                    package: RESTORE.into(),
+                    condition: None,
+                },
+                InstallPackage {
+                    artifact: "runyn.apk".into(),
+                    package: payload::RUNYN.into(),
+                    condition: Some(PackageCondition::ExceptH97xy),
+                },
+            ],
+            directories: vec![Attributes {
+                path: "/data/local/bin/voyahtune-new".into(),
+                mode: 0o755,
+            }],
+            attributes: vec![],
+            remove_files: RETIRED_RUNTIME_FILES.lines().map(str::to_owned).collect(),
+            remove_directories: vec![
+                "/data/local/tmp/voyah_load.lock".into(),
+                "/data/local/tmp/voyahtune-pi".into(),
+            ],
+            remove_prefixes: vec![],
+            remove_packages: vec![],
+        }
     }
 }
 fn clean(path: &str) -> bool {
@@ -140,7 +199,7 @@ impl Recipe {
         let fail = |detail: String| {
             Error::new(
                 "RECIPE_INVALID",
-                "Манифест содержит неподдерживаемое действие или путь",
+                "План установки содержит неподдерживаемое действие или путь",
             )
             .detail(detail)
         };
@@ -152,7 +211,7 @@ impl Recipe {
             .detail(&self.engine));
         }
         if self.files.len() > 512 || self.packages.len() > 64 || self.remove_files.len() > 2048 {
-            return Err(fail("Слишком большой манифест".into()));
+            return Err(fail("Слишком большой план установки".into()));
         }
         if !(1..=2).contains(&self.packages.len())
             || !self.remove_packages.is_empty()

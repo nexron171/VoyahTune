@@ -3,111 +3,109 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 )
 
-func nativeRuntimeFixture(t *testing.T) string {
+func runtimeFixture(t *testing.T) (string, nativeCode) {
 	t.Helper()
 	directory := t.TempDir()
-	manifest := nativeLoaderConfig{
-		Schema: 2,
-		Agents: []nativeAgentConfig{{
-			ID: "acc", Target: "com.qinggan.canbus.service", Modules: []string{"acc"},
-			MaxAttempts: 4, TimeoutSeconds: 35, CrashLimit: 3,
-		}},
-	}
-	data, _ := json.Marshal(manifest)
-	testFile(t, filepath.Join(directory, "agents.json"), string(data), 0644)
-	files := map[string]string{}
-	for name, body := range map[string]string{"agents.dex": "dex fixture", "libvoyahtune-agent.so": "native fixture", "voyahtune-inject": "helper fixture", "voyahtune-inject-arm": "ARM32 helper fixture", "libvoyahtune-agent-arm.so": "ARM32 native fixture"} {
+	code := nativeCode{Schema: 2, Runtime: "unified", AndroidAPI: 30,
+		NativeID: "native-test", RuntimeID: "java-test", SHA256: map[string]string{}}
+	for name, body := range map[string]string{
+		"agents.dex": "dex fixture", "libvoyahtune-agent.so": "native fixture",
+		"voyahtune-inject": "helper fixture", "voyahtune-inject-arm": "ARM32 helper fixture",
+		"libvoyahtune-agent-arm.so": "ARM32 native fixture",
+	} {
 		mode := os.FileMode(0644)
-		if name == "voyahtune-inject" || name == "voyahtune-inject-arm" {
+		if name == nativeHelperName || name == nativeARM32HelperName {
 			mode = 0755
 		}
 		testFile(t, filepath.Join(directory, name), body, mode)
 		digest := sha256.Sum256([]byte(body))
-		files[name] = hex.EncodeToString(digest[:])
+		code.SHA256[name] = hex.EncodeToString(digest[:])
 	}
-	code := map[string]any{"schema": 2, "runtime": "unified", "androidApi": 30, "nativeId": "native-test", "runtimeId": "java-test", "sha256": files}
-	data, _ = json.Marshal(code)
-	testFile(t, filepath.Join(directory, "runtime-manifest.json"), string(data), 0644)
-	return directory
+	return directory, code
 }
 
-func TestNativeManifestLoadsTypedModuleConfiguration(t *testing.T) {
-	directory := nativeRuntimeFixture(t)
-	config, err := loadNativeConfig(directory)
+func TestCompiledRuntimeStartsWithoutExternalManifests(t *testing.T) {
+	directory, code := runtimeFixture(t)
+	config, err := loadNativeConfigWithCode(directory, code)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(config.Agents) != 1 || config.Agents[0].Modules[0] != "acc" || config.Code.RuntimeID != "java-test" {
+	targets := map[string]nativeAgentConfig{}
+	for _, agent := range config.Agents {
+		targets[agent.ID] = agent
+	}
+	if config.Code.RuntimeID != "java-test" || len(targets) != 16 ||
+		targets["launcher"].Target != "com.qinggan.app.launcher" ||
+		targets["acc"].MaxAttempts != 4 || targets["cluster"].TimeoutSeconds != 45 ||
+		targets["keyboard-ru"].Condition != "keyboard-ru" || len(targets["rds"].Modules) != 2 {
 		t.Fatal(config)
 	}
-	if err := os.WriteFile(filepath.Join(directory, "agents.dex"), []byte("changed bytes"), 0644); err != nil {
+	for _, name := range []string{"agents.json", "runtime-manifest.json"} {
+		if _, err := os.Stat(filepath.Join(directory, name)); !os.IsNotExist(err) {
+			t.Fatal(name, err)
+		}
+	}
+}
+
+func TestCompiledRuntimeRejectsDamagedOrUnsafeComponents(t *testing.T) {
+	for _, change := range []string{"content", "missing", "permissions", "symlink", "hardlink"} {
+		t.Run(change, func(t *testing.T) {
+			directory, code := runtimeFixture(t)
+			path := filepath.Join(directory, "agents.dex")
+			var err error
+			switch change {
+			case "content":
+				err = os.WriteFile(path, []byte("changed"), 0644)
+			case "missing":
+				err = os.Remove(path)
+			case "permissions":
+				err = os.Chmod(path, 0666)
+			case "symlink":
+				err = os.Rename(path, path+".original")
+				if err == nil {
+					err = os.Symlink(path+".original", path)
+				}
+			case "hardlink":
+				err = os.Link(path, path+".link")
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := loadNativeConfigWithCode(directory, code); err == nil {
+				t.Fatal("unsafe component accepted")
+			}
+		})
+	}
+}
+
+func TestCompiledRegistryReturnsIndependentCopies(t *testing.T) {
+	directory, code := runtimeFixture(t)
+	first, err := loadNativeConfigWithCode(directory, code)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := loadNativeConfig(directory); err == nil {
-		t.Fatal("mismatched DEX allowed into bootstrap")
+	first.Agents[0].Modules[0] = "changed"
+	second, err := loadNativeConfigWithCode(directory, code)
+	if err != nil || second.Agents[0].Modules[0] != "acc" {
+		t.Fatal(second, err)
 	}
 }
 
-func TestNativeManifestRejectsLegacyAndUnsafeInputs(t *testing.T) {
-	for _, change := range []func(map[string]any){
-		func(value map[string]any) { value["schema"] = 1 },
-		func(value map[string]any) { value["prioritySeconds"] = 45 },
-		func(value map[string]any) { value["agents"].([]any)[0].(map[string]any)["priority"] = true },
-		func(value map[string]any) { value["agents"].([]any)[0].(map[string]any)["earlyStart"] = true },
-		func(value map[string]any) { value["agents"].([]any)[0].(map[string]any)["script"] = "acc.js" },
-		func(value map[string]any) {
-			value["agents"].([]any)[0].(map[string]any)["modules"] = []string{"unknown"}
-		},
-		func(value map[string]any) { value["agents"].([]any)[0].(map[string]any)["target"] = "../escape" },
-		func(value map[string]any) { value["agents"].([]any)[0].(map[string]any)["timeoutSeconds"] = 0 },
-	} {
-		directory := nativeRuntimeFixture(t)
-		var manifest map[string]any
-		data, err := os.ReadFile(filepath.Join(directory, "agents.json"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := json.Unmarshal(data, &manifest); err != nil {
-			t.Fatal(err)
-		}
-		change(manifest)
-		data, _ = json.Marshal(manifest)
-		if err := os.WriteFile(filepath.Join(directory, "agents.json"), data, 0644); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := loadNativeConfig(directory); err == nil {
-			t.Fatal("unsafe manifest accepted", manifest)
-		}
+func TestEmbeddedRuntimeStartsFromBuildOverlay(t *testing.T) {
+	directory := os.Getenv("VOYAHTUNE_TEST_RUNTIME")
+	if directory == "" {
+		t.Skip("requires generated build overlay")
 	}
-}
-
-func TestNativeManifestSupportsIndependentAgents(t *testing.T) {
-	directory := nativeRuntimeFixture(t)
-	manifest := `{"schema":2,"agents":[{"id":"launcher","target":"com.qinggan.app.launcher","modules":["launcher"],"maxAttempts":1,"timeoutSeconds":35}]}`
-	testFile(t, filepath.Join(directory, "agents.json"), manifest, 0644)
 	config, err := loadNativeConfig(directory)
 	if err != nil {
-		t.Fatal("independent agent configuration requires ACC", err)
-	}
-	if len(config.Agents) != 1 || config.Agents[0].ID != "launcher" {
-		t.Fatal(config.Agents)
-	}
-}
-
-func TestNativeManifestLoadsPackagedAgents(t *testing.T) {
-	directory := nativeRuntimeFixture(t)
-	manifest, err := os.ReadFile(filepath.Join("..", "config", "agents.json"))
-	if err != nil {
 		t.Fatal(err)
 	}
-	testFile(t, filepath.Join(directory, "agents.json"), string(manifest), 0644)
-	if _, err := loadNativeConfig(directory); err != nil {
-		t.Fatal("packaged agent configuration cannot be loaded", err)
+	if len(config.Agents) != 16 || config.Code.SHA256[agentDEXName] == "" {
+		t.Fatal(config)
 	}
 }

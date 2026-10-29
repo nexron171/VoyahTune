@@ -40,7 +40,7 @@ pub struct Plan {
     #[serde(default)]
     pub release_version: String,
     #[serde(default)]
-    pub manifest_sha256: String,
+    pub payload_sha256: String,
     #[serde(default)]
     pub recipe_sha256: String,
     #[serde(default)]
@@ -111,11 +111,7 @@ pub fn plan(inventory: Inventory, payload: &Payload, action: Action, dns: Dns) -
     Ok(Plan {
         installer_version: crate::compatibility::INSTALLER_VERSION.into(),
         release_version: payload.manifest.release_version.clone(),
-        manifest_sha256: if payload.root.join("manifest.json").is_file() {
-            crate::payload::sha256(&payload.root.join("manifest.json"))?
-        } else {
-            String::new()
-        },
+        payload_sha256: payload.identity()?,
         recipe_sha256: hex::encode(Sha256::digest(serde_json::to_vec(&serde_json::to_value(
             &payload.manifest.recipe,
         )?)?)),

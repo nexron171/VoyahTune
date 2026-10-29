@@ -34,11 +34,12 @@ class NativeBundleTest(unittest.TestCase):
             components = self.components(root / "components")
             output = root / "runtime"
             bundle.bundle(output, components)
-            metadata = json.loads((output / "runtime-manifest.json").read_text())
+            metadata = bundle.component_metadata(components)
             self.assertEqual(metadata["schema"], 2)
             self.assertEqual(metadata["nativeId"], "native-" + "a" * 64)
             self.assertTrue(metadata["runtimeId"].startswith("java-"))
-            self.assertEqual(json.loads((output / "agents.json").read_text())["schema"], 2)
+            self.assertFalse((output / "agents.json").exists())
+            self.assertFalse((output / "runtime-manifest.json").exists())
             self.assertIn("agents.dex", metadata["sha256"])
             self.assertIn("libvoyahtune-agent-arm.so", metadata["sha256"])
             self.assertIn("voyahtune-inject-arm", metadata["sha256"])
@@ -51,10 +52,10 @@ class NativeBundleTest(unittest.TestCase):
             first = metadata["runtimeId"]
             (components / "voyahtune-loader").write_bytes((components / "voyahtune-loader").read_bytes() + b"supervisor change")
             bundle.bundle(output, components)
-            self.assertEqual(json.loads((output / "runtime-manifest.json").read_text())["runtimeId"], first)
+            self.assertEqual(bundle.component_metadata(components)["runtimeId"], first)
             (components / "agents.dex").write_bytes(b"dex\n039\0next-component")
             bundle.bundle(output, components)
-            self.assertNotEqual(json.loads((output / "runtime-manifest.json").read_text())["runtimeId"], first)
+            self.assertNotEqual(bundle.component_metadata(components)["runtimeId"], first)
 
     def test_missing_or_wrong_abi_component_preserves_previous_runtime(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -62,19 +63,19 @@ class NativeBundleTest(unittest.TestCase):
             components = self.components(root / "components")
             output = root / "runtime"
             bundle.bundle(output, components)
-            previous = (output / "runtime-manifest.json").read_bytes()
+            previous = {p.name: p.read_bytes() for p in output.iterdir()}
             (components / "voyahtune-inject-arm").write_bytes((components / "voyahtune-inject").read_bytes())
             with self.assertRaises(ValueError):
                 bundle.bundle(output, components)
-            self.assertEqual((output / "runtime-manifest.json").read_bytes(), previous)
+            self.assertEqual({p.name: p.read_bytes() for p in output.iterdir()}, previous)
             (components / "voyahtune-inject").unlink()
             with self.assertRaises(ValueError):
                 bundle.bundle(output, components)
-            self.assertEqual((output / "runtime-manifest.json").read_bytes(), previous)
+            self.assertEqual({p.name: p.read_bytes() for p in output.iterdir()}, previous)
             (components / "voyahtune-inject").write_bytes(b"\x7fELF\x01\x01" + b"0" * 58)
             with self.assertRaises(ValueError):
                 bundle.bundle(output, components)
-            self.assertEqual((output / "runtime-manifest.json").read_bytes(), previous)
+            self.assertEqual({p.name: p.read_bytes() for p in output.iterdir()}, previous)
 
 
 if __name__ == "__main__":
