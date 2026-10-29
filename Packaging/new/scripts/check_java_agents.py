@@ -65,6 +65,7 @@ def check_candidate(stage, configured_gson=None):
                  "ru.voyahtune.contracts.ClusterModuleTest", "ru.voyahtune.contracts.ClusterCardControllerTest",
                  "ru.voyahtune.contracts.ModuleHealthTest",
                  "ru.voyahtune.contracts.WindowSystemPolicyTest",
+                 "ru.voyahtune.contracts.WindowPriorityRecalculationTest",
                  "ru.voyahtune.contracts.WindowWifiModuleTest",
                  "ru.voyahtune.contracts.ModuleContentionTest",
                  "ru.voyahtune.contracts.WindowLayoutTest",
