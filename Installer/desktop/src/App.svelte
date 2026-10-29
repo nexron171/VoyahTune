@@ -22,6 +22,7 @@
     type LogUploadProgress,
     type Action,
     type Dns,
+    type InstallOptions,
     type Device,
     type Plan as InstallationPlan,
     type Event,
@@ -730,6 +731,25 @@
       busy = false;
     }
   }
+  async function selectInstallOption(
+    option: keyof InstallOptions,
+    checkbox: HTMLInputElement,
+  ) {
+    if (!plan) return;
+    const options = { ...plan.request.options, [option]: checkbox.checked };
+    checkbox.checked = plan.request.options[option];
+    busy = true;
+    error = null;
+    try {
+      const updated = await command<Plan>("update_install_options", { options });
+      plan = { ...plan, ...updated };
+      await recordChoice("vehicle-options-selected", { options });
+    } catch (cause) {
+      error = failure(cause);
+    } finally {
+      busy = false;
+    }
+  }
   async function start(verificationOnly = false) {
     if (!eventsReady || !plan || (action === "remove" && !removeConfirmed))
       return;
@@ -763,7 +783,13 @@
       await ensureInstallationSession();
       await recordChoice(
         verificationOnly ? "verification-retry" : "plan-approved",
-        { action, dns, restoreCunba, deviceConfirmed: confirmed },
+        {
+          action,
+          dns,
+          options: plan.request.options,
+          restoreCunba,
+          deviceConfirmed: confirmed,
+        },
         undefined,
         dns,
       );
@@ -1682,28 +1708,66 @@
           </div>
         {/if}
         {#if screen === 2 && plan && action !== "remove"}
-          <fieldset class="dns-box" disabled={busy || sessionStarting}>
-            <legend>Яндекс DNS</legend>
-            <p>
-              Эта настройка позволяет иметь доступ к сервисам, которые доступны
-              в белых списках.
-            </p>
-            <div class="dns-options">
-              {#each [{ id: "keep", label: "Оставить как есть" }, { id: "on", label: "Включить" }, { id: "off", label: "Выключить" }] as option}
-                <label>
+          <div class="installation-options">
+            <fieldset class="dns-box" disabled={busy || sessionStarting}>
+              <legend>Яндекс DNS</legend>
+              <p>
+                Эта настройка позволяет иметь доступ к сервисам, которые доступны
+                в белых списках.
+              </p>
+              <div class="dns-options">
+                {#each [{ id: "keep", label: "Оставить как есть" }, { id: "on", label: "Включить" }, { id: "off", label: "Выключить" }] as option}
+                  <label>
+                    <input
+                      type="radio"
+                      name="dns"
+                      value={option.id}
+                      bind:group={dns}
+                      onchange={() =>
+                        recordChoice("dns-selected", { dns }, undefined, dns)}
+                    />
+                    {option.label}
+                  </label>
+                {/each}
+              </div>
+            </fieldset>
+            {#if plan.oemOptionsAvailable}
+              <fieldset class="vehicle-option" disabled={busy || sessionStarting}>
+                <legend>Fake аккаунт</legend>
+                <label class="option-checkbox">
                   <input
-                    type="radio"
-                    name="dns"
-                    value={option.id}
-                    bind:group={dns}
-                    onchange={() =>
-                      recordChoice("dns-selected", { dns }, undefined, dns)}
+                    type="checkbox"
+                    checked={plan.request.options.fakeAccount}
+                    onchange={(event) =>
+                      selectInstallOption("fakeAccount", event.currentTarget)}
                   />
-                  {option.label}
+                  <strong>Включение Fake аккаунта</strong>
                 </label>
-              {/each}
-            </div>
-          </fieldset>
+                <p>Активация сохранения режимов езды штатными средствами.</p>
+                <p class="account-warning">
+                  Если у вас уже есть мастер аккаунт или расширенный гостевой
+                  аккаунт — не применяйте Fake аккаунт.
+                </p>
+              </fieldset>
+              <fieldset class="vehicle-option" disabled={busy || sessionStarting}>
+                <legend>Китайская навигация</legend>
+                <label class="option-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={plan.request.options.disableChineseNavigation}
+                    onchange={(event) =>
+                      selectInstallOption("disableChineseNavigation", event.currentTarget)}
+                  />
+                  <strong>Отключить китайскую навигацию</strong>
+                </label>
+                <p>Отключение dueros во время подготовки автомобиля.</p>
+                <p>
+                  Резервная копия остаётся на автомобиле:
+                  <code>/sdcard/dueros</code>.
+                </p>
+              </fieldset>
+            {/if}
+          </div>
         {/if}
         <div class="footer-toolbar">
           {@render logActions()}
@@ -1849,10 +1913,34 @@
     display: block;
     margin-top: 10px;
   }
-  .footer .dns-box {
+  .installation-options {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 12px;
+  }
+  .installation-options fieldset {
     margin: 0;
     padding: 12px 16px;
     min-width: 0;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+  }
+  .vehicle-option p {
+    margin: 10px 0 0;
+    line-height: 1.4;
+    font-size: 13px;
+  }
+  .option-checkbox {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .option-checkbox input {
+    flex-shrink: 0;
+    margin-top: 3px;
+  }
+  .account-warning {
+    color: var(--amber);
   }
   .current-operation {
     margin-top: 12px;

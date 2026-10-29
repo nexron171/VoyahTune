@@ -16,6 +16,7 @@ pub mod plans;
 pub mod recipe;
 pub mod recovery;
 pub mod session;
+pub mod vehicle_options;
 
 mod voyahtweaks;
 pub mod voyahtweaks_recovery;

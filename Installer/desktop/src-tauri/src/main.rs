@@ -526,6 +526,27 @@ async fn plan(app: tauri::AppHandle, serial: String, action: Action, dns: Dns) -
     release(&app.state::<Runtime>());
     result
 }
+
+#[tauri::command]
+fn update_install_options(
+    app: tauri::AppHandle,
+    options: installer_core::vehicle_options::InstallOptions,
+) -> Result<Plan> {
+    let runtime = app.state::<Runtime>();
+    let mut state = runtime.0.lock().unwrap();
+    if state.busy {
+        return Err(Error::new(
+            "OPERATION_BUSY",
+            "Дождитесь завершения текущей операции",
+        ));
+    }
+    let (plan, _, _) = state
+        .prepared
+        .as_mut()
+        .ok_or_else(|| Error::new("PLAN_REQUIRED", "Сначала проверьте автомобиль и план"))?;
+    plan.set_options(options)?;
+    Ok(plan.clone())
+}
 #[tauri::command]
 async fn disable_cunba(app: tauri::AppHandle, serial: String, confirmed: bool) -> Result<Value> {
     if !confirmed {
@@ -749,7 +770,8 @@ fn run_operation(
             "Релиз изменился. Постройте план заново.",
         ));
     }
-    // DNS is an explicit choice on the review page, after initial diagnosis.
+    plan.set_options(request.options)?;
+    // Choices are confirmed on the review page after initial diagnosis.
     plan.request = request.clone();
     if restore_cunba {
         plan.steps.push(installer_core::plans::Step {
@@ -1007,6 +1029,7 @@ fn main() {
             release_info,
             devices,
             plan,
+            update_install_options,
             apply,
             retry_verification,
             disable_cunba,

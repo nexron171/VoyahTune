@@ -4,6 +4,7 @@ import type {
   Plan,
   Action,
   Dns,
+  InstallOptions,
   PayloadProgress,
   CachedPayload,
 } from "./api";
@@ -64,6 +65,7 @@ let cached: CachedPayload[] =
       ? [{ version: "3.12.0", path: cachePath("3.12.0"), deletable: true }]
       : [];
 let selectedPath = "";
+let preparedPlan: Plan | undefined;
 let catalogUrl =
   sessionStorage.getItem("fixture-catalog-url") ||
   "https://example.org/index.json";
@@ -208,11 +210,35 @@ export async function command(
       payloadRoot: selectedPath,
     };
   }
-  if (name === "plan")
-    return {
+  if (name === "update_install_options") {
+    if (!preparedPlan) throw Error("Сначала проверьте автомобиль");
+    const options = args.options as InstallOptions;
+    if (
+      !preparedPlan.oemOptionsAvailable &&
+      (options.fakeAccount || options.disableChineseNavigation)
+    )
+      throw Error("Дополнительные опции недоступны для этого автомобиля");
+    preparedPlan.request.options = options;
+    preparedPlan.steps = preparedPlan.steps.filter(
+      (step) => step.id !== "fake-account",
+    );
+    if (options.fakeAccount) {
+      const index = preparedPlan.steps.findIndex((step) => step.id === "reboot");
+      preparedPlan.steps.splice(index, 0, {
+        id: "fake-account",
+        title: "Активация Fake аккаунта",
+      });
+    }
+    return preparedPlan;
+  }
+  if (name === "plan") {
+    preparedPlan = {
+      oemOptionsAvailable:
+        args.action !== "remove" && !["h97x", "h97y"].includes(scenario || ""),
       request: {
         action: args.action as Action,
         dns: args.dns as Dns,
+        options: { fakeAccount: false, disableChineseNavigation: false },
         serial: String(args.serial),
         inventoryToken: "fixture-token",
         confirmed: false,
@@ -221,7 +247,9 @@ export async function command(
       warnings: ["Проверка интерфейса: реальный автомобиль не используется."],
       inventory: {
         serial: "CAR-001",
-        model: "Voyah Free",
+        model: ["h97x", "h97y"].includes(scenario || "")
+          ? scenario!.toUpperCase()
+          : "Voyah Free",
         fingerprint: "fixture",
         state: scenario === "unknown-mode" ? "unknown" : "absent",
         sdk: 30,
@@ -285,6 +313,8 @@ export async function command(
           : [{ id: "verify", title: "Проверка результата" }]),
       ],
     } satisfies Plan;
+    return preparedPlan;
+  }
   if (name === "operation_events") return journal;
   if (name === "cancel") {
     cancel = true;
@@ -298,7 +328,7 @@ export async function command(
   if (name === "apply") {
     cancel = false;
     journal = [];
-    const plan = (await command(
+    const plan = preparedPlan ?? (await command(
       "plan",
       args.request as unknown as Record<string, unknown>,
     )) as Plan;

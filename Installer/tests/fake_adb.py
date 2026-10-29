@@ -4,7 +4,15 @@ Never point it at a vehicle. Root locations in scripts are rewritten before sh.
 Android commands have explicit stateful implementations; unknown commands fail.
 """
 
-import hashlib, json, os, re, shutil, subprocess, sys, time
+import hashlib
+import json
+import os
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import time
 from pathlib import Path
 
 base = Path(os.environ["VOYAH_FAKE_ROOT"]).resolve()
@@ -187,6 +195,13 @@ def main():
             if s.get("failShell") and s["failShell"] in script:
                 print("injected shell failure", file=sys.stderr)
                 return 1
+            if script.startswith("/system/bin/timeout "):
+                command = shlex.split(script)
+                if command[2:4] != ["/system/bin/sh", "-c"] or len(command) != 5:
+                    raise RuntimeError(command)
+                if s.get("postflightTimeout"):
+                    return 124
+                script = command[4]
             if script.strip() == "/data/local/bin/voyahtune-updater --version":
                 print(
                     json.dumps(
@@ -232,6 +247,11 @@ def main():
                     "test -x /data/local/bin/voyahtune-new/voyahtune-loader && "
                     + ("true" if ready else "false"),
                 )
+            if "--quiesce --control-timeout 60s" in script:
+                script = script.replace(
+                    '"$RUNTIME/voyahtune-loader" --runtime-dir',
+                    ("false" if s.get("quiesceFailure") else "true") + " --runtime-dir",
+                )
             if "sh /data/local/tmp/open_voyah_dns_overlay.sh" in script:
                 # The DNS helper has separate repository tests; emulate only its host protocol here.
                 if "restore" in script:
@@ -244,7 +264,7 @@ def main():
                 print("RO")
                 return 0
             script = re.sub(
-                r"(?<![\w/])/(system|data|vendor|sdcard|proc)(?=/|[\s\'\";]|$)",
+                r"(?<![\w/])/(system|data|vendor|sdcard|proc|private|tmp|fake_login)(?=/|[\s\'\";]|$)",
                 lambda m: str(root) + "/" + m[1],
                 script,
             )
@@ -280,8 +300,9 @@ def main():
     elif name == "getprop":
         print(
             {
-                "ro.build.fingerprint": "qinggan/voyah/free:11/test",
-                "ro.product.model": "Voyah Free",
+                "ro.build.fingerprint": s.get("fingerprint", "qinggan/voyah/free:11/test"),
+                "ro.build.description": s.get("description", ""),
+                "ro.product.model": s.get("model", "Voyah Free"),
                 "ro.build.version.sdk": s.get("sdk", "30"),
                 "ro.product.cpu.abilist": s.get("abi", "arm64-v8a,armeabi-v7a"),
                 "sys.boot_completed": "1",
@@ -342,6 +363,12 @@ def main():
         else:
             raise RuntimeError(args)
     elif name == "cmd":
+        if args[:2] == ["package", "resolve-activity"]:
+            component = args[-1]
+            if component.split("/", 1)[0] not in s["packages"]:
+                return 1
+            print(component)
+            return 0
         if args[:2] != ["package", "install-existing"]:
             raise RuntimeError(args)
         package = args[-1]
@@ -349,6 +376,19 @@ def main():
         save(s)
         package_data(package)
         print("Package installed for user: 0")
+    elif name == "content":
+        provider = args[args.index("--uri") + 1]
+        if provider == "content://ru.big.town.anative.ota":
+            package, key = "ru.big.town.anative", "otaReady"
+        elif provider == "content://ru.big.town.restoremode.restoremodecontentprovider":
+            package, key = "ru.big.town.restoremode", "ready"
+        else:
+            raise RuntimeError(args)
+        if package not in s["packages"]:
+            return 1
+        bootstrap = remote("/system/etc/voyahtune-ota-bootstrap.json")
+        version = json.loads(bootstrap.read_text())["version"]
+        print(f"Result: Bundle[{{{key}=true, version={version}}}]")
     elif name == "timeout":
         if s.get("postflightTimeout"):
             return 124

@@ -19,11 +19,17 @@ export interface Device {
 export interface Request {
   action: Action;
   dns: Dns;
+  options: InstallOptions;
   serial: string;
   inventoryToken: string;
   confirmed: boolean;
 }
+export interface InstallOptions {
+  fakeAccount: boolean;
+  disableChineseNavigation: boolean;
+}
 export interface Plan {
+  oemOptionsAvailable: boolean;
   releaseVersion?: string;
   payloadSha256?: string;
   request: Request;

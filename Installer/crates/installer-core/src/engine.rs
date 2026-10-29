@@ -20,7 +20,7 @@ use crate::{
     payload::{self, Payload, NATIVE, NATIVE_PATH, RESTORE},
     plans::{self, Action, Dns, Request},
     recovery::{self, Operation, DEVICE_STATE},
-    Error, Result,
+    vehicle_options, Error, Result,
 };
 use release_core::runtime_maintenance::{
     Operation as RuntimeOperation, RuntimeMaintenance, Step as RuntimeStep,
@@ -312,6 +312,7 @@ impl Engine {
         Ok(())
     }
     fn execute(&mut self, r: Request) -> Result<()> {
+        r.options.validate(r.action, true)?;
         if self.restore_cunba && r.action != Action::Remove {
             return Err(Error::new(
                 "CUNBA_RESTORE_UNAVAILABLE",
@@ -341,6 +342,9 @@ impl Engine {
                 if r.action == Action::Install {
                     e.package_model()?;
                 }
+                if r.options.any() {
+                    r.options.validate(r.action, vehicle_options::available(&e.adb)?)?;
+                }
                 if e.restore_cunba && !crate::cunba_recovery::restoration_available(&e.adb)? {
                     return Err(Error::new("CUNBA_RESTORE_UNAVAILABLE", "Резервные данные Cunba недоступны. Повторите проверку или удалите VoyahTune без восстановления Cunba."));
                 }
@@ -361,10 +365,16 @@ impl Engine {
         self.step(
             "system",
             "Подготовка системного раздела",
-            |e| e.writable(r.action == Action::Remove),
+            |e| {
+                e.writable(r.action == Action::Remove)?;
+                e.ota_lock()?;
+                e.ignore("setprop ctl.stop voyahtune_updater 2>/dev/null || true\n");
+                if r.options.disable_chinese_navigation {
+                    vehicle_options::disable_chinese_navigation(&e.adb)?;
+                }
+                Ok(())
+            },
         )?;
-        self.ota_lock()?; // remount may have rebooted; retain this desktop operation across boot.
-        self.ignore("setprop ctl.stop voyahtune_updater 2>/dev/null || true\n");
         if r.action == Action::Install {
             {
                 self.step(
@@ -437,6 +447,13 @@ impl Engine {
                     "packages",
                     "Установка RestoreMode перед перезагрузкой",
                     |e| e.packages(),
+                )?;
+            }
+            if r.options.fake_account {
+                self.step(
+                    "fake-account",
+                    "Активация Fake аккаунта",
+                    |e| vehicle_options::activate_fake_account(&e.adb),
                 )?;
             }
             self.optional_step(

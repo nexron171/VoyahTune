@@ -688,6 +688,7 @@ esac
             .verify_installed(Request {
                 action: Action::Install,
                 dns: Dns::Keep,
+                options: Default::default(),
                 serial: "CAR-001".into(),
                 inventory_token: String::new(),
                 confirmed: true,

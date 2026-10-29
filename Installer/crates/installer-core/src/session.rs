@@ -5,7 +5,7 @@ use crate::{
     inventory,
     payload::Payload,
     plans::{self, Action, Dns, Plan},
-    Result,
+    vehicle_options, Result,
 };
 use std::{path::Path, time::Duration};
 
@@ -39,11 +39,20 @@ pub fn plan_with_events(
     for args in [&["root"][..], &["wait-for-device"][..], &["root"][..]] {
         let _ = adb.run(args, None, Duration::from_secs(20));
     }
-    let plan = plans::plan(
+    let mut plan = plans::plan(
         inventory::diagnose(&adb, payload, action),
         payload,
         action,
         dns,
     )?;
+    if action == Action::Install {
+        match vehicle_options::available(&adb) {
+            Ok(available) => plan.oem_options_available = available,
+            Err(error) => plan.warnings.push(format!(
+                "Дополнительные настройки автомобиля недоступны: {}",
+                error.message
+            )),
+        }
+    }
     Ok(plan)
 }
