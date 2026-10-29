@@ -33,7 +33,8 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="16dp"
-        app:settingsColumns="3" />
+        app:settingsColumns="5"
+        app:settingsMinimumColumnWidth="200dp" />
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -46,7 +47,8 @@
         android:id="@+id/diagnosticsAgents"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        app:settingsColumns="3" />
+        app:settingsColumns="5"
+        app:settingsMinimumColumnWidth="200dp" />
     <TextView
         android:id="@+id/diagnosticsFreshness"
         android:layout_width="match_parent"

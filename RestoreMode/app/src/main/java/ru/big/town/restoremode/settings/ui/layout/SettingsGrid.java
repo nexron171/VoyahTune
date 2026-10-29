@@ -15,6 +15,7 @@ import java.util.List;
 /** Equal columns and stretched rows, with a narrow-window fallback. */
 public final class SettingsGrid extends LinearLayout {
     private final int maxColumns;
+    private final int minimumColumnWidth;
     private final boolean lastFull;
     private final float endColumnWeight;
     private final List<View> visible = new ArrayList<>();
@@ -22,24 +23,27 @@ public final class SettingsGrid extends LinearLayout {
 
     public SettingsGrid(Context context, AttributeSet attrs) {
         super(context, attrs);
-        android.content.res.TypedArray a =
+        android.content.res.TypedArray attributes =
                 context.obtainStyledAttributes(attrs, R.styleable.SettingsGrid);
         maxColumns =
-                Math.max(1, Math.min(3, a.getInt(R.styleable.SettingsGrid_settingsColumns, 2)));
-        lastFull = a.getBoolean(R.styleable.SettingsGrid_settingsLastFull, false);
+                Math.max(1, Math.min(5, attributes.getInt(R.styleable.SettingsGrid_settingsColumns, 2)));
+        minimumColumnWidth = Math.max(1, attributes.getDimensionPixelSize(
+                R.styleable.SettingsGrid_settingsMinimumColumnWidth, SettingsDesign.dp(this, 360)));
+        lastFull = attributes.getBoolean(R.styleable.SettingsGrid_settingsLastFull, false);
         endColumnWeight =
-                Math.max(1f, a.getFloat(R.styleable.SettingsGrid_settingsEndColumnWeight, 1f));
-        a.recycle();
+                Math.max(1f, attributes.getFloat(R.styleable.SettingsGrid_settingsEndColumnWeight, 1f));
+        attributes.recycle();
     }
 
     @Override
     protected void onMeasure(int widthSpec, int heightSpec) {
-        int width = MeasureSpec.getSize(widthSpec), gap = SettingsDesign.dp(this, 16);
+        int width = MeasureSpec.getSize(widthSpec);
+        int gap = SettingsDesign.dp(this, 16);
         int available = Math.max(0, width - getPaddingLeft() - getPaddingRight());
         int columns =
                 Math.min(
                         maxColumns,
-                        Math.max(1, (available + gap) / (SettingsDesign.dp(this, 360) + gap)));
+                        Math.max(1, (available + gap) / (minimumColumnWidth + gap)));
         int rowWidth = Math.max(0, available - gap * (columns - 1));
         float cellWidth =
                 Math.max(
@@ -47,47 +51,48 @@ public final class SettingsGrid extends LinearLayout {
                         rowWidth / (columns - 1 + (columns == maxColumns ? endColumnWeight : 1f)));
         visible.clear();
         bounds.clear();
-        for (int i = 0; i < getChildCount(); i++) {
-            if (getChildAt(i).getVisibility() != GONE) {
-                visible.add(getChildAt(i));
+        for (int index = 0; index < getChildCount(); index++) {
+            if (getChildAt(index).getVisibility() != GONE) {
+                visible.add(getChildAt(index));
             }
         }
         int y = getPaddingTop();
         for (int start = 0; start < visible.size(); start += columns) {
-            int end = Math.min(start + columns, visible.size()), rowHeight = 0;
+            int end = Math.min(start + columns, visible.size());
+            int rowHeight = 0;
             boolean full = lastFull && end - start == 1 && end == visible.size();
-            for (int i = start; i < end; i++) {
-                View c = visible.get(i);
-                int left = Math.round((i - start) * (cellWidth + gap));
-                int cw =
+            for (int index = start; index < end; index++) {
+                View child = visible.get(index);
+                int left = Math.round((index - start) * (cellWidth + gap));
+                int childWidth =
                         full
                                 ? available
-                                : i - start == columns - 1
+                                : index - start == columns - 1
                                         ? available - left
-                                        : Math.round((i - start + 1) * (cellWidth + gap))
+                                        : Math.round((index - start + 1) * (cellWidth + gap))
                                                 - gap
                                                 - left;
-                c.measure(
-                        MeasureSpec.makeMeasureSpec(cw, MeasureSpec.EXACTLY),
+                child.measure(
+                        MeasureSpec.makeMeasureSpec(childWidth, MeasureSpec.EXACTLY),
                         MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED));
-                rowHeight = Math.max(rowHeight, c.getMeasuredHeight());
+                rowHeight = Math.max(rowHeight, child.getMeasuredHeight());
             }
-            for (int i = start; i < end; i++) {
-                View c = visible.get(i);
-                int left = Math.round((i - start) * (cellWidth + gap));
-                int cw =
+            for (int index = start; index < end; index++) {
+                View child = visible.get(index);
+                int left = Math.round((index - start) * (cellWidth + gap));
+                int childWidth =
                         full
                                 ? available
-                                : i - start == columns - 1
+                                : index - start == columns - 1
                                         ? available - left
-                                        : Math.round((i - start + 1) * (cellWidth + gap))
+                                        : Math.round((index - start + 1) * (cellWidth + gap))
                                                 - gap
                                                 - left;
-                c.measure(
-                        MeasureSpec.makeMeasureSpec(cw, MeasureSpec.EXACTLY),
+                child.measure(
+                        MeasureSpec.makeMeasureSpec(childWidth, MeasureSpec.EXACTLY),
                         MeasureSpec.makeMeasureSpec(rowHeight, MeasureSpec.EXACTLY));
                 int x = getPaddingLeft() + left;
-                bounds.add(new Rect(x, y, x + cw, y + rowHeight));
+                bounds.add(new Rect(x, y, x + childWidth, y + rowHeight));
             }
             y += rowHeight + gap;
         }
@@ -99,14 +104,14 @@ public final class SettingsGrid extends LinearLayout {
     }
 
     @Override
-    protected void onLayout(boolean changed, int l, int t, int r, int b) {
-        for (int i = 0; i < visible.size(); i++) {
-            Rect box = bounds.get(i);
+    protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
+        for (int index = 0; index < visible.size(); index++) {
+            Rect box = bounds.get(index);
             int x =
                     getLayoutDirection() == LAYOUT_DIRECTION_RTL
                             ? getWidth() - box.right
                             : box.left;
-            visible.get(i).layout(x, box.top, x + box.width(), box.bottom);
+            visible.get(index).layout(x, box.top, x + box.width(), box.bottom);
         }
     }
 }
