@@ -6,10 +6,12 @@ RunYN, root-служба и runtime из `Packaging/new/`. Версия не с�
 `Packaging/new/` и общие ресурсы `Packaging/installer/`, `Packaging/system/`.
 Исторические имена сохраняются в распознавании и очистке прежних установок.
 
-В manifest используется `infrastructure: unified`, payload schema 4 и recipe
-schema 3 / `qinggan-v3`. Общий пакет требует Installer **1.8.4** и capability
-`unified-runtime-v1`. Установщик включает обработку шрифтов навигации QNX;
-старые установки распознаются для миграции и удаления.
+Формат payload 5 использует фиксированный каталог `common/` без `manifest.json`.
+Версия, revision, `payloadFormat` и минимум Installer читаются из
+`assets/voyahtune-build.json` внутри RestoreMode APK. План установки задан
+типизированным Rust-кодом в `release-core`, recipe schema 3 / `qinggan-v3`.
+Требуется Installer **1.8.5** с capability `fixed-payload-v1` и новая root-служба,
+доставленная через USB. Старые установки распознаются для миграции и удаления.
 
 ## RunYN и определение модели
 
@@ -75,8 +77,8 @@ Python на компьютере и Android не требуется. OTA вып�
 
 ## Миграция и OTA
 
-Сборщик объединяет существующие общие роли приложения/OTA с
-`Packaging/new/build/release-inputs.json`. Этот файл генерируется `build.sh`:
+Сборщик получает общие роли приложения/OTA и runtime из скомпилированного
+плана `release-core`:
 Go-loader, ARM32/ARM64 helper и native bootstrap с общим Java DEX размещаются в `/data/local/bin/voyahtune-new/`.
 Boot-wrapper использует прежнее имя init-сервиса `voyahtune_load`.
 
@@ -86,7 +88,7 @@ Boot-wrapper использует прежнее имя init-сервиса `voy
 Старые loader, Frida, hooks и lock-каталоги удаляются по точным путям. Обязательная
 перезагрузка освобождает прежний код в процессах и разрешает инъекции новой версии.
 Накопительный список старых файлов находится в `Packaging/new/config/retired-files.txt`
-и общем spec. Отдельного скрипта миграции или второго движка установки нет.
+и общем Rust-плане. Отдельного скрипта миграции или второго движка установки нет.
 
 После перезагрузки USB и OTA вызывают `voyahtune-loader --check-hooks`: проверяются
 свежесть supervisor, полные ACK модулей и boot ID/PID/startTicks/UID целевых процессов. Ожидание
@@ -102,7 +104,7 @@ remover; для его сборки готовый новый runtime не тр�
 через штатный file executor, сохраняя свой бинарник, init и bootstrap.
 Настройки URL каталога и DNS сохраняются; прежний выбор релиза сбрасывается.
 
-`minimumInstallerVersion` общего пакета с native/Java runtime — 1.8.4. `minimumOtaVersion`
+`minimumInstallerVersion` общего пакета с native/Java runtime — 1.8.5. `minimumOtaVersion`
 задаётся отдельно: базовая версия VoyahTune, впервые содержащая совместимую службу.
 Для последующих релизов без замены службы сохраняйте минимум предыдущего
 опубликованного общего релиза в выбранном каталоге, определённого по SemVer.
@@ -122,8 +124,8 @@ ACC, Power Hold, CarPlay, настройки и журналирование и�
 различия OEM определяются моделью и наличием API.
 
 Сборщик и USB-установщик проверяют подписи APK, версию, runtime-хеши и digest recipe.
-Installer 1.8.4 необходим из-за порядка quiesce/drain перед заменой runtime,
-проверки назначений USB и новых встроенных helpers удаления. Это требование
+Installer 1.8.5 необходим для фиксированного формата payload и встроенного плана
+установки. Порядок quiesce/drain и проверка назначений USB сохраняются. Это требование
 к установщику не переносится в OTA.
 
 Пример первого общего выпуска (номер условный, замените согласованной версией):

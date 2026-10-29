@@ -1,8 +1,8 @@
 # Подготовка окружения и выпуск VoyahTune
 
 Все новые сборки VoyahTune единые. Один `payload_VERSION.zip` используется
-компьютерным установщиком и OTA. Runtime берётся из `Packaging/new/`, manifest
-содержит `infrastructure: unified`. Особенности автомобилей учитываются адаптерами
+компьютерным установщиком и OTA. Runtime берётся из `Packaging/new/`; метаданные APK
+содержат `infrastructure: unified` и `payloadFormat: 5`. Особенности автомобилей учитываются адаптерами
 и условиями по модели; отдельный вариант релиза выбирать не нужно.
 
 Команды выполняются из корня репозитория. `4.5.0` ниже — условный новый номер,
@@ -10,7 +10,7 @@
 `voyahtune` для stable payload и APK, `installer` для GUI/движка. Beta получает
 согласованный номер с суффиксом `-beta`, например `4.5.0-beta`.
 
-Текущий единый контракт требует Installer **1.8.4**, capability `unified-runtime-v1`
+Текущий единый контракт требует Installer **1.8.5**, capability `fixed-payload-v1`
 и совместимую root-службу. Первый переход на неё выполняется через USB; следующие
 совместимые обновления используют тот же payload через OTA. Общий recipe заменяет
 прежний runtime, удаляет известные устаревшие файлы и перезагружает Android.
@@ -182,8 +182,8 @@ checkout контейнеры нужно пересоздать с правил�
 | --- | --- |
 | Приложения | `Native/`, `RestoreMode/`, `RunYN/`, `Updater/ui/` |
 | Агенты, загрузчик, конфигурации и boot | `Packaging/new/` |
-| Устаревшие runtime-пути для очистки | `Packaging/new/config/retired-files.txt` и общий spec |
-| Общие роли payload | `Packaging/installer/payload-spec.json`, `Packaging/system/` |
+| Устаревшие runtime-пути для очистки | `Packaging/new/config/retired-files.txt` и общий Rust-план |
+| Общие роли payload | `Installer/crates/release-core/src/recipe.rs`, `Packaging/system/` |
 | Root-служба OTA | `Updater/daemon/` |
 | Процесс установки и удаления | `Installer/crates/installer-core/` |
 | Payload, recipe и совместимость | `Installer/crates/release-core/` |
@@ -191,12 +191,14 @@ checkout контейнеры нужно пересоздать с правил�
 | Branding и DNS overlay | `Packaging/branding/`, `Packaging/vendor-overlay/` |
 | Инструкции и описание изменений | `Docs/`, `hownews.md`, `readme.md` |
 
-Сборщик запускает сборку `Packaging/new/` и объединяет её `build/release-inputs.json`
-с общими ролями. Recipe и manifest создаются автоматически. Новую runtime-роль
-добавляйте в исходный manifest/сборщик runtime, а не вручную в `Releases/`.
+Сборщик запускает сборку `Packaging/new/` и получает фиксированные роли из
+типизированного плана `release-core`. Идентификаторы и хеши runtime встраиваются
+в Go-загрузчик после сборки зависимых компонентов. Новую runtime-роль добавляют
+в исходники сборщика и скомпилированный план; изменение формата требует обновления
+Installer/root-службы. Внешние agents/runtime/payload-манифесты не формируются.
 Точные пути старых файлов сохраняются для очистки установок, пропускавших версии.
 
-Версии Native/RestoreMode, manifest, ZIP и записи каталога должны совпадать.
+Версии Native/RestoreMode, ZIP и записи каталога должны совпадать.
 RunYN имеет самостоятельную версию приложения; его включение определяется общим
 контрактом, а установка — моделью. Runtime-хеши и digest recipe записываются
 в подписанные APK metadata. Старые APK нельзя перепаковать с новыми агентами
@@ -239,7 +241,7 @@ python3 -m json.tool Releases/dist/payload_4.5.0.json
 | `Releases/dist/payload_4.5.0.json` | Запись каталога с хешем, размером и минимумами |
 | `Releases/build/installer-payload-4.5.0/` | Распакованный payload для проверки |
 
-В корне ZIP лежит `manifest.json`. После генерации записи каталога ZIP нельзя
+В корне ZIP находится каталог `common/`; версия и формат встроены в APK. После генерации записи каталога ZIP нельзя
 переупаковывать: его размер и SHA-256 относятся к точным байтам архива.
 Локальная успешная сборка атомарно заменяет прежний результат; при ошибке сохраняется
 предыдущий. Опубликованный stable-архив под тем же номером не заменяется.
@@ -268,10 +270,9 @@ npm --prefix Installer/desktop run build
 
 ## 5. Минимумы и каталоги
 
-`requirements.minInstallerVersion` внутри архива и `minimumInstallerVersion`
+`minimumInstallerVersion` в метаданных APK и `minimumInstallerVersion`
 в записи каталога должны отражать один минимальный поддерживаемый GUI.
-Для native/Java runtime это 1.8.4 из-за нового порядка обслуживания и встроенных
-helpers; последующее повышение версии Installer само по себе не меняет минимум.
+Для native/Java runtime это 1.8.5 из-за фиксированного формата без внешних манифестов; последующее повышение версии Installer само по себе не меняет минимум.
 
 `minimumOtaVersion` — базовая версия установленного VoyahTune с совместимой root-службой.
 Если служба обновляется через USB, используйте номер впервые содержащего её релиза.

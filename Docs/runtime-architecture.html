@@ -1021,8 +1021,8 @@
     "payload": {
       "id": "payload",
       "title": "Единый payload",
-      "subtitle": "Runtime + APK + recipe",
-      "language": "JSON · ZIP",
+      "subtitle": "Runtime + APK · формат 5",
+      "language": "ZIP · файлы",
       "place": "Архив доставки",
       "summary": "Одна поставка объединяет обе ABI runtime и приложения. Модельные условия находятся в recipe и адаптерах.",
       "facts": [
@@ -1030,8 +1030,8 @@
         "RunYN устанавливается по условию except-h97xy."
       ],
       "sources": [
-        "Packaging/installer/payload-spec.json",
-        "Installer/crates/release-core/src/default-recipe.json",
+        "Installer/crates/release-core/src/recipe.rs",
+        "Installer/crates/release-core/src/payload.rs",
         "Installer/crates/installer-build/src/main.rs"
       ],
       "artifact": "Payload ZIP",
@@ -1187,7 +1187,7 @@
       ],
       "sources": [
         "RunYN/app/src/main/java/big/town/runyn/MainActivity.kt",
-        "Installer/crates/release-core/src/default-recipe.json"
+        "Installer/crates/release-core/src/payload.rs"
       ],
       "artifact": "RunYN.apk",
       "kind": "code"
@@ -1226,7 +1226,7 @@
       "sources": [
         "Packaging/new/java/src/main/java/ru/voyahtune/agent/runtime/AgentRuntime.java",
         "Packaging/new/java/src/main/java/ru/voyahtune/agent/modules",
-        "Packaging/new/config/agents.json"
+        "Packaging/new/loader/agent_registry.go"
       ],
       "artifact": "agents.dex",
       "kind": "code"
@@ -1349,7 +1349,7 @@
       "place": "Внутри target · общий registry",
       "summary": "Один Dispatch на Executable распределяет callbacks владельцев и хранит backup оригинального метода.",
       "facts": [
-        "Подготовка caller coverage выполняется перед hook; после установки callers деоптимизируются.",
+        "По умолчанию используется прямой hook LSPlant; caller coverage включается только резервной веткой USE_DIRECT_HOOKS=false.",
         "Retirement и in-flight callbacks согласованы со снятием перехвата."
       ],
       "sources": [
@@ -1362,7 +1362,7 @@
     "callers": {
       "id": "callers",
       "title": "AndroidCallers",
-      "subtitle": "DEX-граф + reflection",
+      "subtitle": "Резервная ветка · отключена",
       "language": "Java",
       "place": "Внутри target · подготовка hook",
       "summary": "Находит скомпилированные вызывающие методы и статические инициализаторы, которые могут содержать встроенный вызов.",
@@ -1583,7 +1583,7 @@
       "place": "Компьютер разработчика",
       "summary": "build_runtime.py запускает behavior gate, Java/D8, CMake/NDK и Go cross-compile, затем собирает runtime bundle.",
       "facts": [
-        "Готовит build/runtime, build/system и release-inputs.json.",
+        "Готовит build/runtime и build/system; встраивает сведения о компонентах через Go overlay.",
         "Сама эта команда не собирает Payload/Installer и не устанавливает ничего на ГУ."
       ],
       "sources": [
@@ -1639,10 +1639,10 @@
     "bundle": {
       "id": "bundle",
       "title": "Runtime bundle",
-      "subtitle": "DEX + ELF + manifest",
+      "subtitle": "DEX + ELF + встроенные идентификаторы",
       "language": "Файлы · JSON",
       "place": "Компьютер → /data/local/bin/voyahtune-new",
-      "summary": "bundle.py проверяет ELF ABI и заголовок DEX, копирует конфигурации и создаёт runtime-manifest.json.",
+      "summary": "bundle.py проверяет ELF ABI и заголовок DEX, формирует комплект без внешнего манифеста и генерирует типизированные сведения для загрузчика.",
       "facts": [
         "nativeId задаётся отпечатком native-исходников и lock-файла.",
         "runtimeId учитывает agents.dex и JSON-ресурсы; отдельные SHA-256 хранятся для файлов.",
@@ -1651,7 +1651,7 @@
       "sources": [
         "Packaging/new/scripts/bundle.py",
         "Packaging/new/loader/native_config.go",
-        "Packaging/new/config/install-layout.json"
+        "Packaging/new/loader/runtime_components.go"
       ],
       "artifact": "Packaging/new/build/runtime/",
       "kind": "data"
@@ -1670,7 +1670,7 @@
       "sources": [
         "Installer/crates/release-core/src/runtime_maintenance.rs",
         "Installer/crates/release-core/src/recipe.rs",
-        "Installer/crates/release-core/src/default-recipe.json",
+        "Installer/crates/release-core/src/payload.rs",
         "Updater/daemon/Cargo.toml"
       ],
       "artifact": "",
@@ -1718,10 +1718,10 @@
     },
     "manifest": {
       "id": "manifest",
-      "title": "agents.json",
+      "title": "Реестр агентов Go",
       "subtitle": "16 статических определений",
-      "language": "JSON",
-      "place": "Конфигурация supervisor",
+      "language": "Go",
+      "place": "Внутри Go-supervisor",
       "summary": "Задаёт ID агента, target, набор modules, timeout, число попыток и условия включения.",
       "facts": [
         "Клавиатура EN/RU — взаимоисключающий выбор для одного процесса.",
@@ -1729,7 +1729,7 @@
         "Дополнительные client.\u003cpackage> создаются для клиентской геометрии."
       ],
       "sources": [
-        "Packaging/new/config/agents.json",
+        "Packaging/new/loader/agent_registry.go",
         "Packaging/new/loader/moduleplan/group.go",
         "Packaging/new/loader/moduleplan/keyboard.go",
         "Packaging/new/loader/settings.go"
@@ -1769,7 +1769,7 @@
       ],
       "sources": [
         "Packaging/new/java/src/main/java/ru/voyahtune/agent/modules/AccModule.java",
-        "Packaging/new/config/agents.json",
+        "Packaging/new/loader/agent_registry.go",
         "Packaging/new/java/src/main/java/ru/voyahtune/agent/runtime/AgentRuntime.java"
       ],
       "artifact": "agents.dex",
@@ -1790,7 +1790,7 @@
       ],
       "sources": [
         "Packaging/new/java/src/main/java/ru/voyahtune/agent/modules/DriveResetModule.java",
-        "Packaging/new/config/agents.json",
+        "Packaging/new/loader/agent_registry.go",
         "Packaging/new/java/src/main/java/ru/voyahtune/agent/runtime/AgentRuntime.java"
       ],
       "artifact": "agents.dex",
@@ -1811,7 +1811,7 @@
       ],
       "sources": [
         "Packaging/new/java/src/main/java/ru/voyahtune/agent/modules/VehicleAirModule.java",
-        "Packaging/new/config/agents.json",
+        "Packaging/new/loader/agent_registry.go",
         "Packaging/new/java/src/main/java/ru/voyahtune/agent/runtime/AgentRuntime.java"
       ],
       "artifact": "agents.dex",
@@ -1832,7 +1832,7 @@
       ],
       "sources": [
         "Packaging/new/java/src/main/java/ru/voyahtune/agent/modules/ApolloModule.java",
-        "Packaging/new/config/agents.json",
+        "Packaging/new/loader/agent_registry.go",
         "Packaging/new/java/src/main/java/ru/voyahtune/agent/runtime/AgentRuntime.java"
       ],
       "artifact": "agents.dex",
@@ -1853,7 +1853,7 @@
       ],
       "sources": [
         "Packaging/new/java/src/main/java/ru/voyahtune/agent/modules/SteeringModule.java",
-        "Packaging/new/config/agents.json",
+        "Packaging/new/loader/agent_registry.go",
         "Packaging/new/java/src/main/java/ru/voyahtune/agent/runtime/AgentRuntime.java"
       ],
       "artifact": "agents.dex",
@@ -1874,7 +1874,7 @@
       ],
       "sources": [
         "Packaging/new/java/src/main/java/ru/voyahtune/agent/modules/LauncherModule.java",
-        "Packaging/new/config/agents.json",
+        "Packaging/new/loader/agent_registry.go",
         "Packaging/new/java/src/main/java/ru/voyahtune/agent/runtime/AgentRuntime.java"
       ],
       "artifact": "agents.dex",
@@ -1895,7 +1895,7 @@
       ],
       "sources": [
         "Packaging/new/java/src/main/java/ru/voyahtune/agent/modules/WindowsModule.java",
-        "Packaging/new/config/agents.json",
+        "Packaging/new/loader/agent_registry.go",
         "Packaging/new/java/src/main/java/ru/voyahtune/agent/runtime/AgentRuntime.java"
       ],
       "artifact": "agents.dex",
@@ -1916,7 +1916,7 @@
       ],
       "sources": [
         "Packaging/new/java/src/main/java/ru/voyahtune/agent/modules/MultidisplayModule.java",
-        "Packaging/new/config/agents.json",
+        "Packaging/new/loader/agent_registry.go",
         "Packaging/new/java/src/main/java/ru/voyahtune/agent/runtime/AgentRuntime.java"
       ],
       "artifact": "agents.dex",
@@ -1937,7 +1937,7 @@
       ],
       "sources": [
         "Packaging/new/java/src/main/java/ru/voyahtune/agent/modules/KeyboardModule.java",
-        "Packaging/new/config/agents.json",
+        "Packaging/new/loader/agent_registry.go",
         "Packaging/new/java/src/main/java/ru/voyahtune/agent/runtime/AgentRuntime.java"
       ],
       "artifact": "agents.dex",
@@ -1958,7 +1958,7 @@
       ],
       "sources": [
         "Packaging/new/java/src/main/java/ru/voyahtune/agent/modules/KeyboardModule.java",
-        "Packaging/new/config/agents.json",
+        "Packaging/new/loader/agent_registry.go",
         "Packaging/new/java/src/main/java/ru/voyahtune/agent/runtime/AgentRuntime.java"
       ],
       "artifact": "agents.dex",
@@ -1979,7 +1979,7 @@
       ],
       "sources": [
         "Packaging/new/java/src/main/java/ru/voyahtune/agent/modules/PhoneModule.java",
-        "Packaging/new/config/agents.json",
+        "Packaging/new/loader/agent_registry.go",
         "Packaging/new/java/src/main/java/ru/voyahtune/agent/runtime/AgentRuntime.java"
       ],
       "artifact": "agents.dex",
@@ -2000,7 +2000,7 @@
       ],
       "sources": [
         "Packaging/new/java/src/main/java/ru/voyahtune/agent/modules/ClusterModule.java",
-        "Packaging/new/config/agents.json",
+        "Packaging/new/loader/agent_registry.go",
         "Packaging/new/java/src/main/java/ru/voyahtune/agent/runtime/AgentRuntime.java"
       ],
       "artifact": "agents.dex",
@@ -2021,7 +2021,7 @@
       ],
       "sources": [
         "Packaging/new/java/src/main/java/ru/voyahtune/agent/modules/RdsModule.java",
-        "Packaging/new/config/agents.json",
+        "Packaging/new/loader/agent_registry.go",
         "Packaging/new/java/src/main/java/ru/voyahtune/agent/runtime/AgentRuntime.java"
       ],
       "artifact": "agents.dex",
@@ -2042,7 +2042,7 @@
       ],
       "sources": [
         "Packaging/new/java/src/main/java/ru/voyahtune/agent/modules/StatusBarModule.java",
-        "Packaging/new/config/agents.json",
+        "Packaging/new/loader/agent_registry.go",
         "Packaging/new/java/src/main/java/ru/voyahtune/agent/runtime/AgentRuntime.java"
       ],
       "artifact": "agents.dex",
@@ -2063,7 +2063,7 @@
       ],
       "sources": [
         "Packaging/new/java/src/main/java/ru/voyahtune/agent/modules/NavigationSourceModule.java",
-        "Packaging/new/config/agents.json",
+        "Packaging/new/loader/agent_registry.go",
         "Packaging/new/java/src/main/java/ru/voyahtune/agent/runtime/AgentRuntime.java"
       ],
       "artifact": "agents.dex",
@@ -2084,7 +2084,7 @@
       ],
       "sources": [
         "Packaging/new/java/src/main/java/ru/voyahtune/agent/modules/NavigationSourceModule.java",
-        "Packaging/new/config/agents.json",
+        "Packaging/new/loader/agent_registry.go",
         "Packaging/new/java/src/main/java/ru/voyahtune/agent/runtime/AgentRuntime.java"
       ],
       "artifact": "agents.dex",
@@ -2373,7 +2373,7 @@ views.runtime = {
         'AgentRuntime.start создаёт session; Apply передаёт runtimeId, revision, список модулей и конфигурацию. prepare проверяет необходимые OEM API.'),
     step(
         '5 · Hook', 'registry',
-        'HookRegistry подготавливает caller coverage, устанавливает LSPlant hook и публикует backup. AndroidCallers инвалидирует скомпилированных callers.'),
+        'HookRegistry устанавливает прямой LSPlant hook и публикует backup. При USE_DIRECT_HOOKS=false дополнительно используется AndroidCallers; по умолчанию эта ветка отключена.'),
     step(
         '6 · ACK', 'agent',
         'Java возвращает состояние всех модулей. Только полный ACK вместе с завершением helper и подтверждённым detach позволяет loader опубликовать active.')
@@ -2400,7 +2400,7 @@ views.delivery = {
     edge('build', 'tests', 'gate до DEX'), edge('build', 'tools', 'запускает'),
     edge('build', 'dex', 'javac → D8'), edge('build', 'native-so', 'CMake / NDK'),
     edge('build', 'loader', 'Go cross-build'), edge('build', 'bundle', 'bundle.py', 'file'),
-    edge('bundle', 'payload', 'release-inputs.json', 'file'), edge('installer', 'payload', 'читает', 'file'),
+    edge('bundle', 'payload', 'фиксированные роли', 'file'), edge('installer', 'payload', 'читает', 'file'),
     edge('updater', 'payload', 'читает', 'file'),
     edge('installer', 'recipe', 'использует Rust', 'call', {side: 'right'}),
     edge('updater', 'recipe', 'использует Rust'), edge('recipe', 'maintenance', 'общий порядок'),
@@ -2417,7 +2417,7 @@ views.delivery = {
         'После Drained остановить loader. Остановка службы сама по себе не доказывает завершение внедрённых агентов.'),
     step(
         '4 · Copy', 'bundle',
-        'Заменить согласованный комплект runtime: общий DEX, обе ABI helper/SO, manifest и ресурсы. Очистить точные устаревшие пути.'),
+        'Заменить согласованный комплект runtime: общий DEX, обе ABI helper/SO, загрузчик со встроенной идентичностью и ресурсы. Очистить точные устаревшие пути.'),
     step(
         '5 · Reboot', 'postboot',
         'Перезагрузить Android, чтобы завершить процессы со старыми библиотеками и начать новую boot identity.'),

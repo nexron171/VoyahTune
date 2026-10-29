@@ -8,7 +8,7 @@ OEM-различия определяются доступными класса�
 ## Состав
 
 - `java/` — общий registry, управление модулями и ресурсами, OEM-адаптеры. Все 16
-  статических определений из `config/agents.json` и динамические `client.<package>`
+  статических определений из `loader/agent_registry.go` и динамические `client.<package>`
   используют один runtime. Окна, телефон, руль, клавиатура, ACC/reset, Apollo,
   MultiDisplay, Launcher, RDS и приборка имеют самостоятельные владельцы ресурсов.
 - `native/` — ARM/Thumb и ARM64 attach, bootstrap, JNI/LSPlant, восстановление состояния потока.
@@ -52,13 +52,13 @@ sh Packaging/new/build.sh
 Rust компоненты, тесты registry/модулей и общие установочные проверки.
 OEM/ptrace/JNI boundary в host-тестах может быть подменён; исполнение на Android
 проверяется отдельно. `build.sh` повторяет обязательный gate перед DEX и создаёт
-`build/runtime/`, `build/system/` и `build/release-inputs.json` для общего recipe.
+`build/runtime/` и `build/system/`. Общий план установки скомпилирован в `release-core`.
 Он не собирает APK, Payload или Installer и ничего не устанавливает.
 
 В runtime входят `voyahtune-loader`, ARM64 `voyahtune-inject`/`libvoyahtune-agent.so`,
 ARM32 `voyahtune-inject-arm`/`libvoyahtune-agent-arm.so`,
-`agents.dex`, `agents.json`, `runtime-manifest.json`, `stop-loader.sh` и JSON-настройки.
-Manifest содержит SHA-256 компонентов и поколения native/Java. Обновление только
+`agents.dex`, `stop-loader.sh` и JSON-настройки.
+Сборщик встраивает SHA-256 зависимых компонентов и поколения native/Java в загрузчик через Go overlay; внешних манифестов нет. Обновление только
 supervisor не меняет Java generation. Исполняемые файлы имеют режим 755, данные — 644.
 
 ## Установка, обновление и удаление
@@ -70,7 +70,7 @@ quiesce/drain, остановка сервиса, замена компонен�
 неподтверждённое завершение запрещают замену файлов. Текущий boot marker не даёт
 подключать новую реализацию к процессам со старыми агентами до reboot.
 
-Первое обновление root-службы выполняется через USB с Installer 1.8.4; требуется
+Первое обновление root-службы выполняется через USB с Installer 1.8.5; требуется
 его пересборка из-за нового порядка установки и встроенных helpers. Последующие
 совместимые OTA сохраняют собственные стабильные компоненты службы. Допуск OTA
 определяет `minimumOtaVersion`: при выпуске первого совместимого релиза минимум
