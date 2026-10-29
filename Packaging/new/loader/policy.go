@@ -1,16 +1,20 @@
 package main
 
+const safePointWaitSeconds int64 = 60
+
 type attemptRecord struct {
-	Boot          string          `json:"boot"`
-	Identity      processIdentity `json:"identity"`
-	CodeID        string          `json:"codeId"`
-	State         string          `json:"state"`
-	LastError     string          `json:"lastError,omitempty"`
-	Attempts      int             `json:"attempts"`
-	NextAttempt   int64           `json:"nextAttempt"`
-	LastAttach    int64           `json:"lastAttach"`
-	RapidRestarts int             `json:"rapidRestarts"`
-	Blocked       bool            `json:"blocked"`
+	Boot               string          `json:"boot"`
+	Identity           processIdentity `json:"identity"`
+	CodeID             string          `json:"codeId"`
+	State              string          `json:"state"`
+	LastError          string          `json:"lastError,omitempty"`
+	Attempts           int             `json:"attempts"`
+	NextAttempt        int64           `json:"nextAttempt"`
+	LastAttach         int64           `json:"lastAttach"`
+	RapidRestarts      int             `json:"rapidRestarts"`
+	Blocked            bool            `json:"blocked"`
+	SafePointFailures  int             `json:"safePointFailures,omitempty"`
+	SafePointWaitUntil int64           `json:"safePointWaitUntil,omitempty"`
 }
 
 func (record attemptRecord) failureReason() string {
@@ -59,4 +63,34 @@ func retryDelay(attempt int) int64 {
 	default:
 		return 30
 	}
+}
+
+func (record *attemptRecord) deferSafePoint(now int64) bool {
+	if record.Blocked {
+		return false
+	}
+	if record.State == "waiting" {
+		return record.SafePointFailures > 0 && now < record.SafePointWaitUntil
+	}
+	if record.State != "injecting" || record.Attempts < 1 {
+		return false
+	}
+	if record.SafePointWaitUntil == 0 {
+		record.SafePointWaitUntil = record.LastAttach + safePointWaitSeconds
+	}
+	if now >= record.SafePointWaitUntil {
+		return false
+	}
+	record.SafePointFailures++
+	record.Attempts--
+	delay := retryDelay(record.SafePointFailures)
+	if delay > 5 {
+		delay = 5
+	}
+	record.NextAttempt = now + delay
+	if record.NextAttempt > record.SafePointWaitUntil {
+		record.NextAttempt = record.SafePointWaitUntil
+	}
+	record.State = "waiting"
+	return true
 }

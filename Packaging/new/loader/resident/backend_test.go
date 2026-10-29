@@ -2,11 +2,14 @@ package resident
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 
@@ -153,5 +156,57 @@ func TestNativeBackendSelectsMatchingHelperAndLibrary(t *testing.T) {
 		if class == 2 && (helper != backend.options.HelperPath || library != backend.options.LibraryPath) {
 			t.Fatal(helper, library)
 		}
+	}
+}
+
+func TestNativeBackendPreservesAndDefersSafeAcquisitionTimeout(t *testing.T) {
+	backend, record, _ := backendFixture(t)
+	process := filepath.Join(backend.options.ProcRoot, strconv.Itoa(record.Target.PID))
+	boot := filepath.Join(backend.options.ProcRoot, "sys/kernel/random/boot_id")
+	if err := os.MkdirAll(filepath.Dir(boot), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(process, 0700); err != nil {
+		t.Fatal(err)
+	}
+	stat := fmt.Sprintf("%d (system_server) S %s%s", record.Target.PID, strings.Repeat("0 ", 18), record.Target.StartTicks)
+	files := map[string][]byte{
+		boot:                             []byte(record.Target.BootID),
+		filepath.Join(process, "stat"):   []byte(stat),
+		filepath.Join(process, "status"): []byte(fmt.Sprintf("Uid:\t%d\t%d\t%d\t%d\n", record.Target.UID, record.Target.UID, record.Target.UID, record.Target.UID)),
+	}
+	header := make([]byte, 20)
+	copy(header, []byte{0x7f, 'E', 'L', 'F', 2, 1})
+	binary.LittleEndian.PutUint16(header[18:], 183)
+	files[filepath.Join(process, "exe")] = header
+	for path, data := range files {
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	receipt := safePointFailureFixture()
+	receipt.Schema = 1
+	receipt.RequestID = fmt.Sprintf("attach-%d-%s-%d", record.Target.PID, record.Target.StartTicks, record.Plan.Revision)
+	receipt.Target = record.Target
+	receipt.Helper = agentwire.Target{BootID: record.Target.BootID, UID: 0, StartTicks: "101"}
+	data, err := json.Marshal(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := filepath.Join(t.TempDir(), "receipt-template")
+	if err := os.WriteFile(template, []byte(strings.ReplaceAll(string(data), `"pid":0`, `"pid":HELPER_PID`)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	helper := filepath.Join(t.TempDir(), "helper")
+	quoted := "'" + strings.ReplaceAll(template, "'", "'\\''") + "'"
+	script := "#!/bin/sh\nset -eu\numask 077\nsed \"s/HELPER_PID/$$/g\" " + quoted + " > \"$4\"\nexit 1\n"
+	if err := os.WriteFile(helper, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	backend.options.HelperPath = helper
+	_, err = backend.Attach(context.Background(), record)
+	var deferred *SafePointNotReadyError
+	if !errors.As(err, &deferred) || !strings.Contains(err.Error(), "wait-safe-syscall: Connection timed out") {
+		t.Fatal("native acquisition failure was lost or not deferred", err)
 	}
 }

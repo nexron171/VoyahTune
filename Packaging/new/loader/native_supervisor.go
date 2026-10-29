@@ -195,8 +195,10 @@ func (manager *nativeSupervisor) cycle(ctx context.Context, name string) {
 		if errors.Is(err, resident.ErrQuiescing) {
 			state = "stopping"
 		}
+		if manager.recordAttemptResult(name, identity, false, err) {
+			state = "waiting"
+		}
 		reportAll(identity, state, err.Error())
-		manager.recordAttemptResult(name, identity, false, err)
 		return
 	}
 	if manager.engine.Snapshot().Phase != lifecycle.Running {
@@ -267,6 +269,9 @@ func (manager *nativeSupervisor) admit(target agentwire.Target) error {
 	code := target.NativeID + ":" + target.RuntimeID
 	record := observeTarget(previous, manager.boot, processIdentity{target.PID, target.StartTicks}, code, now, crashLimit)
 	if !record.canAttempt(now, maximum) {
+		if record.State == "waiting" && record.SafePointFailures > 0 && now < record.SafePointWaitUntil {
+			return &resident.SafePointNotReadyError{Reason: record.failureReason()}
+		}
 		return errors.New(record.failureReason())
 	}
 	record.State = "injecting"
@@ -277,30 +282,41 @@ func (manager *nativeSupervisor) admit(target agentwire.Target) error {
 	return writeAtomic(manager.attemptPath(name), record)
 }
 
-func (manager *nativeSupervisor) recordAttemptResult(name string, identity processIdentity, active bool, failure error) {
+func (manager *nativeSupervisor) recordAttemptResult(name string, identity processIdentity, active bool, failure error) bool {
 	var record attemptRecord
 	if err := readJSON(manager.attemptPath(name), &record); err != nil || record.Boot != manager.boot || record.Identity != identity {
-		return
+		return false
 	}
+	previous := record
 	state := "failed"
 	reason := ""
+	deferred := false
 	if active {
 		state = "active"
 	}
 	if failure != nil {
 		reason = failure.Error()
 	}
+	var waiting *resident.SafePointNotReadyError
+	if errors.As(failure, &waiting) {
+		if now, err := uptimeSeconds(manager.procRoot); err == nil && record.deferSafePoint(now) {
+			state = "waiting"
+			deferred = true
+		}
+	}
 	if record.State == "active" || record.State == "restart-required" || record.Blocked {
 		state = record.State
 	}
-	if record.State == state && record.LastError == reason {
-		return
-	}
 	record.State = state
 	record.LastError = reason
+	if record == previous {
+		return deferred
+	}
 	if err := writeAtomic(manager.attemptPath(name), record); err != nil {
 		log.Printf("persist native attempt: %v", err)
+		return false
 	}
+	return deferred
 }
 
 func requireAndroidARM(procRoot string, pid int) error {

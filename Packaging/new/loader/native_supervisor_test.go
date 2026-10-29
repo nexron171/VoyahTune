@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -9,6 +10,7 @@ import (
 
 	"voyahtune/unified-loader/agentwire"
 	"voyahtune/unified-loader/lifecycle"
+	"voyahtune/unified-loader/resident"
 )
 
 type residentSpy struct {
@@ -148,5 +150,93 @@ func TestNativeSupervisorAdmitsARM32OEMProcess(t *testing.T) {
 	manager.cycle(context.Background(), name)
 	if len(spy.plans) != 1 || manager.status.agents["acc"].State != "active" {
 		t.Fatal(spy.plans, manager.status.agents)
+	}
+}
+
+func TestSafePointTimeoutDoesNotConsumeTheInjectionBudget(t *testing.T) {
+	agent := nativeAgentConfig{ID: "windows", Target: "system_server", Modules: []string{"windows"}, MaxAttempts: 1, TimeoutSeconds: 35}
+	manager, _ := supervisorFixture(t, []nativeAgentConfig{agent})
+	manager.updateBlock = filepath.Join(t.TempDir(), "update.block")
+	manager.migrationBoot = filepath.Join(t.TempDir(), "migration.boot")
+	supervisorTarget(t, manager, agent.Target, "100", 2, 183, "1000")
+	target := agentwire.Target{BootID: manager.boot, PID: 42, UID: 1000, StartTicks: "100", NativeID: "native", RuntimeID: "java"}
+	if err := manager.admit(target); err != nil {
+		t.Fatal(err)
+	}
+	failure := &resident.SafePointNotReadyError{Reason: "native attach: wait-safe-syscall: Connection timed out"}
+	if !manager.recordAttemptResult(agent.Target, processIdentity{42, "100"}, false, failure) {
+		t.Fatal("safe timeout exhausted injection budget")
+	}
+	var record attemptRecord
+	if err := readJSON(manager.attemptPath(agent.Target), &record); err != nil {
+		t.Fatal(err)
+	}
+	if record.Attempts != 0 || record.State != "waiting" || record.NextAttempt <= 100 {
+		t.Fatal(record)
+	}
+	var waiting *resident.SafePointNotReadyError
+	if err := manager.admit(target); !errors.As(err, &waiting) {
+		t.Fatal("backoff did not remain pending", err)
+	}
+	if !manager.recordAttemptResult(agent.Target, processIdentity{42, "100"}, false, waiting) {
+		t.Fatal("pending retry became failed")
+	}
+	testFile(t, filepath.Join(manager.procRoot, "uptime"), "102 0", 0600)
+	if err := manager.admit(target); err != nil {
+		t.Fatal("retry denied", err)
+	}
+	manager.recordAttemptResult(agent.Target, processIdentity{42, "100"}, true, nil)
+	if err := readJSON(manager.attemptPath(agent.Target), &record); err != nil {
+		t.Fatal(err)
+	}
+	if record.State != "active" || record.Attempts != 1 {
+		t.Fatal(record)
+	}
+}
+
+func TestSafePointRetriesAreBoundedAndRealFailuresRemainFailed(t *testing.T) {
+	identity := processIdentity{42, "100"}
+	record := attemptRecord{Boot: "boot", Identity: identity, State: "injecting", Attempts: 1, LastAttach: 100}
+	if !record.deferSafePoint(103) {
+		t.Fatal(record)
+	}
+	deadline := record.SafePointWaitUntil
+	for now := int64(110); now < deadline; now += 10 {
+		record.State = "injecting"
+		record.Attempts++
+		record.LastAttach = now
+		if !record.deferSafePoint(now + 1) {
+			t.Fatal(record)
+		}
+		if record.NextAttempt > deadline {
+			t.Fatal("retry moved beyond deadline", record)
+		}
+	}
+	record.State = "injecting"
+	record.Attempts++
+	if record.deferSafePoint(deadline) {
+		t.Fatal("safe point retries never expire", record)
+	}
+	if record.canAttempt(deadline+30, 1) {
+		t.Fatal("exhausted budget was reset", record)
+	}
+}
+
+func TestNativeStartupFailureStillConsumesTheInjectionBudget(t *testing.T) {
+	agent := nativeAgentConfig{ID: "windows", Target: "system_server", Modules: []string{"windows"}, MaxAttempts: 1}
+	manager, _ := supervisorFixture(t, []nativeAgentConfig{agent})
+	manager.updateBlock = filepath.Join(t.TempDir(), "update.block")
+	manager.migrationBoot = filepath.Join(t.TempDir(), "migration.boot")
+	supervisorTarget(t, manager, agent.Target, "100", 2, 183, "1000")
+	target := agentwire.Target{BootID: manager.boot, PID: 42, UID: 1000, StartTicks: "100", NativeID: "native", RuntimeID: "java"}
+	if err := manager.admit(target); err != nil {
+		t.Fatal(err)
+	}
+	if manager.recordAttemptResult(agent.Target, processIdentity{42, "100"}, false, errors.New("module failed after native startup")) {
+		t.Fatal("real failure became pending")
+	}
+	testFile(t, filepath.Join(manager.procRoot, "uptime"), "110 0", 0600)
+	if err := manager.admit(target); err == nil {
+		t.Fatal("failed startup was injected again")
 	}
 }

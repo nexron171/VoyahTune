@@ -243,7 +243,14 @@ func (backend *NativeBackend) Attach(ctx context.Context, record Record) (agentw
 		if ctx.Err() != nil {
 			return agentwire.Status{}, ctx.Err()
 		}
-		return agentwire.Status{}, fmt.Errorf("native helper did not confirm active: %s", snapshot.Error)
+		reason := snapshot.Error
+		if receipt.Error != "" {
+			reason += ": " + receipt.Error
+		}
+		if safePointAcquisitionTimeout(receipt, exitCode) && receipt.Helper.PID == command.Process.Pid && sameProcess(actual, request.Target) {
+			return agentwire.Status{}, &SafePointNotReadyError{Reason: reason}
+		}
+		return agentwire.Status{}, fmt.Errorf("native helper did not confirm active: %s", reason)
 	}
 	return *receipt.Status, nil
 }
