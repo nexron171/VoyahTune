@@ -90,19 +90,39 @@ macos-universal.tar.gz, windows-x64.exe, windows-x86.exe, windows-arm64.exe и b
 
 Образы собираются из `Installer/build-env/Dockerfile`. Контейнеры должны сохранять
 кэши между запусками; используйте `sleep infinity`, без `--rm`. Windows-контейнеру
-нужны cargo-xwin и Rust targets для Windows x64, x86 и ARM64. На Apple Silicon включите Rosetta
+нужны cargo-xwin и target x86_64-pc-windows-msvc. На Apple Silicon включите Rosetta
 в Colima (VZ) и подготовьте закреплённый linuxdeploy, описанный ниже. Скрипт не
 создаёт отсутствующие контейнеры и не пересобирает их образы автоматически.
-Если профиль `v` ещё не подготовлен в `Releases/cache/colima`, сборщик останавливается
-с инструкцией подготовки. Ошибки подключения к Docker сохраняются в `docker.log`,
-ошибки чтения контейнера — в `<контейнер>-inspect.log` внутри каталога логов.
 
 ## Подготовка Colima и контейнеров с нуля
 
 Этот раздел нужен только для Windows/Linux-сборок из macOS. Для `--mac` достаточно
 локальных инструментов из следующего раздела. Команды выполняются из корня
-checkout после установки Docker CLI, Colima и rsync. Они создают постоянную среду;
+checkout после установки Docker CLI, Buildx, Colima и rsync. Они создают постоянную среду;
 повторять создание одноимённых контейнеров перед каждым релизом не нужно.
+
+Для Docker CLI из Homebrew установите Buildx и зарегистрируйте плагин один раз:
+
+```sh
+brew install docker-buildx
+mkdir -p "$HOME/.docker/cli-plugins"
+ln -s "$(brew --prefix)/lib/docker/cli-plugins/docker-buildx" \
+  "$HOME/.docker/cli-plugins/docker-buildx"
+docker buildx version
+```
+
+Если `docker buildx version` уже работает, установка плагина не требуется.
+Для образов используйте BuildKit через `buildx build`: старый сборщик может выбрать
+локальный ARM64-образ при запросе `linux/amd64`. `--pull` обновляет базовые образы
+для выбранной платформы, `--load` сохраняет результат в Docker daemon профиля,
+откуда его запускает `docker run`.
+
+При сборке образов передавайте Docker только `Installer/build-env` как контекст.
+Так `Releases/` с кэшами и диском Colima, `tmp/` и результаты сборок не отправляются
+в Docker daemon. Dockerfile устанавливает инструменты и не копирует файлы проекта;
+рабочие файлы контейнеры получают через `/work`. В командах ниже последний аргумент
+должен оставаться `Installer/build-env`: замена его на `.` передаст весь checkout,
+поскольку `.gitignore` не управляет контекстом Docker.
 
 ### 1. Создать профиль VM
 
@@ -114,16 +134,12 @@ export COLIMA_HOME="$PWD/Releases/cache/colima"
 mkdir -p "$COLIMA_HOME"
 
 # Apple Silicon:
-colima start v --vm-type vz --vz-rosetta --cpus 6 --memory 8 --disk 100 \
-  --mount "$PWD:w" --activate=false
+colima start v --vm-type vz --vz-rosetta --cpu 6 --memory 8 --disk 100 \
+  --mount "$PWD:w"
 
 # Intel: вместо предыдущей команды, без Rosetta:
-# colima start v --vm-type vz --cpus 6 --memory 8 --disk 100 --mount "$PWD:w" --activate=false
+# colima start v --vm-type vz --cpu 6 --memory 8 --disk 100 --mount "$PWD:w"
 ```
-
-Каталог `$COLIMA_HOME` должен существовать **до** вызова Colima: иначе Colima 0.10.3
-использует стандартный `~/.colima`, а сборщик продолжает искать сокет в checkout.
-`--activate=false` сохраняет выбранный глобальный Docker context.
 
 Все Docker-команды ниже явно используют сокет этого профиля. Функцию `vti_docker`
 задайте в том же терминале; она не меняет глобальный Docker context:
@@ -133,30 +149,29 @@ vti_docker() {
   docker --host "unix://$COLIMA_HOME/v/docker.sock" "$@"
 }
 vti_docker info
+vti_docker buildx version
 mkdir -p Releases/build/hosts/windows Releases/build/hosts/linux-amd64
 ```
 
 ### 2. Подготовить Windows builder
 
 Образ собирается для архитектуры самой VM: ARM64 на Apple Silicon либо x64
-на Intel. Cargo-xwin создаёт Windows x64, x86 и ARM64 в обоих случаях.
+на Intel. Cargo-xwin создаёт Windows x64 результат в обоих случаях.
 
 ```sh
-vti_docker build -t voyahtune-builder:host Installer/build-env
+vti_docker buildx build --pull --load -t voyahtune-builder:host Installer/build-env
 vti_docker run -d --name vti-windows \
   -v "$PWD/Releases/build/hosts/windows:/work" \
   voyahtune-builder:host sleep infinity
 vti_docker exec vti-windows cargo install --locked cargo-xwin
-toolchain=$(python3 -c 'import tomllib; print(tomllib.load(open("Installer/rust-toolchain.toml", "rb"))["toolchain"]["channel"])')
 vti_docker exec vti-windows rustup target add \
-  --toolchain "$toolchain" \
-  x86_64-pc-windows-msvc i686-pc-windows-msvc aarch64-pc-windows-msvc
+  --toolchain 1.98.1 x86_64-pc-windows-msvc
 ```
 
 ### 3. Подготовить Linux x64 builder
 
 ```sh
-vti_docker build --platform linux/amd64 -t voyahtune-builder:x64 \
+vti_docker buildx build --pull --load --platform linux/amd64 -t voyahtune-builder:x64 \
   Installer/build-env
 vti_docker run -d --name vti-linux-amd64 --platform linux/amd64 \
   -v "$PWD/Releases/build/hosts/linux-amd64:/work" \
@@ -172,8 +187,6 @@ vti_docker exec vti-linux-amd64 uname -m
 
 ```sh
 ./Installer/scripts/build-all-macos.sh --check --windows --linux
-# Windows-only environment:
-./Installer/scripts/build-all-macos.sh --check --windows
 # После подготовки также Android SDK и локального Rust для macOS:
 ./Installer/scripts/build-all-macos.sh --check
 ./make_release.sh 4.5.0 --minimum-ota-version 4.5.0 --installers
@@ -298,9 +311,14 @@ Node22, Rust1.98.1, GStreamer, а также xvfb/xauth для GUI-провер�
 Пример для нативного x64 Docker-host:
 
 ```sh
-docker build --platform linux/amd64 -t voyahtune-builder:x64 Installer/build-env
+docker buildx version
+docker buildx build --pull --load --platform linux/amd64 \
+  -t voyahtune-builder:x64 Installer/build-env
 docker run --rm -it --platform linux/amd64 -v "$PWD:/work" -w /work voyahtune-builder:x64 bash
 ```
+
+Для Docker Engine на Linux должен быть установлен
+[плагин Buildx](https://github.com/docker/buildx#installing).
 
 Для постоянного окружения общей macOS-команды создайте контейнер с именем и mount
 из таблицы выше, без `--rm`, с командой `sleep infinity`.
@@ -339,15 +357,17 @@ python3 Installer/scripts/package-linux.py \
 ```sh
 mkdir -p Releases/cache
 curl -fL -H 'Accept: application/octet-stream' \
-  https://api.github.com/repos/linuxdeploy/linuxdeploy/releases/assets/538917371 \
+  https://api.github.com/repos/linuxdeploy/linuxdeploy/releases/assets/602438599 \
   -o Releases/cache/linuxdeploy-x86_64-new.AppImage.download
 shasum -a 256 Releases/cache/linuxdeploy-x86_64-new.AppImage.download
 ```
 
-Ожидаемый SHA-256: `36a2d7e274d12e1050d0e9ecfe11d339ed54720b2bec464c286d53f8b07f5c62`.
+Ожидаемый SHA-256: `8aea8da0f7f7039d2a2cecb14657d752a222a5e1d3825caeef186c82f751cdd1`.
 Только после совпадения переименуйте файл в
 `Releases/cache/linuxdeploy-x86_64-new.AppImage`. Скрипт повторно проверит сумму.
 Версия: commit07333c6; SquashFS offset944632 относится именно к этому файлу.
+Проверены распаковка и сборка минимального AppDir в Linux x64 под Rosetta.
+Артефакты continuous могут пересоздаваться даже для того же коммита.
 Если asset удалён, используйте проверенную копию прежнего кэша или отдельно
 проверьте новый инструмент и обновите закрепление в build-all-macos.sh.
 
