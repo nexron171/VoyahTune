@@ -6,10 +6,11 @@ pub mod infrastructure;
 pub mod paths;
 pub mod payload;
 pub mod recipe;
-mod storage;
 pub use error::{Error, Result};
 pub mod apk_identity;
 pub mod ota;
 
 pub mod installation_logcat;
 pub mod vehicle_model;
+
+pub mod runtime_maintenance;

@@ -215,7 +215,11 @@ impl Engine {
                 .iter()
                 .filter(|package| package.package == payload::RUNYN && package.applies_to(model))
             {
-                self.verify_active_apk(&package.package, &package.artifact, None)?;
+                let expected = &self.payload.artifact(&package.artifact)?.sha256;
+                self.readiness_command(
+                    &super::active_apk_script(&package.package, expected, None),
+                    deadline,
+                )?;
             }
         }
         self.readiness_command("[ ! -e /data/local/voyahtune-install.lock ]", deadline)?;
@@ -566,6 +570,7 @@ case "$script" in
             echo '{"schema":1,"ok":true,"uid":0,"pid":104,"infrastructure":"unified","capabilities":["restoremode-ota-ui-v1","unified-runtime-v1"]}' ;;
     *'voyahtune-loader --check-hooks'*)
         if [ -e "$root/hooks-failed" ]; then echo 'hook acc: failed' >&2; exit 1; fi ;;
+    *'getprop ro.build.fingerprint'*) echo H97C ;;
     *'getprop'*|*'voyahtune-install.lock'*|*'sha256sum'*|*'resolve-activity'*) exit 0 ;;
     *) echo 'Unexpected command' >&2; exit 1 ;;
 esac
@@ -576,12 +581,19 @@ esac
             "releaseVersion":"4.1.1", "buildRevision":"test",
             "artifacts":[
                 {"name":"native.apk","path":"native.apk","sha256":"0".repeat(64),"size":1},
-                {"name":"restore_mode.apk","path":"restore_mode.apk","sha256":"0".repeat(64),"size":1}
+                {"name":"restore_mode.apk","path":"restore_mode.apk","sha256":"0".repeat(64),"size":1},
+                {"name":"runyn.apk","path":"runyn.apk","sha256":"0".repeat(64),"size":1}
             ]
         });
-        fs::write(directory.path().join("manifest.json"), manifest.to_string()).unwrap();
+        for artifact in manifest["artifacts"].as_array().unwrap() {
+            fs::write(
+                directory.path().join(artifact["path"].as_str().unwrap()),
+                "test APK",
+            )
+            .unwrap();
+        }
         let payload = Payload {
-            root: directory.path().into(),
+            root: directory.path().canonicalize().unwrap(),
             manifest: serde_json::from_value(manifest).unwrap(),
         };
         let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -676,6 +688,7 @@ esac
             .verify_installed(Request {
                 action: Action::Install,
                 dns: Dns::Keep,
+                options: Default::default(),
                 serial: "CAR-001".into(),
                 inventory_token: String::new(),
                 confirmed: true,

@@ -1,0 +1,1100 @@
+{
+  "schema": 1,
+  "cases": [
+    {
+      "id": "navigation.yandex-STRAIGHT",
+      "contract": "navigation.policy",
+      "agents": [
+        "yandex-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "yandexIcon",
+        "value": "STRAIGHT"
+      },
+      "expected": {
+        "value": 1
+      }
+    },
+    {
+      "id": "navigation.yandex-SLIGHT_LEFT",
+      "contract": "navigation.policy",
+      "agents": [
+        "yandex-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "yandexIcon",
+        "value": "SLIGHT_LEFT"
+      },
+      "expected": {
+        "value": 8
+      }
+    },
+    {
+      "id": "navigation.yandex-SLIGHT_RIGHT",
+      "contract": "navigation.policy",
+      "agents": [
+        "yandex-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "yandexIcon",
+        "value": "SLIGHT_RIGHT"
+      },
+      "expected": {
+        "value": 2
+      }
+    },
+    {
+      "id": "navigation.yandex-LEFT",
+      "contract": "navigation.policy",
+      "agents": [
+        "yandex-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "yandexIcon",
+        "value": "LEFT"
+      },
+      "expected": {
+        "value": 7
+      }
+    },
+    {
+      "id": "navigation.yandex-RIGHT",
+      "contract": "navigation.policy",
+      "agents": [
+        "yandex-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "yandexIcon",
+        "value": "RIGHT"
+      },
+      "expected": {
+        "value": 3
+      }
+    },
+    {
+      "id": "navigation.yandex-HARD_LEFT",
+      "contract": "navigation.policy",
+      "agents": [
+        "yandex-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "yandexIcon",
+        "value": "HARD_LEFT"
+      },
+      "expected": {
+        "value": 6
+      }
+    },
+    {
+      "id": "navigation.yandex-HARD_RIGHT",
+      "contract": "navigation.policy",
+      "agents": [
+        "yandex-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "yandexIcon",
+        "value": "HARD_RIGHT"
+      },
+      "expected": {
+        "value": 4
+      }
+    },
+    {
+      "id": "navigation.yandex-FORK_LEFT",
+      "contract": "navigation.policy",
+      "agents": [
+        "yandex-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "yandexIcon",
+        "value": "FORK_LEFT"
+      },
+      "expected": {
+        "value": 8
+      }
+    },
+    {
+      "id": "navigation.yandex-FORK_RIGHT",
+      "contract": "navigation.policy",
+      "agents": [
+        "yandex-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "yandexIcon",
+        "value": "FORK_RIGHT"
+      },
+      "expected": {
+        "value": 2
+      }
+    },
+    {
+      "id": "navigation.yandex-UTURN_LEFT",
+      "contract": "navigation.policy",
+      "agents": [
+        "yandex-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "yandexIcon",
+        "value": "UTURN_LEFT"
+      },
+      "expected": {
+        "value": 5
+      }
+    },
+    {
+      "id": "navigation.yandex-UTURN_RIGHT",
+      "contract": "navigation.policy",
+      "agents": [
+        "yandex-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "yandexIcon",
+        "value": "UTURN_RIGHT"
+      },
+      "expected": {
+        "value": 0
+      }
+    },
+    {
+      "id": "navigation.yandex-ENTER_ROUNDABOUT",
+      "contract": "navigation.policy",
+      "agents": [
+        "yandex-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "yandexIcon",
+        "value": "ENTER_ROUNDABOUT"
+      },
+      "expected": {
+        "value": 9
+      }
+    },
+    {
+      "id": "navigation.yandex-LEAVE_ROUNDABOUT",
+      "contract": "navigation.policy",
+      "agents": [
+        "yandex-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "yandexIcon",
+        "value": "LEAVE_ROUNDABOUT"
+      },
+      "expected": {
+        "value": 9
+      }
+    },
+    {
+      "id": "navigation.yandex-EXIT_LEFT",
+      "contract": "navigation.policy",
+      "agents": [
+        "yandex-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "yandexIcon",
+        "value": "EXIT_LEFT"
+      },
+      "expected": {
+        "value": 8
+      }
+    },
+    {
+      "id": "navigation.yandex-EXIT_RIGHT",
+      "contract": "navigation.policy",
+      "agents": [
+        "yandex-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "yandexIcon",
+        "value": "EXIT_RIGHT"
+      },
+      "expected": {
+        "value": 2
+      }
+    },
+    {
+      "id": "navigation.yandex-unknown",
+      "contract": "navigation.policy",
+      "agents": [
+        "yandex-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "yandexIcon",
+        "value": "unknown"
+      },
+      "expected": {
+        "value": 0
+      }
+    },
+    {
+      "id": "navigation.yandex-__proto__",
+      "contract": "navigation.policy",
+      "agents": [
+        "yandex-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "yandexIcon",
+        "value": "__proto__"
+      },
+      "expected": {
+        "value": 0
+      }
+    },
+    {
+      "id": "navigation.dgis-from",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "dgisIcon",
+        "value": "assets/from.svg"
+      },
+      "expected": {
+        "value": 1
+      }
+    },
+    {
+      "id": "navigation.dgis-startA",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "dgisIcon",
+        "value": "assets/startA.svg"
+      },
+      "expected": {
+        "value": 1
+      }
+    },
+    {
+      "id": "navigation.dgis-start",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "dgisIcon",
+        "value": "assets/start.svg"
+      },
+      "expected": {
+        "value": 1
+      }
+    },
+    {
+      "id": "navigation.dgis-crossroad_straight",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "dgisIcon",
+        "value": "assets/crossroad_straight.svg"
+      },
+      "expected": {
+        "value": 1
+      }
+    },
+    {
+      "id": "navigation.dgis-crossroad_left",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "dgisIcon",
+        "value": "assets/crossroad_left.svg"
+      },
+      "expected": {
+        "value": 7
+      }
+    },
+    {
+      "id": "navigation.dgis-crossroad_right",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "dgisIcon",
+        "value": "assets/crossroad_right.svg"
+      },
+      "expected": {
+        "value": 3
+      }
+    },
+    {
+      "id": "navigation.dgis-crossroad_keep_left",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "dgisIcon",
+        "value": "assets/crossroad_keep_left.svg"
+      },
+      "expected": {
+        "value": 8
+      }
+    },
+    {
+      "id": "navigation.dgis-crossroad_keep_right",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "dgisIcon",
+        "value": "assets/crossroad_keep_right.svg"
+      },
+      "expected": {
+        "value": 2
+      }
+    },
+    {
+      "id": "navigation.dgis-crossroad_slightly_left",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "dgisIcon",
+        "value": "assets/crossroad_slightly_left.svg"
+      },
+      "expected": {
+        "value": 8
+      }
+    },
+    {
+      "id": "navigation.dgis-crossroad_slightly_right",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "dgisIcon",
+        "value": "assets/crossroad_slightly_right.svg"
+      },
+      "expected": {
+        "value": 2
+      }
+    },
+    {
+      "id": "navigation.dgis-crossroad_sharply_left",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "dgisIcon",
+        "value": "assets/crossroad_sharply_left.svg"
+      },
+      "expected": {
+        "value": 6
+      }
+    },
+    {
+      "id": "navigation.dgis-crossroad_sharply_right",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "dgisIcon",
+        "value": "assets/crossroad_sharply_right.svg"
+      },
+      "expected": {
+        "value": 4
+      }
+    },
+    {
+      "id": "navigation.dgis-crossroad_uturn",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "dgisIcon",
+        "value": "assets/crossroad_uturn.svg"
+      },
+      "expected": {
+        "value": 5
+      }
+    },
+    {
+      "id": "navigation.dgis-turn_over_right_hand",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "dgisIcon",
+        "value": "assets/turn_over_right_hand.svg"
+      },
+      "expected": {
+        "value": 5
+      }
+    },
+    {
+      "id": "navigation.dgis-turn_over_left_hand",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "dgisIcon",
+        "value": "assets/turn_over_left_hand.svg"
+      },
+      "expected": {
+        "value": 0
+      }
+    },
+    {
+      "id": "navigation.dgis-turn_over",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "dgisIcon",
+        "value": "assets/turn_over.svg"
+      },
+      "expected": {
+        "value": 0
+      }
+    },
+    {
+      "id": "navigation.dgis-left_ring_exit",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "dgisIcon",
+        "value": "assets/left_ring_exit.svg"
+      },
+      "expected": {
+        "value": 9
+      }
+    },
+    {
+      "id": "navigation.dgis-right_ring_exit",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "dgisIcon",
+        "value": "assets/right_ring_exit.svg"
+      },
+      "expected": {
+        "value": 0
+      }
+    },
+    {
+      "id": "navigation.dgis-ringroad_exit",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "dgisIcon",
+        "value": "assets/ringroad_exit.svg"
+      },
+      "expected": {
+        "value": 0
+      }
+    },
+    {
+      "id": "navigation.dgis-ringroad_backward",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "dgisIcon",
+        "value": "assets/ringroad_backward.svg"
+      },
+      "expected": {
+        "value": 9
+      }
+    },
+    {
+      "id": "navigation.dgis-ringroad_forward",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "dgisIcon",
+        "value": "assets/ringroad_forward.svg"
+      },
+      "expected": {
+        "value": 9
+      }
+    },
+    {
+      "id": "navigation.dgis-ringroad_left_135",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "dgisIcon",
+        "value": "assets/ringroad_left_135.svg"
+      },
+      "expected": {
+        "value": 9
+      }
+    },
+    {
+      "id": "navigation.dgis-ringroad_left_180",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "dgisIcon",
+        "value": "assets/ringroad_left_180.svg"
+      },
+      "expected": {
+        "value": 9
+      }
+    },
+    {
+      "id": "navigation.dgis-ringroad_left_45",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "dgisIcon",
+        "value": "assets/ringroad_left_45.svg"
+      },
+      "expected": {
+        "value": 9
+      }
+    },
+    {
+      "id": "navigation.dgis-ringroad_left_90",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "dgisIcon",
+        "value": "assets/ringroad_left_90.svg"
+      },
+      "expected": {
+        "value": 9
+      }
+    },
+    {
+      "id": "navigation.dgis-ringroad_right_135",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "dgisIcon",
+        "value": "assets/ringroad_right_135.svg"
+      },
+      "expected": {
+        "value": 9
+      }
+    },
+    {
+      "id": "navigation.dgis-ringroad_right_45",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "dgisIcon",
+        "value": "assets/ringroad_right_45.svg"
+      },
+      "expected": {
+        "value": 9
+      }
+    },
+    {
+      "id": "navigation.dgis-ringroad_right_90",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "dgisIcon",
+        "value": "assets/ringroad_right_90.svg"
+      },
+      "expected": {
+        "value": 9
+      }
+    },
+    {
+      "id": "navigation.dgis-unknown",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "dgisIcon",
+        "value": "assets/unknown.svg"
+      },
+      "expected": {
+        "value": 0
+      }
+    },
+    {
+      "id": "navigation.dgis-__proto__",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "dgisIcon",
+        "value": "assets/__proto__.svg"
+      },
+      "expected": {
+        "value": 0
+      }
+    },
+    {
+      "id": "navigation.distance-00",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "meters",
+        "value": "0 m"
+      },
+      "expected": {
+        "value": 0
+      }
+    },
+    {
+      "id": "navigation.distance-01",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "meters",
+        "value": "999 м"
+      },
+      "expected": {
+        "value": 999
+      }
+    },
+    {
+      "id": "navigation.distance-02",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "meters",
+        "value": "1 km"
+      },
+      "expected": {
+        "value": 1000
+      }
+    },
+    {
+      "id": "navigation.distance-03",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "meters",
+        "value": "1,5 км"
+      },
+      "expected": {
+        "value": 1500
+      }
+    },
+    {
+      "id": "navigation.distance-04",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "meters",
+        "value": "1.25 km"
+      },
+      "expected": {
+        "value": 1250
+      }
+    },
+    {
+      "id": "navigation.distance-05",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "meters",
+        "value": " 2 KM "
+      },
+      "expected": {
+        "value": 2000
+      }
+    },
+    {
+      "id": "navigation.distance-06",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "meters",
+        "value": "1 234 м"
+      },
+      "expected": {
+        "value": 1234
+      }
+    },
+    {
+      "id": "navigation.distance-07",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "meters",
+        "value": "1 234 м"
+      },
+      "expected": {
+        "value": 1234
+      }
+    },
+    {
+      "id": "navigation.distance-08",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "meters",
+        "value": "1 234 m"
+      },
+      "expected": {
+        "value": 1234
+      }
+    },
+    {
+      "id": "navigation.distance-09",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "meters",
+        "value": "0.5 m"
+      },
+      "expected": {
+        "value": 1
+      }
+    },
+    {
+      "id": "navigation.distance-10",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "meters",
+        "value": "12.34 m"
+      },
+      "expected": {
+        "value": 12
+      }
+    },
+    {
+      "id": "navigation.distance-11",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "meters",
+        "value": ""
+      },
+      "expected": {
+        "value": -1
+      }
+    },
+    {
+      "id": "navigation.distance-12",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "meters",
+        "value": "-1 m"
+      },
+      "expected": {
+        "value": -1
+      }
+    },
+    {
+      "id": "navigation.distance-13",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "meters",
+        "value": "1 mi"
+      },
+      "expected": {
+        "value": -1
+      }
+    },
+    {
+      "id": "navigation.distance-14",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "meters",
+        "value": "NaN km"
+      },
+      "expected": {
+        "value": -1
+      }
+    },
+    {
+      "id": "navigation.distance-15",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "meters",
+        "value": "1.234 km"
+      },
+      "expected": {
+        "value": -1
+      }
+    },
+    {
+      "id": "navigation.distance-16",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "meters",
+        "value": "2147483648 m"
+      },
+      "expected": {
+        "value": -1
+      }
+    },
+    {
+      "id": "navigation.distance-17",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "meters",
+        "value": "1 23 m"
+      },
+      "expected": {
+        "value": -1
+      }
+    },
+    {
+      "id": "navigation.mode-car",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "driving",
+        "value": "car"
+      },
+      "expected": {
+        "value": true
+      }
+    },
+    {
+      "id": "navigation.mode-walk",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "driving",
+        "value": "walk"
+      },
+      "expected": {
+        "value": false
+      }
+    },
+    {
+      "id": "navigation.mode-bicycle",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "driving",
+        "value": "bicycle"
+      },
+      "expected": {
+        "value": false
+      }
+    },
+    {
+      "id": "navigation.mode-empty",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "navigation-sources.test.js",
+      "input": {
+        "operation": "driving",
+        "value": ""
+      },
+      "expected": {
+        "value": false
+      }
+    },
+    {
+      "id": "navigation.uppercase-cyrillic",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "../agents/app-client.js",
+      "input": {
+        "operation": "meters",
+        "value": "1 КМ"
+      },
+      "expected": {
+        "value": 1000
+      }
+    },
+    {
+      "id": "navigation.unicode-trim",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "../agents/app-client.js",
+      "input": {
+        "operation": "meters",
+        "value": "﻿1 км "
+      },
+      "expected": {
+        "value": 1000
+      }
+    },
+    {
+      "id": "navigation.integer-limit",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "../agents/app-client.js",
+      "input": {
+        "operation": "meters",
+        "value": "2147483647 м"
+      },
+      "expected": {
+        "value": 2147483647
+      }
+    },
+    {
+      "id": "navigation.overflow-fraction",
+      "contract": "navigation.policy",
+      "agents": [
+        "dgis-navigation"
+      ],
+      "reference": "../agents/app-client.js",
+      "input": {
+        "operation": "meters",
+        "value": "2147483647.1 м"
+      },
+      "expected": {
+        "value": -1
+      }
+    }
+  ]
+}

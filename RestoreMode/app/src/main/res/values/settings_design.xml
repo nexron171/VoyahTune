@@ -41,6 +41,7 @@
     <declare-styleable name="SettingsGrid">
         <attr name="settingsLastFull" format="boolean" />
         <attr name="settingsColumns" format="integer" />
+        <attr name="settingsMinimumColumnWidth" format="dimension" />
         <attr name="settingsEndColumnWeight" format="float" />
     </declare-styleable>
     <declare-styleable name="SettingsPreviewView">

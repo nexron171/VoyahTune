@@ -1,0 +1,2311 @@
+{
+  "schema": 1,
+  "cases": [
+    {
+      "id": "radio.startup-reset",
+      "contract": "radio.restore",
+      "agents": [
+        "rds"
+      ],
+      "reference": "rds-restore.test.js",
+      "input": {
+        "initial": {
+          "saved": {
+            "fm": true,
+            "freq": 10170,
+            "rds": true,
+            "pi": 1234,
+            "ta": false
+          },
+          "current": {
+            "fm": true,
+            "freq": 8750,
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "ready": true,
+          "focus": true,
+          "playing": false
+        },
+        "events": [
+          {
+            "action": "observe",
+            "station": {
+              "fm": true,
+              "freq": 8750,
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            }
+          },
+          {
+            "action": "advance",
+            "milliseconds": 1000
+          }
+        ]
+      },
+      "expected": {
+        "tunes": [],
+        "writes": [],
+        "plays": 0,
+        "fallbacks": 0,
+        "owned": null
+      }
+    },
+    {
+      "id": "radio.restore-submitted",
+      "contract": "radio.restore",
+      "agents": [
+        "rds"
+      ],
+      "reference": "rds-restore.test.js",
+      "input": {
+        "initial": {
+          "saved": {
+            "fm": true,
+            "freq": 10170,
+            "rds": true,
+            "pi": 1234,
+            "ta": false
+          },
+          "current": {
+            "fm": true,
+            "freq": 8750,
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "ready": true,
+          "focus": true,
+          "playing": false
+        },
+        "events": [
+          {
+            "action": "resume"
+          }
+        ]
+      },
+      "expected": {
+        "tunes": [
+          {
+            "fm": true,
+            "freq": 10170,
+            "rds": true,
+            "pi": 1234,
+            "ta": false
+          }
+        ],
+        "writes": [],
+        "plays": 0,
+        "fallbacks": 0,
+        "owned": {
+          "fm": true,
+          "freq": 10170,
+          "rds": true,
+          "pi": 1234,
+          "ta": false
+        }
+      }
+    },
+    {
+      "id": "radio.first-learn",
+      "contract": "radio.restore",
+      "agents": [
+        "rds"
+      ],
+      "reference": "rds-restore.test.js",
+      "input": {
+        "initial": {
+          "saved": null,
+          "current": {
+            "fm": true,
+            "freq": 8750,
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "ready": true,
+          "focus": true,
+          "playing": false
+        },
+        "events": [
+          {
+            "action": "observe",
+            "station": {
+              "fm": true,
+              "freq": 10170,
+              "rds": true,
+              "pi": 1234,
+              "ta": false
+            }
+          },
+          {
+            "action": "advance",
+            "milliseconds": 750
+          }
+        ]
+      },
+      "expected": {
+        "tunes": [],
+        "writes": [
+          {
+            "fm": true,
+            "freq": 10170,
+            "rds": true,
+            "pi": 1234,
+            "ta": false
+          }
+        ],
+        "plays": 0,
+        "fallbacks": 0,
+        "owned": null
+      }
+    },
+    {
+      "id": "radio.settle-boundary",
+      "contract": "radio.restore",
+      "agents": [
+        "rds"
+      ],
+      "reference": "rds-restore.test.js",
+      "input": {
+        "initial": {
+          "saved": null,
+          "current": {
+            "fm": true,
+            "freq": 8750,
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "ready": true,
+          "focus": true,
+          "playing": false
+        },
+        "events": [
+          {
+            "action": "observe",
+            "station": {
+              "fm": true,
+              "freq": 10170,
+              "rds": true,
+              "pi": 1234,
+              "ta": false
+            }
+          },
+          {
+            "action": "advance",
+            "milliseconds": 749
+          }
+        ]
+      },
+      "expected": {
+        "tunes": [],
+        "writes": [],
+        "plays": 0,
+        "fallbacks": 0,
+        "owned": null
+      }
+    },
+    {
+      "id": "radio.explicit-choice",
+      "contract": "radio.restore",
+      "agents": [
+        "rds"
+      ],
+      "reference": "rds-restore.test.js",
+      "input": {
+        "initial": {
+          "saved": {
+            "fm": true,
+            "freq": 10170,
+            "rds": true,
+            "pi": 1234,
+            "ta": false
+          },
+          "current": {
+            "fm": true,
+            "freq": 8750,
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "ready": true,
+          "focus": true,
+          "playing": false
+        },
+        "events": [
+          {
+            "action": "select",
+            "station": {
+              "fm": true,
+              "freq": 10230,
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            }
+          },
+          {
+            "action": "observe",
+            "station": {
+              "fm": true,
+              "freq": 8750,
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            }
+          },
+          {
+            "action": "advance",
+            "milliseconds": 1000
+          },
+          {
+            "action": "observe",
+            "station": {
+              "fm": true,
+              "freq": 10230,
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            }
+          },
+          {
+            "action": "advance",
+            "milliseconds": 750
+          }
+        ]
+      },
+      "expected": {
+        "tunes": [],
+        "writes": [
+          {
+            "fm": true,
+            "freq": 10230,
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          }
+        ],
+        "plays": 0,
+        "fallbacks": 0,
+        "owned": null
+      }
+    },
+    {
+      "id": "radio.pause-cancels",
+      "contract": "radio.restore",
+      "agents": [
+        "rds"
+      ],
+      "reference": "rds-restore.test.js",
+      "input": {
+        "initial": {
+          "saved": {
+            "fm": true,
+            "freq": 10170,
+            "rds": true,
+            "pi": 1234,
+            "ta": false
+          },
+          "current": {
+            "fm": true,
+            "freq": 8750,
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "ready": true,
+          "focus": true,
+          "playing": false
+        },
+        "events": [
+          {
+            "action": "resume"
+          },
+          {
+            "action": "pause"
+          },
+          {
+            "action": "advance",
+            "milliseconds": 12000
+          }
+        ]
+      },
+      "expected": {
+        "tunes": [
+          {
+            "fm": true,
+            "freq": 10170,
+            "rds": true,
+            "pi": 1234,
+            "ta": false
+          }
+        ],
+        "writes": [],
+        "plays": 0,
+        "fallbacks": 0,
+        "owned": null
+      }
+    },
+    {
+      "id": "radio.deadline",
+      "contract": "radio.restore",
+      "agents": [
+        "rds"
+      ],
+      "reference": "rds-restore.test.js",
+      "input": {
+        "initial": {
+          "saved": {
+            "fm": true,
+            "freq": 10170,
+            "rds": true,
+            "pi": 1234,
+            "ta": false
+          },
+          "current": {
+            "fm": true,
+            "freq": 8750,
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "ready": false,
+          "focus": true,
+          "playing": false
+        },
+        "events": [
+          {
+            "action": "resume"
+          },
+          {
+            "action": "advance",
+            "milliseconds": 9000
+          },
+          {
+            "action": "resume"
+          },
+          {
+            "action": "advance",
+            "milliseconds": 1000
+          },
+          {
+            "action": "ready",
+            "value": true
+          },
+          {
+            "action": "advance",
+            "milliseconds": 1000
+          }
+        ]
+      },
+      "expected": {
+        "tunes": [],
+        "writes": [],
+        "plays": 0,
+        "fallbacks": 0,
+        "owned": null
+      }
+    },
+    {
+      "id": "radio.matching-resume",
+      "contract": "radio.restore",
+      "agents": [
+        "rds"
+      ],
+      "reference": "rds-restore.test.js",
+      "input": {
+        "initial": {
+          "saved": {
+            "fm": true,
+            "freq": 10170,
+            "rds": true,
+            "pi": 1234,
+            "ta": false
+          },
+          "current": {
+            "fm": true,
+            "freq": 10170,
+            "rds": true,
+            "pi": 1234,
+            "ta": false
+          },
+          "ready": true,
+          "focus": true,
+          "playing": false
+        },
+        "events": [
+          {
+            "action": "resume"
+          }
+        ]
+      },
+      "expected": {
+        "tunes": [],
+        "writes": [],
+        "plays": 1,
+        "fallbacks": 0,
+        "owned": null
+      }
+    },
+    {
+      "id": "radio.stale-pi",
+      "contract": "radio.restore",
+      "agents": [
+        "rds"
+      ],
+      "reference": "rds-restore.test.js",
+      "input": {
+        "initial": {
+          "saved": {
+            "fm": true,
+            "freq": 10170,
+            "rds": true,
+            "pi": 1234,
+            "ta": false
+          },
+          "current": {
+            "fm": true,
+            "freq": 8750,
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "ready": true,
+          "focus": true,
+          "playing": false
+        },
+        "events": [
+          {
+            "action": "observe",
+            "station": {
+              "fm": true,
+              "freq": 8750,
+              "rds": true,
+              "pi": 1234,
+              "ta": false
+            }
+          },
+          {
+            "action": "advance",
+            "milliseconds": 1000
+          }
+        ]
+      },
+      "expected": {
+        "tunes": [],
+        "writes": [],
+        "plays": 0,
+        "fallbacks": 0,
+        "owned": null
+      }
+    },
+    {
+      "id": "radio.unrequested-af",
+      "contract": "radio.restore",
+      "agents": [
+        "rds"
+      ],
+      "reference": "rds-restore.test.js",
+      "input": {
+        "initial": {
+          "saved": {
+            "fm": true,
+            "freq": 10170,
+            "rds": true,
+            "pi": 1234,
+            "ta": false
+          },
+          "current": {
+            "fm": true,
+            "freq": 8750,
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "ready": true,
+          "focus": true,
+          "playing": false
+        },
+        "events": [
+          {
+            "action": "observe",
+            "station": {
+              "fm": true,
+              "freq": 10230,
+              "rds": true,
+              "pi": 1234,
+              "ta": false
+            }
+          },
+          {
+            "action": "advance",
+            "milliseconds": 750
+          }
+        ]
+      },
+      "expected": {
+        "tunes": [],
+        "writes": [],
+        "plays": 0,
+        "fallbacks": 0,
+        "owned": null
+      }
+    },
+    {
+      "id": "radio.traffic-announcement",
+      "contract": "radio.restore",
+      "agents": [
+        "rds"
+      ],
+      "reference": "rds-restore.test.js",
+      "input": {
+        "initial": {
+          "saved": {
+            "fm": true,
+            "freq": 10170,
+            "rds": true,
+            "pi": 1234,
+            "ta": false
+          },
+          "current": {
+            "fm": true,
+            "freq": 8750,
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "ready": true,
+          "focus": true,
+          "playing": false
+        },
+        "events": [
+          {
+            "action": "observe",
+            "station": {
+              "fm": true,
+              "freq": 10230,
+              "rds": true,
+              "pi": 1234,
+              "ta": true
+            }
+          },
+          {
+            "action": "advance",
+            "milliseconds": 1000
+          }
+        ]
+      },
+      "expected": {
+        "tunes": [],
+        "writes": [],
+        "plays": 0,
+        "fallbacks": 0,
+        "owned": null
+      }
+    },
+    {
+      "id": "radio.invalid-saved",
+      "contract": "radio.restore",
+      "agents": [
+        "rds"
+      ],
+      "reference": "rds-restore.test.js",
+      "input": {
+        "initial": {
+          "saved": {
+            "fm": true,
+            "freq": -1,
+            "rds": true,
+            "pi": 1234,
+            "ta": false
+          },
+          "current": {
+            "fm": true,
+            "freq": 8750,
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "ready": true,
+          "focus": true,
+          "playing": false
+        },
+        "events": [
+          {
+            "action": "resume"
+          }
+        ]
+      },
+      "expected": {
+        "tunes": [],
+        "writes": [],
+        "plays": 0,
+        "fallbacks": 1,
+        "owned": null
+      }
+    },
+    {
+      "id": "radio.am-distinct",
+      "contract": "radio.restore",
+      "agents": [
+        "rds"
+      ],
+      "reference": "rds-restore.test.js",
+      "input": {
+        "initial": {
+          "saved": {
+            "fm": false,
+            "freq": 999,
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "current": {
+            "fm": true,
+            "freq": 8750,
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "ready": true,
+          "focus": true,
+          "playing": false
+        },
+        "events": [
+          {
+            "action": "resume"
+          }
+        ]
+      },
+      "expected": {
+        "tunes": [
+          {
+            "fm": false,
+            "freq": 999,
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          }
+        ],
+        "writes": [],
+        "plays": 0,
+        "fallbacks": 0,
+        "owned": {
+          "fm": false,
+          "freq": 999,
+          "rds": false,
+          "pi": 0,
+          "ta": false
+        }
+      }
+    },
+    {
+      "id": "radio.close-cancels",
+      "contract": "radio.restore",
+      "agents": [
+        "rds"
+      ],
+      "reference": "rds-restore.test.js",
+      "input": {
+        "initial": {
+          "saved": null,
+          "current": {
+            "fm": true,
+            "freq": 8750,
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "ready": true,
+          "focus": true,
+          "playing": false
+        },
+        "events": [
+          {
+            "action": "observe",
+            "station": {
+              "fm": true,
+              "freq": 10170,
+              "rds": true,
+              "pi": 1234,
+              "ta": false
+            }
+          },
+          {
+            "action": "close"
+          },
+          {
+            "action": "advance",
+            "milliseconds": 20000
+          }
+        ]
+      },
+      "expected": {
+        "tunes": [],
+        "writes": [],
+        "plays": 0,
+        "fallbacks": 0,
+        "owned": null
+      }
+    },
+    {
+      "id": "radio.focus-loss",
+      "contract": "radio.restore",
+      "agents": [
+        "rds"
+      ],
+      "reference": "rds-restore.test.js",
+      "input": {
+        "initial": {
+          "saved": {
+            "fm": true,
+            "freq": 10170,
+            "rds": true,
+            "pi": 1234,
+            "ta": false
+          },
+          "current": {
+            "fm": true,
+            "freq": 8750,
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "ready": true,
+          "focus": true,
+          "playing": false
+        },
+        "events": [
+          {
+            "action": "resume"
+          },
+          {
+            "action": "focus",
+            "value": false
+          },
+          {
+            "action": "advance",
+            "milliseconds": 250
+          }
+        ]
+      },
+      "expected": {
+        "tunes": [
+          {
+            "fm": true,
+            "freq": 10170,
+            "rds": true,
+            "pi": 1234,
+            "ta": false
+          }
+        ],
+        "writes": [],
+        "plays": 0,
+        "fallbacks": 0,
+        "owned": null
+      }
+    },
+    {
+      "id": "radio.disk-retry",
+      "contract": "radio.restore",
+      "agents": [
+        "rds"
+      ],
+      "reference": "rds-restore.test.js",
+      "input": {
+        "initial": {
+          "saved": {
+            "fm": true,
+            "freq": 10170,
+            "rds": true,
+            "pi": 1234,
+            "ta": false
+          },
+          "current": {
+            "fm": true,
+            "freq": 8750,
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "ready": true,
+          "focus": true,
+          "playing": false
+        },
+        "events": [
+          {
+            "action": "select",
+            "station": {
+              "fm": true,
+              "freq": 10230,
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            }
+          },
+          {
+            "action": "diskFail",
+            "value": true
+          },
+          {
+            "action": "observe",
+            "station": {
+              "fm": true,
+              "freq": 10230,
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            }
+          },
+          {
+            "action": "advance",
+            "milliseconds": 750
+          },
+          {
+            "action": "diskFail",
+            "value": false
+          },
+          {
+            "action": "observe",
+            "station": {
+              "fm": true,
+              "freq": 10230,
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            }
+          },
+          {
+            "action": "advance",
+            "milliseconds": 750
+          }
+        ]
+      },
+      "expected": {
+        "tunes": [],
+        "writes": [
+          {
+            "fm": true,
+            "freq": 10230,
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          }
+        ],
+        "plays": 0,
+        "fallbacks": 0,
+        "owned": null
+      }
+    },
+    {
+      "id": "radio.saved-snapshot",
+      "contract": "radio.widget",
+      "agents": [
+        "rds"
+      ],
+      "reference": "rds-widget.test.js",
+      "input": {
+        "initial": {
+          "saved": {
+            "fm": true,
+            "freq": 10210,
+            "name": "Монте-Карло",
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "current": {
+            "fm": true,
+            "freq": 8750,
+            "name": "Старое имя",
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "ready": true,
+          "playing": false,
+          "list": [
+            {
+              "fm": true,
+              "freq": 9900,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            },
+            {
+              "fm": true,
+              "freq": 10210,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            },
+            {
+              "fm": true,
+              "freq": 10620,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            }
+          ]
+        },
+        "commands": [
+          {
+            "action": "snapshot"
+          }
+        ]
+      },
+      "expected": {
+        "responses": [
+          {
+            "schema": 1,
+            "fm": true,
+            "freq": 10210,
+            "name": "Монте-Карло",
+            "ready": true,
+            "playing": false,
+            "canSkip": true,
+            "message": ""
+          }
+        ],
+        "tunes": [],
+        "pauses": 0
+      }
+    },
+    {
+      "id": "radio.play-display",
+      "contract": "radio.widget",
+      "agents": [
+        "rds"
+      ],
+      "reference": "rds-widget.test.js",
+      "input": {
+        "initial": {
+          "saved": {
+            "fm": true,
+            "freq": 10210,
+            "name": "Монте-Карло",
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "current": {
+            "fm": true,
+            "freq": 8750,
+            "name": "Старое имя",
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "ready": true,
+          "playing": false,
+          "list": [
+            {
+              "fm": true,
+              "freq": 9900,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            },
+            {
+              "fm": true,
+              "freq": 10210,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            },
+            {
+              "fm": true,
+              "freq": 10620,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            }
+          ]
+        },
+        "commands": [
+          {
+            "action": "play",
+            "station": {
+              "fm": true,
+              "freq": 10620,
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            }
+          }
+        ]
+      },
+      "expected": {
+        "responses": [
+          {
+            "schema": 1,
+            "fm": true,
+            "freq": 10210,
+            "name": "Монте-Карло",
+            "ready": true,
+            "playing": false,
+            "canSkip": true,
+            "message": "",
+            "accepted": true,
+            "requestedFreq": 10620,
+            "requestedFm": true
+          }
+        ],
+        "tunes": [
+          {
+            "fm": true,
+            "freq": 10620,
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          }
+        ],
+        "pauses": 0
+      }
+    },
+    {
+      "id": "radio.next",
+      "contract": "radio.widget",
+      "agents": [
+        "rds"
+      ],
+      "reference": "rds-widget.test.js",
+      "input": {
+        "initial": {
+          "saved": {
+            "fm": true,
+            "freq": 10210,
+            "name": "Монте-Карло",
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "current": {
+            "fm": true,
+            "freq": 8750,
+            "name": "Старое имя",
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "ready": true,
+          "playing": false,
+          "list": [
+            {
+              "fm": true,
+              "freq": 9900,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            },
+            {
+              "fm": true,
+              "freq": 10210,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            },
+            {
+              "fm": true,
+              "freq": 10620,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            }
+          ]
+        },
+        "commands": [
+          {
+            "action": "next",
+            "station": {
+              "fm": true,
+              "freq": 10210,
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            }
+          }
+        ]
+      },
+      "expected": {
+        "responses": [
+          {
+            "schema": 1,
+            "fm": true,
+            "freq": 10210,
+            "name": "Монте-Карло",
+            "ready": true,
+            "playing": false,
+            "canSkip": true,
+            "message": "",
+            "accepted": true,
+            "requestedFreq": 10620,
+            "requestedFm": true
+          }
+        ],
+        "tunes": [
+          {
+            "fm": true,
+            "freq": 10620,
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          }
+        ],
+        "pauses": 0
+      }
+    },
+    {
+      "id": "radio.wrap-next",
+      "contract": "radio.widget",
+      "agents": [
+        "rds"
+      ],
+      "reference": "rds-widget.test.js",
+      "input": {
+        "initial": {
+          "saved": {
+            "fm": true,
+            "freq": 10210,
+            "name": "Монте-Карло",
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "current": {
+            "fm": true,
+            "freq": 8750,
+            "name": "Старое имя",
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "ready": true,
+          "playing": false,
+          "list": [
+            {
+              "fm": true,
+              "freq": 9900,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            },
+            {
+              "fm": true,
+              "freq": 10210,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            },
+            {
+              "fm": true,
+              "freq": 10620,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            }
+          ]
+        },
+        "commands": [
+          {
+            "action": "next",
+            "station": {
+              "fm": true,
+              "freq": 10620,
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            }
+          }
+        ]
+      },
+      "expected": {
+        "responses": [
+          {
+            "schema": 1,
+            "fm": true,
+            "freq": 10210,
+            "name": "Монте-Карло",
+            "ready": true,
+            "playing": false,
+            "canSkip": true,
+            "message": "",
+            "accepted": true,
+            "requestedFreq": 9900,
+            "requestedFm": true
+          }
+        ],
+        "tunes": [
+          {
+            "fm": true,
+            "freq": 9900,
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          }
+        ],
+        "pauses": 0
+      }
+    },
+    {
+      "id": "radio.wrap-previous",
+      "contract": "radio.widget",
+      "agents": [
+        "rds"
+      ],
+      "reference": "rds-widget.test.js",
+      "input": {
+        "initial": {
+          "saved": {
+            "fm": true,
+            "freq": 10210,
+            "name": "Монте-Карло",
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "current": {
+            "fm": true,
+            "freq": 8750,
+            "name": "Старое имя",
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "ready": true,
+          "playing": false,
+          "list": [
+            {
+              "fm": true,
+              "freq": 9900,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            },
+            {
+              "fm": true,
+              "freq": 10210,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            },
+            {
+              "fm": true,
+              "freq": 10620,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            }
+          ]
+        },
+        "commands": [
+          {
+            "action": "previous",
+            "station": {
+              "fm": true,
+              "freq": 9900,
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            }
+          }
+        ]
+      },
+      "expected": {
+        "responses": [
+          {
+            "schema": 1,
+            "fm": true,
+            "freq": 10210,
+            "name": "Монте-Карло",
+            "ready": true,
+            "playing": false,
+            "canSkip": true,
+            "message": "",
+            "accepted": true,
+            "requestedFreq": 10620,
+            "requestedFm": true
+          }
+        ],
+        "tunes": [
+          {
+            "fm": true,
+            "freq": 10620,
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          }
+        ],
+        "pauses": 0
+      }
+    },
+    {
+      "id": "radio.nearest-next",
+      "contract": "radio.widget",
+      "agents": [
+        "rds"
+      ],
+      "reference": "rds-widget.test.js",
+      "input": {
+        "initial": {
+          "saved": {
+            "fm": true,
+            "freq": 10210,
+            "name": "Монте-Карло",
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "current": {
+            "fm": true,
+            "freq": 8750,
+            "name": "Старое имя",
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "ready": true,
+          "playing": false,
+          "list": [
+            {
+              "fm": true,
+              "freq": 9900,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            },
+            {
+              "fm": true,
+              "freq": 10210,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            },
+            {
+              "fm": true,
+              "freq": 10620,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            }
+          ]
+        },
+        "commands": [
+          {
+            "action": "next",
+            "station": {
+              "fm": true,
+              "freq": 10000,
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            }
+          }
+        ]
+      },
+      "expected": {
+        "responses": [
+          {
+            "schema": 1,
+            "fm": true,
+            "freq": 10210,
+            "name": "Монте-Карло",
+            "ready": true,
+            "playing": false,
+            "canSkip": true,
+            "message": "",
+            "accepted": true,
+            "requestedFreq": 10210,
+            "requestedFm": true
+          }
+        ],
+        "tunes": [
+          {
+            "fm": true,
+            "freq": 10210,
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          }
+        ],
+        "pauses": 0
+      }
+    },
+    {
+      "id": "radio.nearest-previous",
+      "contract": "radio.widget",
+      "agents": [
+        "rds"
+      ],
+      "reference": "rds-widget.test.js",
+      "input": {
+        "initial": {
+          "saved": {
+            "fm": true,
+            "freq": 10210,
+            "name": "Монте-Карло",
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "current": {
+            "fm": true,
+            "freq": 8750,
+            "name": "Старое имя",
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "ready": true,
+          "playing": false,
+          "list": [
+            {
+              "fm": true,
+              "freq": 9900,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            },
+            {
+              "fm": true,
+              "freq": 10210,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            },
+            {
+              "fm": true,
+              "freq": 10620,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            }
+          ]
+        },
+        "commands": [
+          {
+            "action": "previous",
+            "station": {
+              "fm": true,
+              "freq": 10000,
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            }
+          }
+        ]
+      },
+      "expected": {
+        "responses": [
+          {
+            "schema": 1,
+            "fm": true,
+            "freq": 10210,
+            "name": "Монте-Карло",
+            "ready": true,
+            "playing": false,
+            "canSkip": true,
+            "message": "",
+            "accepted": true,
+            "requestedFreq": 9900,
+            "requestedFm": true
+          }
+        ],
+        "tunes": [
+          {
+            "fm": true,
+            "freq": 9900,
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          }
+        ],
+        "pauses": 0
+      }
+    },
+    {
+      "id": "radio.pause",
+      "contract": "radio.widget",
+      "agents": [
+        "rds"
+      ],
+      "reference": "rds-widget.test.js",
+      "input": {
+        "initial": {
+          "saved": {
+            "fm": true,
+            "freq": 10210,
+            "name": "Монте-Карло",
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "current": {
+            "fm": true,
+            "freq": 8750,
+            "name": "Старое имя",
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "ready": true,
+          "playing": false,
+          "list": [
+            {
+              "fm": true,
+              "freq": 9900,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            },
+            {
+              "fm": true,
+              "freq": 10210,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            },
+            {
+              "fm": true,
+              "freq": 10620,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            }
+          ]
+        },
+        "commands": [
+          {
+            "action": "pause"
+          },
+          {
+            "action": "pause"
+          }
+        ]
+      },
+      "expected": {
+        "responses": [
+          {
+            "schema": 1,
+            "fm": true,
+            "freq": 10210,
+            "name": "Монте-Карло",
+            "ready": true,
+            "playing": false,
+            "canSkip": true,
+            "message": "",
+            "accepted": true
+          },
+          {
+            "schema": 1,
+            "fm": true,
+            "freq": 10210,
+            "name": "Монте-Карло",
+            "ready": true,
+            "playing": false,
+            "canSkip": true,
+            "message": "",
+            "accepted": true
+          }
+        ],
+        "tunes": [],
+        "pauses": 2
+      }
+    },
+    {
+      "id": "radio.unready",
+      "contract": "radio.widget",
+      "agents": [
+        "rds"
+      ],
+      "reference": "rds-widget.test.js",
+      "input": {
+        "initial": {
+          "saved": {
+            "fm": true,
+            "freq": 10210,
+            "name": "Монте-Карло",
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "current": {
+            "fm": true,
+            "freq": 8750,
+            "name": "Старое имя",
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "ready": false,
+          "playing": false,
+          "list": [
+            {
+              "fm": true,
+              "freq": 9900,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            },
+            {
+              "fm": true,
+              "freq": 10210,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            },
+            {
+              "fm": true,
+              "freq": 10620,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            }
+          ]
+        },
+        "commands": [
+          {
+            "action": "play",
+            "station": {
+              "fm": true,
+              "freq": 10210,
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            }
+          }
+        ]
+      },
+      "expected": {
+        "responses": [
+          {
+            "schema": 1,
+            "fm": true,
+            "freq": 10210,
+            "name": "Монте-Карло",
+            "ready": false,
+            "playing": false,
+            "canSkip": false,
+            "message": "Радио не готово",
+            "accepted": false
+          }
+        ],
+        "tunes": [],
+        "pauses": 0
+      }
+    },
+    {
+      "id": "radio.bad-frequency-0",
+      "contract": "radio.widget",
+      "agents": [
+        "rds"
+      ],
+      "reference": "rds-widget.test.js",
+      "input": {
+        "initial": {
+          "saved": {
+            "fm": true,
+            "freq": 10210,
+            "name": "Монте-Карло",
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "current": {
+            "fm": true,
+            "freq": 8750,
+            "name": "Старое имя",
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "ready": true,
+          "playing": false,
+          "list": [
+            {
+              "fm": true,
+              "freq": 9900,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            },
+            {
+              "fm": true,
+              "freq": 10210,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            },
+            {
+              "fm": true,
+              "freq": 10620,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            }
+          ]
+        },
+        "commands": [
+          {
+            "action": "play",
+            "station": null
+          }
+        ]
+      },
+      "expected": {
+        "responses": [
+          {
+            "schema": 1,
+            "fm": true,
+            "freq": 10210,
+            "name": "Монте-Карло",
+            "ready": true,
+            "playing": false,
+            "canSkip": true,
+            "message": "",
+            "accepted": false
+          }
+        ],
+        "tunes": [],
+        "pauses": 0
+      }
+    },
+    {
+      "id": "radio.bad-frequency-1",
+      "contract": "radio.widget",
+      "agents": [
+        "rds"
+      ],
+      "reference": "rds-widget.test.js",
+      "input": {
+        "initial": {
+          "saved": {
+            "fm": true,
+            "freq": 10210,
+            "name": "Монте-Карло",
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "current": {
+            "fm": true,
+            "freq": 8750,
+            "name": "Старое имя",
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "ready": true,
+          "playing": false,
+          "list": [
+            {
+              "fm": true,
+              "freq": 9900,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            },
+            {
+              "fm": true,
+              "freq": 10210,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            },
+            {
+              "fm": true,
+              "freq": 10620,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            }
+          ]
+        },
+        "commands": [
+          {
+            "action": "play",
+            "station": {
+              "fm": true,
+              "freq": -1,
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            }
+          }
+        ]
+      },
+      "expected": {
+        "responses": [
+          {
+            "schema": 1,
+            "fm": true,
+            "freq": 10210,
+            "name": "Монте-Карло",
+            "ready": true,
+            "playing": false,
+            "canSkip": true,
+            "message": "",
+            "accepted": false
+          }
+        ],
+        "tunes": [],
+        "pauses": 0
+      }
+    },
+    {
+      "id": "radio.bad-frequency-2",
+      "contract": "radio.widget",
+      "agents": [
+        "rds"
+      ],
+      "reference": "rds-widget.test.js",
+      "input": {
+        "initial": {
+          "saved": {
+            "fm": true,
+            "freq": 10210,
+            "name": "Монте-Карло",
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "current": {
+            "fm": true,
+            "freq": 8750,
+            "name": "Старое имя",
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "ready": true,
+          "playing": false,
+          "list": [
+            {
+              "fm": true,
+              "freq": 9900,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            },
+            {
+              "fm": true,
+              "freq": 10210,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            },
+            {
+              "fm": true,
+              "freq": 10620,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            }
+          ]
+        },
+        "commands": [
+          {
+            "action": "play",
+            "station": {
+              "fm": true,
+              "freq": 10801,
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            }
+          }
+        ]
+      },
+      "expected": {
+        "responses": [
+          {
+            "schema": 1,
+            "fm": true,
+            "freq": 10210,
+            "name": "Монте-Карло",
+            "ready": true,
+            "playing": false,
+            "canSkip": true,
+            "message": "",
+            "accepted": false
+          }
+        ],
+        "tunes": [],
+        "pauses": 0
+      }
+    },
+    {
+      "id": "radio.bad-frequency-3",
+      "contract": "radio.widget",
+      "agents": [
+        "rds"
+      ],
+      "reference": "rds-widget.test.js",
+      "input": {
+        "initial": {
+          "saved": {
+            "fm": true,
+            "freq": 10210,
+            "name": "Монте-Карло",
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "current": {
+            "fm": true,
+            "freq": 8750,
+            "name": "Старое имя",
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "ready": true,
+          "playing": false,
+          "list": [
+            {
+              "fm": true,
+              "freq": 9900,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            },
+            {
+              "fm": true,
+              "freq": 10210,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            },
+            {
+              "fm": true,
+              "freq": 10620,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            }
+          ]
+        },
+        "commands": [
+          {
+            "action": "play",
+            "station": {
+              "fm": false,
+              "freq": 999999,
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            }
+          }
+        ]
+      },
+      "expected": {
+        "responses": [
+          {
+            "schema": 1,
+            "fm": true,
+            "freq": 10210,
+            "name": "Монте-Карло",
+            "ready": true,
+            "playing": false,
+            "canSkip": true,
+            "message": "",
+            "accepted": false
+          }
+        ],
+        "tunes": [],
+        "pauses": 0
+      }
+    },
+    {
+      "id": "radio.bad-frequency-4",
+      "contract": "radio.widget",
+      "agents": [
+        "rds"
+      ],
+      "reference": "rds-widget.test.js",
+      "input": {
+        "initial": {
+          "saved": {
+            "fm": true,
+            "freq": 10210,
+            "name": "Монте-Карло",
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "current": {
+            "fm": true,
+            "freq": 8750,
+            "name": "Старое имя",
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "ready": true,
+          "playing": false,
+          "list": [
+            {
+              "fm": true,
+              "freq": 9900,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            },
+            {
+              "fm": true,
+              "freq": 10210,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            },
+            {
+              "fm": true,
+              "freq": 10620,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            }
+          ]
+        },
+        "commands": [
+          {
+            "action": "play",
+            "station": {
+              "fm": true,
+              "freq": 10210.5,
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            }
+          }
+        ]
+      },
+      "expected": {
+        "responses": [
+          {
+            "schema": 1,
+            "fm": true,
+            "freq": 10210,
+            "name": "Монте-Карло",
+            "ready": true,
+            "playing": false,
+            "canSkip": true,
+            "message": "",
+            "accepted": false
+          }
+        ],
+        "tunes": [],
+        "pauses": 0
+      }
+    },
+    {
+      "id": "radio.am-request",
+      "contract": "radio.widget",
+      "agents": [
+        "rds"
+      ],
+      "reference": "rds-widget.test.js",
+      "input": {
+        "initial": {
+          "saved": {
+            "fm": true,
+            "freq": 10210,
+            "name": "Монте-Карло",
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "current": {
+            "fm": true,
+            "freq": 8750,
+            "name": "Старое имя",
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "ready": true,
+          "playing": false,
+          "list": [
+            {
+              "fm": true,
+              "freq": 9900,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            },
+            {
+              "fm": true,
+              "freq": 10210,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            },
+            {
+              "fm": true,
+              "freq": 10620,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            }
+          ]
+        },
+        "commands": [
+          {
+            "action": "play",
+            "station": {
+              "fm": false,
+              "freq": 999,
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            }
+          }
+        ]
+      },
+      "expected": {
+        "responses": [
+          {
+            "schema": 1,
+            "fm": true,
+            "freq": 10210,
+            "name": "Монте-Карло",
+            "ready": true,
+            "playing": false,
+            "canSkip": true,
+            "message": "",
+            "accepted": true,
+            "requestedFreq": 999,
+            "requestedFm": false
+          }
+        ],
+        "tunes": [
+          {
+            "fm": false,
+            "freq": 999,
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          }
+        ],
+        "pauses": 0
+      }
+    },
+    {
+      "id": "radio.no-saved",
+      "contract": "radio.widget",
+      "agents": [
+        "rds"
+      ],
+      "reference": "rds-widget.test.js",
+      "input": {
+        "initial": {
+          "saved": null,
+          "current": {
+            "fm": true,
+            "freq": 8750,
+            "name": "Старое имя",
+            "rds": false,
+            "pi": 0,
+            "ta": false
+          },
+          "ready": true,
+          "playing": false,
+          "list": [
+            {
+              "fm": true,
+              "freq": 9900,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            },
+            {
+              "fm": true,
+              "freq": 10210,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            },
+            {
+              "fm": true,
+              "freq": 10620,
+              "name": "",
+              "rds": false,
+              "pi": 0,
+              "ta": false
+            }
+          ]
+        },
+        "commands": [
+          {
+            "action": "snapshot"
+          }
+        ]
+      },
+      "expected": {
+        "responses": [
+          {
+            "schema": 1,
+            "fm": true,
+            "freq": -1,
+            "name": "",
+            "ready": true,
+            "playing": false,
+            "canSkip": null,
+            "message": ""
+          }
+        ],
+        "tunes": [],
+        "pauses": 0
+      }
+    }
+  ]
+}

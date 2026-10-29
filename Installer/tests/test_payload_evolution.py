@@ -22,67 +22,54 @@ class EvolutionTests(InstallerTests):
                     z.write(p, p.relative_to(payload))
         return out
 
-    def test_one_binary_installs_a_b_and_removes_with_saved_recipe(self):
+    def test_one_binary_installs_a_b_and_removes_with_compiled_recipe(self):
         binary = hashlib.sha256(DRIVER.read_bytes()).hexdigest()
         cache = self.base / "cache"
+        legacy = self.device / "data/local/bin/voyahtune-new"
+        legacy.mkdir(parents=True, exist_ok=True)
+        for name in ["agents.json", "runtime-manifest.json"]:
+            (legacy / name).write_text("old runtime manifest")
         for label in ["A", "B"]:
             archive = self.archive(FIXTURES / label, label)
             response = json.loads(self.cli("import", str(archive), str(cache)).stdout)
             self.use(Path(response["payloadRoot"]))
             self.apply(self.plan("install"))
-            old = (
-                self.device
-                / "data/local/bin/voyahtune-new/voyahtune_acceptance_old.json"
-            )
-            new = (
-                self.device
-                / "data/local/bin/voyahtune-new/voyahtune_acceptance_new.json"
-            )
-            if label == "A":
-                self.assertTrue(old.is_file())
-                self.assertFalse(new.exists())
-            else:
-                self.assertFalse(old.exists())
-                self.assertEqual(json.loads(new.read_text()), {"fixture": "B"})
-                self.assertEqual(new.stat().st_mode & 0o777, 0o755)
-                self.assertTrue(
-                    (
-                        self.device / "data/local/bin/voyahtune-new/voyahtune_fixture"
-                    ).is_dir()
-                )
+            runtime = self.device / "data/local/bin/voyahtune-new"
+            self.assertEqual(json.loads((runtime / "voyahtune_keyboard_en_config.json").read_text())["acceptanceFixture"], label)
+            self.assertTrue((runtime / "voyahtune-inject-arm").is_file())
+            self.assertEqual((runtime / "voyahtune-loader").stat().st_mode & 0o777, 0o755)
+            self.assertFalse((runtime / "agents.json").exists())
+            self.assertFalse((runtime / "runtime-manifest.json").exists())
         saved = self.base / "recovery"
         self.cli("removal", response["payloadRoot"], str(saved))
         shutil.rmtree(cache)
         self.use(saved)
         self.apply(self.plan("remove"))
-        self.assertFalse(new.exists())
-        self.assertFalse(
-            (self.device / "data/local/bin/voyahtune-new/voyahtune_fixture").exists()
-        )
+        self.assertFalse(runtime.exists())
         self.assertEqual(binary, hashlib.sha256(DRIVER.read_bytes()).hexdigest())
 
-    def test_c_and_unknown_operations_reject_before_adb(self):
-        p = self.base / "future"
-        p.mkdir()
-        manifest = json.loads((FIXTURES / "B/manifest.json").read_text())
-        manifest["requirements"]["minInstallerVersion"] = "99.0.0"
-        (p / "manifest.json").write_text(json.dumps(manifest))
-        self.use(p)
-        result = self.cli(
-            "plan", "--device", "CAR-001", "--action", "install", okay=False
-        )
-        self.assertIn("INSTALLER_UPDATE_REQUIRED", result.stdout)
-        self.assertFalse((self.base / "calls.jsonl").exists())
-        manifest["requirements"]["minInstallerVersion"] = "1.0.0"
-        manifest["recipe"]["exec"] = "echo unexpected"
-        (p / "manifest.json").write_text(json.dumps(manifest))
-        self.assertNotEqual(
-            self.cli(
-                "plan", "--device", "CAR-001", "--action", "install", okay=False
-            ).returncode,
-            0,
-        )
-        self.assertFalse((self.base / "calls.jsonl").exists())
+    def change_metadata(self, payload, **changes):
+        apk = payload / "common/restore_mode.apk"
+        with zipfile.ZipFile(apk) as archive:
+            entries = [(item, archive.read(item)) for item in archive.infolist()]
+        with zipfile.ZipFile(apk, "w") as archive:
+            for item, data in entries:
+                if item.filename == "assets/voyahtune-build.json":
+                    metadata = json.loads(data)
+                    metadata.update(changes)
+                    data = json.dumps(metadata).encode()
+                archive.writestr(item, data)
+
+    def test_future_format_and_installer_minimum_reject_before_adb(self):
+        for changes in [{"payloadFormat": 99}, {"minimumInstallerVersion": "99.0.0"}]:
+            with self.subTest(changes=changes):
+                p = self.base / ("future-" + next(iter(changes)))
+                shutil.copytree(FIXTURES / "B", p)
+                self.change_metadata(p, **changes)
+                self.use(p)
+                result = self.cli("plan", "--device", "CAR-001", "--action", "install", okay=False)
+                self.assertIn("INSTALLER_UPDATE_REQUIRED", result.stdout)
+                self.assertFalse((self.base / "calls.jsonl").exists())
 
     def test_corrupt_zip_never_enters_cache(self):
         archive = self.base / "bad.zip"
@@ -93,17 +80,13 @@ class EvolutionTests(InstallerTests):
         )
         self.assertEqual(json.loads(self.cli("cache-list", str(cache)).stdout), [])
 
-    def test_manifest_tampering_is_rejected_by_signed_recipe(self):
+    def test_component_tampering_is_rejected_by_signed_apk_hashes(self):
         p = self.base / "tampered"
         shutil.copytree(FIXTURES / "B", p)
-        manifest = json.loads((p / "manifest.json").read_text())
-        manifest["recipe"]["attributes"][0]["mode"] = 420
-        (p / "manifest.json").write_text(json.dumps(manifest))
+        (p / "common/voyahtune-new-agents.dex").write_bytes(b"changed agent code")
         self.use(p)
-        result = self.cli(
-            "plan", "--device", "CAR-001", "--action", "install", okay=False
-        )
-        self.assertIn("RECIPE_SIGNATURE", result.stdout)
+        result = self.cli("plan", "--device", "CAR-001", "--action", "install", okay=False)
+        self.assertIn("APK_RUNTIME_HASH", result.stdout)
         self.assertFalse((self.base / "calls.jsonl").exists())
 
 

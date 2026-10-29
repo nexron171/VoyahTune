@@ -86,24 +86,8 @@ pub fn open_ui() -> io::Result<()> {
     })
 }
 
-pub fn no_links(path: &Path) -> io::Result<()> {
-    let mut current = std::path::PathBuf::new();
-    for part in path.components() {
-        current.push(part);
-        match fs::symlink_metadata(&current) {
-            Ok(m) if m.file_type().is_symlink() => {
-                return Err(invalid(&format!(
-                    "Ссылка в целевом пути {}",
-                    current.display()
-                )))
-            }
-            Ok(_) => {}
-            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e),
-        }
-    }
-    Ok(())
-}
+pub use release_core::paths::no_links;
+
 pub fn atomic_copy(source: &Path, target: &Path, mode: u32) -> io::Result<()> {
     no_links(target)?;
     let parent = target

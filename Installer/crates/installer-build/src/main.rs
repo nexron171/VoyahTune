@@ -179,6 +179,12 @@ fn run(args: Args) -> Result<()> {
                 .args([
                     "--no-daemon",
                     "assembleRelease",
+                    &format!("-PvoyahPayloadFormat={}", payload::PAYLOAD_FORMAT),
+                    &format!(
+                        "-PvoyahMinimumInstallerVersion={}",
+                        installer_core::compatibility::Requirements::unified()
+                            .min_installer_version
+                    ),
                     &format!("-PvoyahReleaseVersion={}", args.version),
                     &format!("-PvoyahBuildRevision={}", args.revision),
                     &format!(
@@ -208,7 +214,7 @@ fn run(args: Args) -> Result<()> {
     let result = (|| {
         let mut manifest = Manifest {
             infrastructure: Infrastructure::Unified,
-            schema: 4,
+            schema: payload::PAYLOAD_FORMAT,
             removal_only: false,
             requirements: Some(installer_core::compatibility::Requirements::unified()),
             recipe,
@@ -242,7 +248,6 @@ fn run(args: Args) -> Result<()> {
             }
             copy(&stage, &source, name, &mut manifest)?;
         }
-        write_json(&stage.join("manifest.json"), &manifest)?;
         Payload::open(&stage)?;
         if args.output.exists() {
             return Err(Error::new("OUTPUT_EXISTS","Папка payload уже существует. Укажите новый output; готовый релиз не перезаписывается."));
@@ -266,9 +271,12 @@ fn build_recovery(root: &Path, output: &Path) -> Result<()> {
     let (mut recipe, sources) = base_payload(root)?;
     recipe.remove_directories = recipe.cleanup_directories();
     fs::create_dir_all(output)?;
+    if output.join("manifest.json").exists() {
+        fs::remove_file(output.join("manifest.json"))?;
+    }
     let mut manifest = Manifest {
         infrastructure,
-        schema: 4,
+        schema: payload::PAYLOAD_FORMAT,
         removal_only: true,
         requirements: Some(installer_core::compatibility::Requirements::unified()),
         recipe,
@@ -287,15 +295,12 @@ fn build_recovery(root: &Path, output: &Path) -> Result<()> {
             &mut manifest,
         )?;
     }
-    write_json(&output.join("manifest.json"), &manifest)?;
     Payload::open(output)?;
     Ok(())
 }
 // Developer inputs are application sources and Packaging files, not a release manifest.
 fn base_payload(root: &Path) -> Result<(installer_core::recipe::Recipe, serde_json::Value)> {
-    let recipe: installer_core::recipe::Recipe = serde_json::from_slice(&fs::read(
-        root.join("Packaging/installer/payload-spec.json"),
-    )?)?;
+    let recipe = installer_core::recipe::Recipe::default();
     let mut artifacts = Vec::new();
     for name in recipe
         .files
@@ -309,7 +314,13 @@ fn base_payload(root: &Path) -> Result<(installer_core::recipe::Recipe, serde_js
         )
         .chain(["init.logcat.original.sh", "dns-helper.sh", "dns.apk"])
     {
-        let source = match name {
+        let source = if let Some((_, filename, _)) = payload::NATIVE_RUNTIME_ROLES
+            .iter()
+            .find(|(role, _, _)| *role == name)
+        {
+            format!("Packaging/new/build/runtime/{filename}")
+        } else {
+            match name {
             "native.apk" => "Native/app/build/outputs/apk/release/app-release.apk",
             "restore_mode.apk" => "RestoreMode/app/build/outputs/apk/release/app-release.apk",
             "runyn.apk" => "RunYN/app/build/outputs/apk/release/app-release.apk",
@@ -317,8 +328,6 @@ fn base_payload(root: &Path) -> Result<(installer_core::recipe::Recipe, serde_js
             "voyahtune-updater" => "Updater/build/daemon/arm64-v8a/voyahtune-updater",
             "voyahtune.updater.rc" => "Packaging/system/voyahtune.updater.rc",
             "voyahtune-ota-bootstrap.json" => "Updater/build/bootstrap.json",
-            "voyahtune-new-voyahtune-loader" => "Packaging/new/build/runtime/voyahtune-loader",
-            "voyahtune-new-frida-inject" => "Packaging/new/build/runtime/frida-inject",
             "voyahtune.load.sh" => "Packaging/new/system/voyahtune.load.sh",
             "voyahtune.load.rc" => "Packaging/new/system/voyahtune.load.rc",
             "init.logcat.original.sh" => "Packaging/system/init.logcat.original.sh",
@@ -327,6 +336,7 @@ fn base_payload(root: &Path) -> Result<(installer_core::recipe::Recipe, serde_js
                 "Packaging/vendor-overlay/framework-res__config_ethernet_interfaces_yandexdns.apk"
             }
             _ => return Err(Error::new("SOURCE_SCHEMA", "Неизвестная базовая роль").detail(name)),
+        }.to_owned()
         };
         artifacts.push(serde_json::json!({"name": name, "source": source}));
     }
@@ -338,50 +348,7 @@ fn base_payload(root: &Path) -> Result<(installer_core::recipe::Recipe, serde_js
 }
 
 fn discover_unified(root: &Path) -> Result<(installer_core::recipe::Recipe, serde_json::Value)> {
-    let (mut recipe, mut sources) = base_payload(root)?;
-    let overlay: serde_json::Value = serde_json::from_slice(&fs::read(
-        root.join("Packaging/new/build/release-inputs.json"),
-    )?)?;
-    if overlay["schema"] != 1 || overlay["infrastructure"] != "unified" {
-        return Err(Error::new(
-            "UNIFIED_CONTRACT",
-            "Неподдерживаемый runtime overlay",
-        ));
-    }
-    let runtime_roles = [
-        "voyahtune-new-voyahtune-loader",
-        "voyahtune-new-frida-inject",
-        "voyahtune.load.sh",
-        "voyahtune.load.rc",
-    ];
-    recipe
-        .files
-        .retain(|file| !runtime_roles.contains(&file.artifact.as_str()));
-    let artifacts = sources["artifacts"].as_array_mut().unwrap();
-    artifacts
-        .retain(|artifact| !runtime_roles.contains(&artifact["name"].as_str().unwrap_or_default()));
-    recipe.files.extend(serde_json::from_value::<
-        Vec<installer_core::recipe::CopyFile>,
-    >(overlay["files"].clone())?);
-    let directories: Vec<installer_core::recipe::Attributes> =
-        serde_json::from_value(overlay["directories"].clone())?;
-    recipe
-        .directories
-        .retain(|directory| !directories.iter().any(|entry| entry.path == directory.path));
-    recipe.directories.extend(directories);
-    recipe
-        .remove_files
-        .extend(serde_json::from_value::<Vec<String>>(
-            overlay["removeFiles"].clone(),
-        )?);
-    recipe.remove_files.sort();
-    recipe.remove_files.dedup();
-    artifacts.extend(serde_json::from_value::<Vec<serde_json::Value>>(
-        overlay["artifacts"].clone(),
-    )?);
-    sources["infrastructure"] = serde_json::json!("unified");
-    recipe.validate()?;
-    Ok((recipe, sources))
+    base_payload(root)
 }
 
 fn copy(stage: &Path, source: &Path, name: &str, manifest: &mut Manifest) -> Result<()> {
@@ -416,7 +383,6 @@ mod tests {
         let checkout = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
         let root = std::env::temp_dir().join(format!("voyahtune-recovery-{}", std::process::id()));
         for relative in [
-            "Packaging/installer/payload-spec.json",
             "Packaging/system/init.logcat.original.sh",
             "Packaging/installer/common/dns-overlay-device.sh",
         ] {
@@ -502,57 +468,7 @@ mod tests {
     #[test]
     fn common_recipe_replaces_both_runtimes_and_conditionally_installs_runyn() {
         use installer_core::recipe::PackageCondition;
-        let checkout = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
-        let root =
-            std::env::temp_dir().join(format!("voyahtune-unified-recipe-{}", std::process::id()));
-        fs::create_dir_all(root.join("Packaging/installer")).unwrap();
-        fs::create_dir_all(root.join("Packaging/new/build")).unwrap();
-        fs::copy(
-            checkout.join("Packaging/installer/payload-spec.json"),
-            root.join("Packaging/installer/payload-spec.json"),
-        )
-        .unwrap();
-        let mut files = Vec::new();
-        let mut artifacts = Vec::new();
-        for (artifact, destination, mode, phase) in [
-            (
-                "voyahtune-new-voyahtune-loader",
-                "/data/local/bin/voyahtune-new/voyahtune-loader",
-                0o755,
-                "files",
-            ),
-            (
-                "voyahtune-new-frida-inject",
-                "/data/local/bin/voyahtune-new/frida-inject",
-                0o755,
-                "files",
-            ),
-            (
-                "voyahtune.load.sh",
-                "/system/etc/init.voyahtune.load.sh",
-                0o755,
-                "boot-hooks",
-            ),
-            (
-                "voyahtune.load.rc",
-                "/system/etc/init/voyahtune.load.rc",
-                0o644,
-                "boot-hooks",
-            ),
-        ] {
-            files.push(serde_json::json!({"artifact":artifact,"destination":destination,"mode":mode,"phase":phase}));
-            artifacts.push(serde_json::json!({"name":artifact,"source":format!("Packaging/new/build/{artifact}")}));
-        }
-        let retired =
-            fs::read_to_string(checkout.join("Packaging/new/config/retired-files.txt")).unwrap();
-        let overlay = serde_json::json!({"schema":1,"infrastructure":"unified","files":files,
-            "directories":[{"path":"/data/local/bin/voyahtune-new","mode":0o755}],
-            "artifacts":artifacts,"removeFiles":retired.lines().collect::<Vec<_>>()});
-        fs::write(
-            root.join("Packaging/new/build/release-inputs.json"),
-            serde_json::to_vec(&overlay).unwrap(),
-        )
-        .unwrap();
+        let root = std::env::temp_dir();
         let (mut recipe, sources) = discover_unified(&root).unwrap();
         assert_eq!(sources["infrastructure"], "unified");
         for obsolete in [
@@ -585,58 +501,6 @@ mod tests {
         assert_eq!(runyn.condition, Some(PackageCondition::ExceptH97xy));
         runyn.condition = None;
         assert!(recipe.validate().is_err());
-        let overlay_path = root.join("Packaging/new/build/release-inputs.json");
-        let mut missing_loader = overlay.clone();
-        missing_loader["files"].as_array_mut().unwrap().remove(0);
-        fs::write(&overlay_path, serde_json::to_vec(&missing_loader).unwrap()).unwrap();
-        assert!(discover_unified(&root).is_err());
-        let mut changed = overlay;
-        let added = serde_json::json!({"artifact":"voyahtune-new-extra.js",
-            "destination":"/data/local/bin/voyahtune-new/extra.js","mode":0o644,"phase":"files"});
-        changed["files"].as_array_mut().unwrap().push(added);
-        changed["artifacts"]
-            .as_array_mut()
-            .unwrap()
-            .push(serde_json::json!({
-            "name":"voyahtune-new-extra.js","source":"Packaging/new/build/runtime/extra.js"}));
-        fs::write(&overlay_path, serde_json::to_vec(&changed).unwrap()).unwrap();
-        let (recipe, sources) = discover_unified(&root).unwrap();
-        assert!(recipe
-            .files
-            .iter()
-            .any(|file| file.artifact == "voyahtune-new-extra.js"));
-        assert!(sources["artifacts"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|source| source["name"] == "voyahtune-new-extra.js"));
-        changed["files"].as_array_mut().unwrap().pop();
-        changed["artifacts"].as_array_mut().unwrap().pop();
-        changed["removeFiles"]
-            .as_array_mut()
-            .unwrap()
-            .push(serde_json::json!("/data/local/bin/voyahtune-new/extra.js"));
-        fs::write(&overlay_path, serde_json::to_vec(&changed).unwrap()).unwrap();
-        let (recipe, _) = discover_unified(&root).unwrap();
-        assert!(!recipe
-            .files
-            .iter()
-            .any(|file| file.artifact == "voyahtune-new-extra.js"));
-        assert!(recipe
-            .remove_files
-            .contains(&"/data/local/bin/voyahtune-new/extra.js".into()));
-        changed["removeFiles"]
-            .as_array_mut()
-            .unwrap()
-            .push(serde_json::json!("/data/local/bin/unowned.js"));
-        fs::write(&overlay_path, serde_json::to_vec(&changed).unwrap()).unwrap();
-        assert!(discover_unified(&root).is_err());
-        changed["schema"] = serde_json::json!(2);
-        fs::write(&overlay_path, serde_json::to_vec(&changed).unwrap()).unwrap();
-        assert_eq!(
-            discover_unified(&root).unwrap_err().code,
-            "UNIFIED_CONTRACT"
-        );
-        fs::remove_dir_all(root).unwrap();
+        recipe.validate().unwrap_err();
     }
 }

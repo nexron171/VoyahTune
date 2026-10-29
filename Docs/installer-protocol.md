@@ -2,7 +2,7 @@
 
 Версии задаются в [versions.json](../versions.json): `installer` для GUI/движка,
 `voyahtune` для stable-релиза. Производные Cargo/Tauri/Gradle metadata синхронизируются
-при сборке. Новый payload единый: schema 4, recipe schema 3 / engine `qinggan-v3`.
+при сборке. Новый payload единый: формат 5, recipe schema 3 / engine `qinggan-v3`.
 Один ZIP используется USB-установщиком и OTA.
 
 ## Совместимость
@@ -13,7 +13,7 @@
 `ota-bootstrap-v1`, `infrastructure-v1`, `restoremode-ota-ui-v1`, `unified-runtime-v1`.
 Имена capability являются стабильными идентификаторами протокола.
 
-APK metadata, manifest и root-служба используют `infrastructure: unified`. Версия нового релиза
+APK metadata и root-служба используют `infrastructure: unified`. Версия нового релиза
 имеет вид `4.5.0` или `4.5.0-beta`, без инфраструктурного суффикса. Общие
 Native/RestoreMode собираются с политикой `acc-hooks` и контрактом `driveHookV2`.
 Профиля PI/OD в Java-коде и параметрах сборки нет. Различия OEM определяются
@@ -36,17 +36,18 @@ JSON-индексы больше не ведутся.
 выбранного каталога. Единая root-служба выбирает релизы без инфраструктурных суффиксов.
 [Правила выбора, переустановки и минимумов](ota-release-format.md).
 
-Проверки архива и manifest выполняются независимо от предварительных ограничений
+Проверки архива и фиксированного комплекта выполняются независимо от предварительных ограничений
 каталога. Невалидный ответ не заменяет последнюю сохранённую копию. Локальный импорт
 ZIP и ранее скачанные релизы доступны без сети.
 
 ## Payload и файловые операции
 
-В корне ZIP лежит `manifest.json`: `schema`, `product`, `releaseVersion`,
-`buildRevision`, `infrastructure`, `requirements`, `recipe`, `artifacts`. Для удаления
-существует внутренний архив ресурсов с `removalOnly: true`, непригодный для установки.
-Артефакт имеет `name`, относительный `path`, `size`, `sha256`; в schema 4 нет `variant`.
-В архиве одна пара Native/RestoreMode APK, RunYN (`runyn.apk`, `big.town.runyn`),
+В корне ZIP находится `common/` с фиксированными именами компонентов. Внешнего
+`manifest.json` нет. Формат 5, версия релиза, build revision и минимум Installer
+читаются из встроенных метаданных RestoreMode APK. Для удаления достаточно двух
+ресурсов `common/dns-helper.sh` и `common/init.logcat.original.sh`: правила очистки
+скомпилированы в Installer. Такие ресурсы удаления непригодны для установки.
+В полном комплекте находятся Native/RestoreMode APK, RunYN (`runyn.apk`, `big.town.runyn`),
 общий runtime и необходимые роли OTA/DNS.
 
 RunYN использует `condition: except-h97xy`: USB и OTA пропускают установку на H97X/H97Y
@@ -54,10 +55,10 @@ RunYN использует `condition: except-h97xy`: USB и OTA пропуск�
 Тот же предикат используется при проверке результата; имеющийся RunYN на H97X/H97Y
 автоматически не удаляется.
 
-Источник recipe — [общий spec](../Packaging/installer/payload-spec.json) и
-`Packaging/new/build/release-inputs.json`, создаваемый сборкой runtime. Общий сборщик
-объединяет их, передаёт recipe/source mapping в Gradle и проверяет подписанные APK
-metadata schema 3: `infrastructure`, `recipeSha256`, `runtimeHashes`.
+Источник recipe — [общий Rust-план](../Installer/crates/release-core/src/recipe.rs).
+Сборщик передаёт его временное представление и source mapping в Gradle для подписания
+metadata APK schema 3: `infrastructure`, `payloadFormat`, `minimumInstallerVersion`,
+`recipeSha256`, `runtimeHashes`. Эти временные входы сборки не включаются в payload.
 Ручная перепаковка старых APK с новыми агентами не создаёт проверенный payload.
 
 `files` копирует или атомарно заменяет файл с владельцем root:root и правами 0644
@@ -136,7 +137,7 @@ disabled — у условных агентов. Ошибка хука не по
 регистра и дубликаты запрещены. Ограничения: 2 GiB ZIP, 4 GiB распакованных данных,
 4096 entries. Публикация в кэш атомарна; отменённая загрузка не становится готовой.
 SHA-256 связывает архив с HTTPS-каталогом, но не является самостоятельной подписью
-издателя. План закрепляет manifest digest; перед выполнением файлы проверяются заново.
+издателя. План закрепляет идентичность содержимого комплекта; перед выполнением файлы проверяются заново.
 EOF внешнего CLI больше не участвует в recovery: GUI использует библиотеку напрямую.
 
 

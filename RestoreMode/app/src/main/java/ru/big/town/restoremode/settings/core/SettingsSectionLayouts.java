@@ -99,6 +99,7 @@ public final class SettingsSectionLayouts {
         layout(R.layout.settings_other_location_permission),
         layout(R.layout.settings_other_metrics_heading),
         layout(R.layout.settings_other_metrics),
+        layout(R.layout.settings_other_runtime),
         layout(R.layout.settings_other_diagnostics),
         layout(R.layout.settings_other_keyboard_heading),
         layout(R.layout.settings_other_keyboard),

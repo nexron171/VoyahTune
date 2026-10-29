@@ -1,0 +1,386 @@
+{
+  "schema": 1,
+  "cases": [
+    {
+      "id": "statusbar.zero",
+      "contract": "statusbar.air-quality",
+      "agents": [
+        "statusbar"
+      ],
+      "reference": "carplay-statusbar.test.js",
+      "input": {
+        "events": [
+          {
+            "boot": 12,
+            "value": 0
+          }
+        ]
+      },
+      "expected": {
+        "writes": [
+          "12:0"
+        ]
+      }
+    },
+    {
+      "id": "statusbar.deduplicate",
+      "contract": "statusbar.air-quality",
+      "agents": [
+        "statusbar"
+      ],
+      "reference": "carplay-statusbar.test.js",
+      "input": {
+        "events": [
+          {
+            "boot": 12,
+            "value": 0
+          },
+          {
+            "boot": 12,
+            "value": 0
+          }
+        ]
+      },
+      "expected": {
+        "writes": [
+          "12:0"
+        ]
+      }
+    },
+    {
+      "id": "statusbar.change",
+      "contract": "statusbar.air-quality",
+      "agents": [
+        "statusbar"
+      ],
+      "reference": "carplay-statusbar.test.js",
+      "input": {
+        "events": [
+          {
+            "boot": 12,
+            "value": 0
+          },
+          {
+            "boot": 12,
+            "value": 27
+          }
+        ]
+      },
+      "expected": {
+        "writes": [
+          "12:0",
+          "12:27"
+        ]
+      }
+    },
+    {
+      "id": "statusbar.unknown",
+      "contract": "statusbar.air-quality",
+      "agents": [
+        "statusbar"
+      ],
+      "reference": "carplay-statusbar.test.js",
+      "input": {
+        "events": [
+          {
+            "boot": 12,
+            "value": -1
+          }
+        ]
+      },
+      "expected": {
+        "writes": [
+          "12:-1"
+        ]
+      }
+    },
+    {
+      "id": "statusbar.fraction",
+      "contract": "statusbar.air-quality",
+      "agents": [
+        "statusbar"
+      ],
+      "reference": "carplay-statusbar.test.js",
+      "input": {
+        "events": [
+          {
+            "boot": 12,
+            "value": 1.5
+          }
+        ]
+      },
+      "expected": {
+        "writes": [
+          "12:-1"
+        ]
+      }
+    },
+    {
+      "id": "statusbar.new-boot",
+      "contract": "statusbar.air-quality",
+      "agents": [
+        "statusbar"
+      ],
+      "reference": "carplay-statusbar.test.js",
+      "input": {
+        "events": [
+          {
+            "boot": 12,
+            "value": 27
+          },
+          {
+            "boot": 13,
+            "value": 27
+          }
+        ]
+      },
+      "expected": {
+        "writes": [
+          "12:27",
+          "13:27"
+        ]
+      }
+    },
+    {
+      "id": "statusbar.opt-in",
+      "contract": "statusbar.visibility",
+      "agents": [
+        "statusbar"
+      ],
+      "reference": "carplay-statusbar.test.js",
+      "input": {
+        "initial": {
+          "top": [
+            "ru.big.town.anative.CarPlayFullscreenActivity",
+            ""
+          ],
+          "hide": false
+        },
+        "events": [
+          {
+            "action": "reconcile"
+          }
+        ]
+      },
+      "expected": {
+        "visible": [
+          true,
+          true
+        ],
+        "reports": [
+          [
+            0,
+            false
+          ]
+        ]
+      }
+    },
+    {
+      "id": "statusbar.hide-driver",
+      "contract": "statusbar.visibility",
+      "agents": [
+        "statusbar"
+      ],
+      "reference": "carplay-statusbar.test.js",
+      "input": {
+        "initial": {
+          "top": [
+            "ru.big.town.anative.CarPlayFullscreenActivity",
+            ""
+          ],
+          "hide": true
+        },
+        "events": [
+          {
+            "action": "reconcile"
+          }
+        ]
+      },
+      "expected": {
+        "visible": [
+          false,
+          true
+        ],
+        "reports": [
+          [
+            0,
+            true
+          ]
+        ]
+      }
+    },
+    {
+      "id": "statusbar.hide-passenger",
+      "contract": "statusbar.visibility",
+      "agents": [
+        "statusbar"
+      ],
+      "reference": "carplay-statusbar.test.js",
+      "input": {
+        "initial": {
+          "top": [
+            "",
+            "ru.big.town.anative.CarPlayFullscreenActivity"
+          ],
+          "hide": true
+        },
+        "events": [
+          {
+            "action": "reconcile"
+          }
+        ]
+      },
+      "expected": {
+        "visible": [
+          true,
+          false
+        ],
+        "reports": [
+          [
+            1,
+            true
+          ]
+        ]
+      }
+    },
+    {
+      "id": "statusbar.restore",
+      "contract": "statusbar.visibility",
+      "agents": [
+        "statusbar"
+      ],
+      "reference": "carplay-statusbar.test.js",
+      "input": {
+        "initial": {
+          "top": [
+            "ru.big.town.anative.CarPlayFullscreenActivity",
+            ""
+          ],
+          "hide": true
+        },
+        "events": [
+          {
+            "action": "reconcile"
+          },
+          {
+            "action": "setHide",
+            "value": false
+          },
+          {
+            "action": "reconcile"
+          }
+        ]
+      },
+      "expected": {
+        "visible": [
+          true,
+          true
+        ],
+        "reports": [
+          [
+            0,
+            true
+          ],
+          [
+            0,
+            false
+          ]
+        ]
+      }
+    },
+    {
+      "id": "statusbar.process-death",
+      "contract": "statusbar.visibility",
+      "agents": [
+        "statusbar"
+      ],
+      "reference": "carplay-statusbar.test.js",
+      "input": {
+        "initial": {
+          "top": [
+            "ru.big.town.anative.CarPlayFullscreenActivity",
+            ""
+          ],
+          "hide": true
+        },
+        "events": [
+          {
+            "action": "reconcile"
+          },
+          {
+            "action": "top",
+            "display": 0,
+            "value": ""
+          },
+          {
+            "action": "advance",
+            "milliseconds": 1000
+          }
+        ]
+      },
+      "expected": {
+        "visible": [
+          true,
+          true
+        ],
+        "reports": [
+          [
+            0,
+            true
+          ],
+          [
+            0,
+            false
+          ]
+        ]
+      }
+    },
+    {
+      "id": "statusbar.camera",
+      "contract": "statusbar.visibility",
+      "agents": [
+        "statusbar"
+      ],
+      "reference": "carplay-statusbar.test.js",
+      "input": {
+        "initial": {
+          "top": [
+            "ru.big.town.anative.CarPlayFullscreenActivity",
+            ""
+          ],
+          "hide": true
+        },
+        "events": [
+          {
+            "action": "reconcile"
+          },
+          {
+            "action": "top",
+            "display": 0,
+            "value": "Camera"
+          },
+          {
+            "action": "advance",
+            "milliseconds": 1000
+          }
+        ]
+      },
+      "expected": {
+        "visible": [
+          false,
+          true
+        ],
+        "reports": [
+          [
+            0,
+            true
+          ],
+          [
+            0,
+            false
+          ]
+        ]
+      }
+    }
+  ]
+}

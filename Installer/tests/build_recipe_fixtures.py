@@ -36,28 +36,10 @@ def main():
         path = source / name
         if not path.exists():
             path.symlink_to(ROOT / name, target_is_directory=True)
-    spec = source / "Packaging/installer/payload-spec.json"
-    base = json.loads(spec.read_text())
-    config = source / "Packaging/new/config"
-    runtime = "/data/local/bin/voyahtune-new/"
+    config = source / "Packaging/new/config/voyahtune_keyboard_en_config.json"
+    base = json.loads(config.read_text())
     for label, version in [("A", "4.5.0"), ("B", "4.5.1")]:
-        recipe = json.loads(json.dumps(base))
-        for filename in [
-            "voyahtune_acceptance_old.json",
-            "voyahtune_acceptance_new.json",
-        ]:
-            (config / filename).unlink(missing_ok=True)
-        filename = (
-            "voyahtune_acceptance_" + ("old" if label == "A" else "new") + ".json"
-        )
-        (config / filename).write_text(json.dumps({"fixture": label}))
-        if label == "B":
-            recipe["removeFiles"].append(runtime + "voyahtune_acceptance_old.json")
-            recipe["directories"].append(
-                dict(path=runtime + "voyahtune_fixture", mode=493)
-            )
-            recipe["attributes"] = [dict(path=runtime + filename, mode=493)]
-        spec.write_text(json.dumps(recipe))
+        config.write_text(json.dumps({**base, "acceptanceFixture": label}))
         subprocess.run(
             [
                 str(ROOT / "Installer/target/release/installer-build"),

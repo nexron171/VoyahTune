@@ -701,7 +701,7 @@ dependencies = [
 
 [[package]]
 name = "qnx-fonts"
-version = "1.8.4"
+version = "1.8.6"
 dependencies = [
  "hex",
  "release-core",
@@ -765,7 +765,7 @@ dependencies = [
 
 [[package]]
 name = "release-core"
-version = "1.8.4"
+version = "1.8.6"
 dependencies = [
  "apksig",
  "hex",

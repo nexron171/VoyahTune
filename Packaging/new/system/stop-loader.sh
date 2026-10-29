@@ -1,6 +1,7 @@
 #!/system/bin/sh
 set -eu
-# init owns the supervisor and injector process group, including orphaned children.
+RUNTIME=/data/local/bin/voyahtune-new
+"$RUNTIME/voyahtune-loader" --runtime-dir "$RUNTIME" --quiesce --control-timeout 60s >/dev/null
 setprop ctl.stop voyahtune_load
 attempt=0
 while [ "$(getprop init.svc.voyahtune_load)" != stopped ]; do

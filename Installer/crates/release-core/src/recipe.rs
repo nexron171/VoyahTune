@@ -28,6 +28,19 @@ pub struct CopyFile {
     pub mode: u32,
     pub phase: Phase,
 }
+pub const OTA_STABLE_ARTIFACTS: &[&str] = &[
+    "voyahtune-updater",
+    "voyahtune-updater.apk",
+    "voyahtune.updater.rc",
+    "voyahtune-ota-bootstrap.json",
+];
+
+impl CopyFile {
+    pub fn delivered_by_ota(&self) -> bool {
+        !OTA_STABLE_ARTIFACTS.contains(&self.artifact.as_str())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct InstallPackage {
@@ -72,8 +85,67 @@ pub struct Recipe {
 }
 impl Default for Recipe {
     fn default() -> Self {
-        serde_json::from_str(include_str!("default-recipe.json"))
-            .expect("default installation recipe")
+        let names = [
+            "native.apk",
+            "whitelist.xml",
+            "voyahtune-updater",
+            "voyahtune.updater.rc",
+            "voyahtune-ota-bootstrap.json",
+            "voyahtune.load.sh",
+            "voyahtune.load.rc",
+        ];
+        let files = names
+            .into_iter()
+            .chain(
+                payload::NATIVE_RUNTIME_ROLES
+                    .iter()
+                    .map(|(name, _, _)| *name),
+            )
+            .map(|name| {
+                let (destination, mode) =
+                    payload::destination(name).expect("compiled installation destination");
+                let phase = if ["voyahtune.load.sh", "voyahtune.load.rc"].contains(&name) {
+                    Phase::BootHooks
+                } else {
+                    Phase::Files
+                };
+                CopyFile {
+                    artifact: name.into(),
+                    destination,
+                    mode,
+                    phase,
+                }
+            })
+            .collect();
+        Self {
+            schema: 3,
+            engine: "qinggan-v3".into(),
+            files,
+            packages: vec![
+                InstallPackage {
+                    artifact: "restore_mode.apk".into(),
+                    package: RESTORE.into(),
+                    condition: None,
+                },
+                InstallPackage {
+                    artifact: "runyn.apk".into(),
+                    package: payload::RUNYN.into(),
+                    condition: Some(PackageCondition::ExceptH97xy),
+                },
+            ],
+            directories: vec![Attributes {
+                path: "/data/local/bin/voyahtune-new".into(),
+                mode: 0o755,
+            }],
+            attributes: vec![],
+            remove_files: RETIRED_RUNTIME_FILES.lines().map(str::to_owned).collect(),
+            remove_directories: vec![
+                "/data/local/tmp/voyah_load.lock".into(),
+                "/data/local/tmp/voyahtune-pi".into(),
+            ],
+            remove_prefixes: vec![],
+            remove_packages: vec![],
+        }
     }
 }
 fn clean(path: &str) -> bool {
@@ -95,15 +167,15 @@ fn owned(path: &str) -> bool {
             "voyahtune-updater.apk",
             "voyahtune.updater.rc",
             "voyahtune-ota-bootstrap.json",
+            "voyahtune.load.rc",
+            "voyahtune.load.sh",
         ]
         .iter()
         .any(|name| payload::destination(name).is_some_and(|(p, _)| p == path))
             || RUNTIME_DIRECTORIES.contains(&path)
             || path == NATIVE_PATH
             || path == WHITELIST
-            || payload::RUNTIME_NAMES
-                .iter()
-                .any(|n| payload::destination(n).is_some_and(|d| d.0 == path))
+            || RETIRED_RUNTIME_FILES.lines().any(|retired| retired == path)
             || include_str!("cleanup_paths.txt").lines().any(|p| p == path)
             || include_str!("pi-cleanup-paths.txt")
                 .lines()
@@ -124,14 +196,10 @@ fn owned(path: &str) -> bool {
 }
 impl Recipe {
     pub fn validate(&self) -> Result<()> {
-        let unified = self
-            .files
-            .iter()
-            .any(|file| file.artifact == "voyahtune-new-voyahtune-loader");
         let fail = |detail: String| {
             Error::new(
                 "RECIPE_INVALID",
-                "Манифест содержит неподдерживаемое действие или путь",
+                "План установки содержит неподдерживаемое действие или путь",
             )
             .detail(detail)
         };
@@ -143,7 +211,7 @@ impl Recipe {
             .detail(&self.engine));
         }
         if self.files.len() > 512 || self.packages.len() > 64 || self.remove_files.len() > 2048 {
-            return Err(fail("Слишком большой манифест".into()));
+            return Err(fail("Слишком большой план установки".into()));
         }
         if !(1..=2).contains(&self.packages.len())
             || !self.remove_packages.is_empty()
@@ -153,12 +221,10 @@ impl Recipe {
                 "Неподдерживаемые пакетные операции или prefix cleanup".into(),
             ));
         }
-        if unified
-            && !self.packages.iter().any(|package| {
-                package.package == payload::RUNYN
-                    && package.condition == Some(PackageCondition::ExceptH97xy)
-            })
-        {
+        if !self.packages.iter().any(|package| {
+            package.package == payload::RUNYN
+                && package.condition == Some(PackageCondition::ExceptH97xy)
+        }) {
             return Err(fail(
                 "Общий payload требует условную установку RunYN".into(),
             ));
@@ -183,28 +249,38 @@ impl Recipe {
             {
                 return Err(fail(file.destination.clone()));
             }
+            if RETIRED_RUNTIME_FILES
+                .lines()
+                .any(|retired| retired == file.destination)
+                || (file
+                    .destination
+                    .starts_with("/data/local/bin/voyahtune-new/")
+                    && file.destination.ends_with(".js"))
+            {
+                return Err(fail(format!(
+                    "Retired runtime target: {}",
+                    file.destination
+                )));
+            }
             let boot = ["voyahtune.load.rc", "voyahtune.load.sh"].contains(&file.artifact.as_str());
             if (file.phase == Phase::BootHooks) != boot {
                 return Err(fail(file.artifact.clone()));
             }
             // Special engine roles have fixed targets and restoration semantics.
-            if [
+            if ([
                 "voyahtune-updater",
                 "voyahtune-updater.apk",
                 "voyahtune.updater.rc",
                 "voyahtune-ota-bootstrap.json",
                 "native.apk",
                 "whitelist.xml",
-                "load.bin",
-                "loaderFrida",
-                "injects.json",
-                "frida-inject",
                 "voyahtune.load.rc",
                 "voyahtune.load.sh",
-                "voyahtune-new-voyahtune-loader",
-                "voyahtune-new-frida-inject",
             ]
             .contains(&file.artifact.as_str())
+                || payload::NATIVE_RUNTIME_ROLES
+                    .iter()
+                    .any(|(role, _, _)| *role == file.artifact))
                 && payload::destination(&file.artifact)
                     .is_none_or(|(p, m)| p != file.destination || m != file.mode)
             {
@@ -221,29 +297,10 @@ impl Recipe {
                 return Err(fail(format!("Обязательная роль: {name}")));
             }
         }
-        let injector = if unified {
-            "voyahtune-new-frida-inject"
-        } else {
-            "frida-inject"
-        };
-        if !self.files.iter().any(|file| file.artifact == injector) {
-            return Err(fail(format!("Обязательная роль: {injector}")));
-        }
-        let loaders = self
-            .files
-            .iter()
-            .filter(|f| {
-                ["load.bin", "loaderFrida", "voyahtune-new-voyahtune-loader"]
-                    .contains(&f.artifact.as_str())
-            })
-            .count();
-        if loaders != 1 {
-            return Err(fail("Требуется ровно один загрузчик инфраструктуры".into()));
-        }
-        if self.files.iter().any(|f| f.artifact == "loaderFrida")
-            && !self.files.iter().any(|f| f.artifact == "injects.json")
-        {
-            return Err(fail("PI требует injects.json".into()));
+        for (role, _, _) in payload::NATIVE_RUNTIME_ROLES {
+            if !self.files.iter().any(|file| file.artifact == *role) {
+                return Err(fail(format!("Обязательная роль: {role}")));
+            }
         }
         let mut ids = BTreeSet::new();
         for package in &self.packages {
@@ -281,12 +338,7 @@ impl Recipe {
             }
         }
         for path in &self.remove_files {
-            if !owned(path)
-                || [NATIVE_PATH, WHITELIST].contains(&path.as_str())
-                || (!unified
-                    && ["/data/local/bin/load.bin", "/data/local/bin/frida-inject"]
-                        .contains(&path.as_str()))
-            {
+            if !owned(path) || [NATIVE_PATH, WHITELIST].contains(&path.as_str()) {
                 return Err(fail(path.clone()));
             }
         }
@@ -324,28 +376,17 @@ impl Recipe {
         self.remove_files
             .iter()
             .cloned()
-            .chain(
-                RETIRED_RUNTIME_FILES
-                    .lines()
-                    // Generic names use the engine's ownership and backup handling.
-                    .filter(|path| {
-                        ![
-                            "/data/local/bin/load.bin",
-                            "/data/local/bin/loaderFrida",
-                            "/data/local/bin/frida-inject",
-                        ]
-                        .contains(path)
-                    })
-                    .map(String::from),
-            )
+            .chain(RETIRED_RUNTIME_FILES.lines().map(String::from))
+            .chain(std::iter::once(
+                "/data/local/bin/voyahtune-native-migration.boot".to_string(),
+            ))
             .chain(
                 self.files
                     .iter()
-                    .filter(|f| {
-                        !["native.apk", "whitelist.xml", "load.bin", "frida-inject"]
-                            .contains(&f.artifact.as_str())
+                    .filter(|file| {
+                        !["native.apk", "whitelist.xml"].contains(&file.artifact.as_str())
                     })
-                    .map(|f| f.destination.clone()),
+                    .map(|file| file.destination.clone()),
             )
             .collect::<BTreeSet<_>>()
             .into_iter()
@@ -375,7 +416,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn removal_covers_old_and_new_runtime_without_changing_installation_cleanup() {
+    fn removal_covers_owned_runtime_without_removing_active_installation_targets() {
         let mut recipe = Recipe::default();
         recipe.directories.push(Attributes {
             path: "/data/local/bin/voyahtune-extra".into(),
@@ -403,12 +444,14 @@ mod tests {
             "/data/local/tmp/voyahtune_vehicle_air.pid",
         ] {
             assert!(recipe.cleanup_files().contains(&file.to_string()));
-            assert!(!recipe.remove_files.contains(&file.to_string()));
         }
         for file in ["load.bin", "loaderFrida", "frida-inject"] {
-            assert!(!recipe
+            assert!(recipe
                 .cleanup_files()
                 .contains(&format!("/data/local/bin/{file}")));
+        }
+        for file in &recipe.files {
+            assert!(!recipe.remove_files.contains(&file.destination));
         }
         recipe.validate().unwrap();
     }
@@ -447,7 +490,7 @@ mod tests {
             "/system/bin/sh",
             "/data/local/bin/../other",
             "/data",
-            "/data/local/bin/frida-inject",
+            "/data/local/bin/foreign-injector",
         ] {
             let mut recipe = Recipe::default();
             recipe.remove_files.push(path.into());
@@ -460,6 +503,34 @@ mod tests {
         assert_eq!(recipe.validate().unwrap_err().code, "ENGINE_REQUIRED");
     }
     #[test]
+    fn native_runtime_requires_every_compiled_component() {
+        for role in [
+            "voyahtune-new-voyahtune-loader",
+            "voyahtune-new-voyahtune-inject",
+            "voyahtune-new-voyahtune-inject-arm",
+            "voyahtune-new-libvoyahtune-agent-arm.so",
+            "voyahtune-new-agents.dex",
+            "voyahtune-new-libvoyahtune-agent.so",
+        ] {
+            let mut recipe = Recipe::default();
+            recipe.files.retain(|file| file.artifact != role);
+            assert!(recipe.validate().is_err(), "missing {role} accepted");
+        }
+    }
+
+    #[test]
+    fn retired_runtime_cannot_be_reintroduced_as_an_install_target() {
+        let mut recipe = Recipe::default();
+        recipe.files.push(CopyFile {
+            artifact: "old-agent".into(),
+            destination: "/data/local/bin/phone-num.js".into(),
+            mode: 0o644,
+            phase: Phase::Files,
+        });
+        assert!(recipe.validate().is_err());
+    }
+
+    #[test]
     fn rejects_shell_and_duplicate_targets() {
         let mut value = serde_json::to_value(Recipe::default()).unwrap();
         value["shell"] = serde_json::json!("rm -rf /");
@@ -467,5 +538,33 @@ mod tests {
         let mut recipe = Recipe::default();
         recipe.files.push(recipe.files[0].clone());
         assert!(recipe.validate().is_err());
+    }
+}
+
+#[cfg(test)]
+mod ota_delivery_tests {
+    use super::*;
+
+    #[test]
+    fn ota_preserves_its_running_service_but_delivers_the_new_injection_runtime() {
+        for (name, deliver) in [
+            ("voyahtune-updater", false),
+            ("voyahtune-updater.apk", false),
+            ("voyahtune.updater.rc", false),
+            ("voyahtune-ota-bootstrap.json", false),
+            ("agents.dex", true),
+            ("libvoyahtune-agent.so", true),
+            ("libvoyahtune-agent-arm.so", true),
+            ("voyahtune-inject-arm", true),
+            ("voyahtune-loader", true),
+        ] {
+            let file = CopyFile {
+                artifact: name.into(),
+                destination: "/data/local/bin/test".into(),
+                mode: 0o644,
+                phase: Phase::Files,
+            };
+            assert_eq!(file.delivered_by_ota(), deliver, "{name}");
+        }
     }
 }

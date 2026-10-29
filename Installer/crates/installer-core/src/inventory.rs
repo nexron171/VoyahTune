@@ -240,7 +240,7 @@ pub fn inspect_for_action(
     }
     let mut foreign_files = BTreeMap::new();
     for name in ["load.bin", "loaderFrida", "frida-inject"] {
-        let path = payload::destination(name).unwrap().0;
+        let path = format!("/data/local/bin/{name}");
         if let Some(hash) = files.get(&path).cloned() {
             let marker = if name == "load.bin" {
                 adb.read("head -n 24 /data/local/bin/load.bin\n")?

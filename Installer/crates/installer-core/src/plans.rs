@@ -1,4 +1,4 @@
-use crate::{inventory::Inventory, payload::Payload, Result};
+use crate::{inventory::Inventory, payload::Payload, vehicle_options::InstallOptions, Result};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -21,6 +21,8 @@ pub enum Dns {
 pub struct Request {
     pub action: Action,
     pub dns: Dns,
+    #[serde(default)]
+    pub options: InstallOptions,
     pub serial: String,
     pub inventory_token: String,
     pub confirmed: bool,
@@ -36,11 +38,13 @@ pub struct Step {
 #[serde(rename_all = "camelCase")]
 pub struct Plan {
     #[serde(default)]
+    pub oem_options_available: bool,
+    #[serde(default)]
     pub installer_version: String,
     #[serde(default)]
     pub release_version: String,
     #[serde(default)]
-    pub manifest_sha256: String,
+    pub payload_sha256: String,
     #[serde(default)]
     pub recipe_sha256: String,
     #[serde(default)]
@@ -50,6 +54,15 @@ pub struct Plan {
     pub operation: String,
     pub warnings: Vec<String>,
     pub steps: Vec<Step>,
+}
+
+impl Plan {
+    pub fn set_options(&mut self, options: InstallOptions) -> Result<()> {
+        options.validate(self.request.action, self.oem_options_available)?;
+        self.request.options = options;
+        self.steps = operation_steps(self.request.action, options);
+        Ok(())
+    }
 }
 
 /// Packages whose installed key differs from the selected release. Only our two
@@ -89,7 +102,7 @@ pub fn signature_resets(
 }
 
 pub fn plan(inventory: Inventory, payload: &Payload, action: Action, dns: Dns) -> Result<Plan> {
-    let mut warnings=vec!["Совпадение компонентов не означает проверку всех функций на этой прошивке. Автомобиль должен стоять на парковке; питание нельзя отключать до завершения.".into()];
+    let mut warnings = vec!["Совпадение компонентов не означает проверку всех функций на этой прошивке. Автомобиль должен стоять на парковке; питание нельзя отключать до завершения.".into()];
     warnings.extend(inventory.problems.iter().cloned());
     let operation = if action == Action::Remove {
         "remove"
@@ -106,16 +119,14 @@ pub fn plan(inventory: Inventory, payload: &Payload, action: Action, dns: Dns) -
     if !resets.is_empty() {
         warnings.push(format!("Другой ключ подписи: {}. Эти приложения будут автоматически удалены вместе с настройками и данными, затем установлены заново.", resets.join(", ")));
     }
-    let steps = operation_steps(action);
+    let options = InstallOptions::default();
+    let steps = operation_steps(action, options);
     use sha2::{Digest, Sha256};
     Ok(Plan {
+        oem_options_available: false,
         installer_version: crate::compatibility::INSTALLER_VERSION.into(),
         release_version: payload.manifest.release_version.clone(),
-        manifest_sha256: if payload.root.join("manifest.json").is_file() {
-            crate::payload::sha256(&payload.root.join("manifest.json"))?
-        } else {
-            String::new()
-        },
+        payload_sha256: payload.identity()?,
         recipe_sha256: hex::encode(Sha256::digest(serde_json::to_vec(&serde_json::to_value(
             &payload.manifest.recipe,
         )?)?)),
@@ -123,6 +134,7 @@ pub fn plan(inventory: Inventory, payload: &Payload, action: Action, dns: Dns) -
         request: Request {
             action,
             dns,
+            options,
             serial: inventory.serial.clone(),
             inventory_token: inventory.token.clone(),
             confirmed: false,
@@ -130,19 +142,13 @@ pub fn plan(inventory: Inventory, payload: &Payload, action: Action, dns: Dns) -
         inventory,
         operation: operation.into(),
         warnings,
-        steps: steps
-            .into_iter()
-            .map(|(id, title)| Step {
-                id: id.into(),
-                title: title.into(),
-            })
-            .collect(),
+        steps,
     })
 }
 
 /// Presentation boundaries must match every step emitted by Engine::execute.
-fn operation_steps(action: Action) -> Vec<(&'static str, &'static str)> {
-    let mut s = vec![
+fn operation_steps(action: Action, options: InstallOptions) -> Vec<Step> {
+    let mut steps = vec![
         ("preflight", "Подготовка файлов релиза"),
         ("root", "Получение системного доступа"),
         (
@@ -151,15 +157,15 @@ fn operation_steps(action: Action) -> Vec<(&'static str, &'static str)> {
         ),
         ("navigation-fonts-check", "Проверка тем приборки"),
     ];
-    s.push(("system", "Подготовка системного раздела"));
+    steps.push(("system", "Подготовка системного раздела"));
     if action == Action::Install {
-        s.push((
+        steps.push((
             "third-party-loaders",
             "Проверка и отключение сторонних решений",
         ));
     }
     if action == Action::Remove {
-        s.extend([
+        steps.extend([
             ("navigation-fonts", "Восстановление шрифтов приборки"),
             ("deactivate", "Отключение Apollo"),
             ("dns", "Восстановление DNS"),
@@ -171,7 +177,7 @@ fn operation_steps(action: Action) -> Vec<(&'static str, &'static str)> {
             ("settings", "Очистка настроек после перезагрузки"),
         ]);
     } else {
-        s.extend([
+        steps.extend([
             ("backup", "Сохранение файлов перед заменой"),
             ("signing-reset", "Переустановка при смене подписи"),
             ("runtime", "Остановка старых hooks"),
@@ -180,17 +186,28 @@ fn operation_steps(action: Action) -> Vec<(&'static str, &'static str)> {
             ("migration", "Миграция старого init.logcat.sh"),
             ("boot-hooks", "Установка boot-hook"),
         ]);
-        s.extend([
+        steps.extend([
             ("native", "Установка Native и разрешений"),
             ("packages", "Установка RestoreMode и настроек"),
             ("dns", "Настройка DNS"),
             ("updater-bootstrap", "Подготовка первого запуска OTA"),
+        ]);
+        if options.fake_account {
+            steps.push(("fake-account", "Активация Fake аккаунта"));
+        }
+        steps.extend([
             ("navigation-fonts", "Шрифты навигации приборки"),
             ("reboot", "Перезагрузка автомобиля"),
             ("verify", "Проверка Native и готовности OTA"),
         ]);
     }
-    s
+    steps
+        .into_iter()
+        .map(|(id, title)| Step {
+            id: id.into(),
+            title: title.into(),
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -199,9 +216,80 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn installation_request_preserves_explicit_vehicle_choices() {
+        let request: Request = serde_json::from_value(json!({
+            "action": "install", "dns": "keep", "serial": "CAR-001",
+            "inventoryToken": "token", "confirmed": true,
+            "options": {"fakeAccount": true, "disableChineseNavigation": true}
+        }))
+        .unwrap();
+        let saved = serde_json::to_value(request).unwrap();
+        assert_eq!(saved["options"]["fakeAccount"], true);
+        assert_eq!(saved["options"]["disableChineseNavigation"], true);
+    }
+
+    #[test]
+    fn older_requests_leave_both_vehicle_options_disabled() {
+        let request: Request = serde_json::from_value(json!({
+            "action": "install", "dns": "keep", "serial": "CAR-001",
+            "inventoryToken": "token", "confirmed": true
+        }))
+        .unwrap();
+        assert_eq!(request.options, InstallOptions::default());
+    }
+
+    #[test]
+    fn vehicle_choices_update_the_reviewed_plan_and_enforce_availability() {
+        for action in [Action::Install, Action::Remove] {
+            for available in [false, true] {
+                for fake_account in [false, true] {
+                    for disable_chinese_navigation in [false, true] {
+                        let mut plan = fixture(action);
+                        plan.oem_options_available = available;
+                        let options = InstallOptions {
+                            fake_account,
+                            disable_chinese_navigation,
+                        };
+                        let allowed = !options.any() || (available && action == Action::Install);
+                        assert_eq!(plan.set_options(options).is_ok(), allowed);
+                        if allowed {
+                            assert_eq!(plan.request.options, options);
+                            assert_eq!(
+                                plan.steps
+                                    .iter()
+                                    .filter(|step| step.id == "fake-account")
+                                    .count(),
+                                usize::from(fake_account)
+                            );
+                        } else {
+                            assert_eq!(plan.request.options, InstallOptions::default());
+                        }
+                    }
+                }
+            }
+        }
+        let mut plan = fixture(Action::Install);
+        plan.oem_options_available = true;
+        plan.set_options(InstallOptions {
+            fake_account: true,
+            disable_chinese_navigation: false,
+        })
+        .unwrap();
+        let fake = plan
+            .steps
+            .iter()
+            .position(|step| step.id == "fake-account")
+            .unwrap();
+        assert_eq!(plan.steps[fake].title, "Активация Fake аккаунта");
+        assert_eq!(plan.steps[fake - 1].id, "updater-bootstrap");
+        plan.set_options(InstallOptions::default()).unwrap();
+        assert!(!plan.steps.iter().any(|step| step.id == "fake-account"));
+    }
+
+    #[test]
     fn install_prepares_third_party_solutions_immediately_after_remount() {
-        let steps = operation_steps(Action::Install);
-        let ids: Vec<_> = steps.iter().map(|(id, _)| *id).collect();
+        let steps = operation_steps(Action::Install, InstallOptions::default());
+        let ids: Vec<_> = steps.iter().map(|step| step.id.as_str()).collect();
         assert_eq!(
             &ids[..7],
             &[
@@ -220,24 +308,28 @@ mod tests {
     #[test]
     fn navigation_fonts_are_applied_before_reboot_and_restored_before_removal() {
         {
-            let install = operation_steps(Action::Install);
+            let install = operation_steps(Action::Install, InstallOptions::default());
             let font = install
                 .iter()
-                .position(|(id, _)| *id == "navigation-fonts")
+                .position(|step| step.id == "navigation-fonts")
                 .unwrap();
-            assert_eq!(install[font + 1].0, "reboot");
-            let remove = operation_steps(Action::Remove);
+            assert_eq!(install[font + 1].id, "reboot");
+            let remove = operation_steps(Action::Remove, InstallOptions::default());
             let font = remove
                 .iter()
-                .position(|(id, _)| *id == "navigation-fonts")
+                .position(|step| step.id == "navigation-fonts")
                 .unwrap();
-            let files = remove.iter().position(|(id, _)| *id == "files").unwrap();
+            let files = remove.iter().position(|step| step.id == "files").unwrap();
             assert!(font < files);
         }
     }
 
     #[test]
     fn removal_does_not_require_matching_release_or_apk_signatures() {
+        assert_eq!(fixture(Action::Remove).operation, "remove");
+    }
+
+    fn fixture(action: Action) -> Plan {
         let inventory: Inventory = serde_json::from_value(json!({
             "serial":"test", "fingerprint":"test", "model":"test", "sdk":30,
             "abi":"arm64-v8a", "problems":[], "baseNative":null,
@@ -256,11 +348,6 @@ mod tests {
                 "releaseVersion":"1.0.0","buildRevision":"older","artifacts":[]}))
             .unwrap(),
         };
-        assert_eq!(
-            plan(inventory, &payload, Action::Remove, Dns::Keep)
-                .unwrap()
-                .operation,
-            "remove"
-        );
+        plan(inventory, &payload, action, Dns::Keep).unwrap()
     }
 }

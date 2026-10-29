@@ -1,0 +1,172 @@
+{
+  "schema": 1,
+  "cases": [
+    {
+      "id": "installation.normal",
+      "contract": "installation.lifecycle",
+      "agents": [],
+      "reference": "migration lifecycle requirement",
+      "input": {
+        "events": [
+          "install"
+        ]
+      },
+      "expected": {
+        "trace": [
+          "block",
+          "quiesce",
+          "drained",
+          "stop",
+          "copy",
+          "cleanup",
+          "reboot",
+          "check"
+        ]
+      }
+    },
+    {
+      "id": "installation.quiesce-timeout",
+      "contract": "installation.lifecycle",
+      "agents": [],
+      "reference": "migration lifecycle requirement",
+      "input": {
+        "events": [
+          "install",
+          "quiesce-timeout"
+        ]
+      },
+      "expected": {
+        "trace": [
+          "block",
+          "quiesce",
+          "repair-required"
+        ]
+      }
+    },
+    {
+      "id": "installation.stale-ack",
+      "contract": "installation.lifecycle",
+      "agents": [],
+      "reference": "migration lifecycle requirement",
+      "input": {
+        "events": [
+          "install",
+          "ack-other-identity"
+        ]
+      },
+      "expected": {
+        "trace": [
+          "block",
+          "quiesce",
+          "repair-required"
+        ]
+      }
+    },
+    {
+      "id": "installation.copy-failure",
+      "contract": "installation.lifecycle",
+      "agents": [],
+      "reference": "migration lifecycle requirement",
+      "input": {
+        "events": [
+          "install",
+          "copy-failure"
+        ]
+      },
+      "expected": {
+        "trace": [
+          "block",
+          "quiesce",
+          "drained",
+          "stop",
+          "copy",
+          "repair-required"
+        ]
+      }
+    },
+    {
+      "id": "installation.removal",
+      "contract": "installation.lifecycle",
+      "agents": [],
+      "reference": "migration lifecycle requirement",
+      "input": {
+        "events": [
+          "remove"
+        ]
+      },
+      "expected": {
+        "trace": [
+          "block",
+          "quiesce",
+          "drained",
+          "stop",
+          "remove",
+          "reboot"
+        ]
+      }
+    },
+    {
+      "id": "installation.payload-clean-layout",
+      "contract": "installation.payload",
+      "agents": [],
+      "reference": "../scripts/prepare-release.py + migration packaging requirement",
+      "input": {
+        "operation": "assemble-runtime"
+      },
+      "expected": {
+        "fridaFiles": 0,
+        "agentDex": true,
+        "nativeAbis": [
+          "arm64-v8a",
+          "armeabi-v7a"
+        ],
+        "executablesHaveMode755": true
+      }
+    },
+    {
+      "id": "installation.payload-cleanup-owned",
+      "contract": "installation.payload",
+      "agents": [],
+      "reference": "../scripts/prepare-release.py + migration packaging requirement",
+      "input": {
+        "operation": "cleanup",
+        "legacyFiles": [
+          "frida-inject",
+          "launcher.js"
+        ],
+        "userSettings": true
+      },
+      "expected": {
+        "legacyFiles": [],
+        "userSettings": true
+      }
+    },
+    {
+      "id": "installation.payload-no-ota-self-update",
+      "contract": "installation.payload",
+      "agents": [],
+      "reference": "../scripts/prepare-release.py + migration packaging requirement",
+      "input": {
+        "operation": "ota",
+        "stableComponentChanged": true
+      },
+      "expected": {
+        "stableComponentReplaced": false
+      }
+    },
+    {
+      "id": "installation.payload-symlink",
+      "contract": "installation.payload",
+      "agents": [],
+      "reference": "../scripts/prepare-release.py + migration packaging requirement",
+      "input": {
+        "operation": "install",
+        "destinationSymlink": true
+      },
+      "expected": {
+        "filesWritten": 0,
+        "state": "failed"
+      }
+    }
+  ]
+}

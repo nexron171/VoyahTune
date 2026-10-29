@@ -1,72 +1,108 @@
-# Единая инфраструктура загрузчика и хуков
+# Единый native/Java runtime
 
-Исходники единого runtime находятся в `Packaging/new/`: Go-supervisor, восстановление по ACC, подмена OEM-сбросов и контроль состояния агентов. Различия прошивок учитываются адаптерами; прежние каталоги сохранены для совместимости и очистки старых установок.
+Runtime предназначен для Android 11 ARM32 и ARM64. ARM64 Go-supervisor выбирает
+helper и библиотеку по ELF целевого процесса, bootstrap загружает общий Java DEX.
+LSPlant устанавливает перехваты.
+OEM-различия определяются доступными классами, сигнатурами и моделью автомобиля.
 
-## Состав и выбор прошивки
+## Состав
 
-- `loader/` — независимый Go-модуль без сторонних зависимостей. Точное имя процесса, Linux boot ID и `/proc/<pid>/stat` защищают от повторного использования PID. Записи попыток сохраняются между перезапусками загрузчика.
-- `runtime/adapters.js` — выбор возможностей по доступным классам и сигнатурам методов непосредственно в целевом процессе. Возможности определяются для каждого процесса: OEM-пакеты могут иметь разные версии.
-- `agents/` — ACC, OEM reset, Power Hold, Apollo, руль, окна/DPI, MultiDisplay, телефон, клавиатура и клиентские исправления. Navigation-source принадлежит только app-client; работа внутри приборки — только cluster-агенту.
-- `adapters/launcher/` — два варианта OEM lifecycle: раздельные `NavigationBarMain/Second` и общий `NavigationBar` с `mScreenId`. Общий вход выбирает один вариант после проверки ABI. Их обработчики transfer, All Apps и пассажирского экрана сохранены вместе, поскольку зависят от внутренних классов launcher. Возможности соответствуют выбранному варианту: настройка Home/All Apps и управление CarPlay chrome — в split; пассажирский Home → All Apps — в shared.
-- `config/agents.json` — процессы, ready-маркеры, условия, таймауты и бюджеты попыток. `config/bundles.json` задаёт состав standalone-агентов, `config/install-layout.json` — размещение boot-ресурсов.
-- `adapters/windows/` — сохраняет рабочий Java ClassLoader или выбирает доступный загрузчик классов `services.jar` для раннего запуска system_server.
-- `config/frida.json` — закреплённые хеши ARM32/ARM64 Frida 16.2.1. Supervisor читает ELF целевого процесса и выбирает инжектор той же архитектуры: ARM64→ARM32 может зависнуть при завершении инъекции на H97X/650.
-- `provenance.json` — исходные файлы и их хеши на момент переноса. Это происхождение, а не хеши изменённых новых агентов.
+- `java/` — общий registry, управление модулями и ресурсами, OEM-адаптеры. Все 16
+  статических определений из `loader/agent_registry.go` и динамические `client.<package>`
+  используют один runtime. Окна, телефон, руль, клавиатура, ACC/reset, Apollo,
+  MultiDisplay, Launcher, RDS и приборка имеют самостоятельные владельцы ресурсов.
+- `native/` — ARM/Thumb и ARM64 attach, bootstrap, JNI/LSPlant, восстановление состояния потока.
+  Версии зависимостей и локальные патчи закреплены в `dependencies.lock.json`.
+- `loader/` — планы модулей, ограничение повторов, выбор клавиатуры, Apollo admission,
+  durable journal, аутентифицированные status/quiesce и восстановление после сбоя.
+- `config/` — schema 2 manifest, настройки клавиатуры и точные устаревшие пути.
+- `system/` — init/wrapper/stop для сервиса `voyahtune_load`.
 
-ACC-worker запускается первым. Остальные ждут его ready/ошибки либо 45 секунд. Наблюдение за процессами выполняется параллельно, а Frida-инъекции — последовательно под общей блокировкой: attach изменяет общую SELinux-политику. Дополнительная блокировка целевого процесса разделяет drive-reset и Apollo в VehicleSetting. Все штатные агенты eternalized; RPC-bootstrap удерживает инжектор до завершения Java-инициализации. Успех требует ready-маркеров и нулевого кода выхода.
+Один resident принадлежит boot ID/PID/startTicks/UID и поколениям native/Java кода.
+Повторный запуск supervisor восстанавливает его из журнала без повторного attach.
+`active` публикуется после завершения helper, освобождения tracee и полного ACK всех
+обязательных модулей. Смена живого DEX/SO даёт `restart-required`.
 
-Повторы ограничены, а быстрые перезапуски поддерживаемых целевых процессов размыкают crash-loop. Health ACC/reset имеет ограниченное окно после пробуждения. Блокировки наследуются дочерним инжектором. Go запускает Frida напрямую и завершает группу процессов при ошибке или таймауте; Android parent-death signal завершает инжектор при аварии supervisor. Обычный перезапуск загрузчика сохраняет установленные агенты. Обновление eternalized-агента требует перезапуска его процесса или Android.
+В `AgentRuntime` переключатель `USE_DIRECT_HOOKS = true` выбирает прямые
+LSPlant-перехваты без обхода DEX и подготовки вызывающих методов. Значение `false`
+включает сохранённый путь с `AndroidCallers` и освобождением временного индекса после
+применения плана и quiesce. Смена значения требует пересборки runtime и перезапуска
+целевых процессов; штатная установка выполняет reboot.
 
-Клавиатура выбирается из существующего `voyahtune_keyboard_mode`: `off`, `en`, `ru`. Выбор фиксируется до перезапуска QGIME, чтобы EN и RU не перехватили одни методы одновременно. Apollo загружается только при существующем разрешении Native для текущей загрузки Linux. Отсутствующие обязательные OEM-методы дают ошибку установки; необязательные возможности, например NAVI_FULL, проверяются отдельно.
+Если ART успел встроить тело целевого метода в вызывающий код
+до установки перехвата, такой вызов может обойти подмену. Ранняя установка уменьшает
+это окно для JIT, но не гарантирует перехват уже скомпилированного AOT-кода.
+Правила ART 11 нельзя переносить на другие версии Android без проверки.
+Таймеры, listeners и перехваты принадлежат модулю; disable/quiesce ждут завершения
+выполняющихся callbacks и worker.
 
 ## Сборка и проверки
 
-Нужны Go 1.23+, Python 3 и Android NDK с `aarch64-linux-android30-clang`; Node нужен только для тестов. Каталоги SDK/NDK можно передать через `ANDROID_SDK_ROOT` и `ANDROID_NDK_HOME`.
-
-Из корня репозитория:
+Нужны Python 3.12+, Go 1.23+, JDK 21, host C++20 compiler, Rust из
+`Installer/rust-toolchain.toml`, Android SDK/NDK/CMake из
+`native/dependencies.lock.json` и закреплённый Gson из локального Gradle cache.
+`ANDROID_SDK_ROOT` и `JAVA_HOME` переопределяют пути среды.
 
 ```sh
 sh Packaging/new/check.sh
 sh Packaging/new/build.sh
 ```
 
-Результат: `build/runtime/` с Android ARM64 PIE loader, Frida 16.2.1, агентами и конфигурацией; `build/system/` с init/wrapper/stop; `build/install-layout.json` со схемой размещения. Runtime самодостаточен. Официальные ARM64 и ARM32 Frida читаются из `tools/`; оба бинарника проверяются по закреплённым SHA-256. Хеши готовых runtime-файлов записаны в `build/runtime/runtime-manifest.json`.
+`check.sh` выполняет обязательные 450 JSON-контрактов через production Java/Go/native/
+Rust компоненты, тесты registry/модулей и общие установочные проверки.
+OEM/ptrace/JNI boundary в host-тестах может быть подменён; исполнение на Android
+проверяется отдельно. `build.sh` повторяет обязательный gate перед DEX и создаёт
+`build/runtime/` и `build/system/`. Общий план установки скомпилирован в `release-core`.
+Он не собирает APK, Payload или Installer и ничего не устанавливает.
 
-`check.sh` выполняет проверки нового Go-модуля, все `tests/*.test.js` напрямую на исходниках `new`, а также общие поведенческие проверки ACC preferences, остановки старого загрузчика и Apollo из `Packaging/tests/`. Проверяются ACC, reset, Power Hold, Apollo, dock, RDS, окна после сна, CarPlay, navigation-source, cluster units, выбор адаптеров, rollback и lifecycle загрузчика. OEM/Frida окружение моделируется; исполнение на автомобиле этими тестами не подтверждается.
+В runtime входят `voyahtune-loader`, ARM64 `voyahtune-inject`/`libvoyahtune-agent.so`,
+ARM32 `voyahtune-inject-arm`/`libvoyahtune-agent-arm.so`,
+`agents.dex`, `stop-loader.sh` и JSON-настройки.
+Сборщик встраивает SHA-256 зависимых компонентов и поколения native/Java в загрузчик через Go overlay; внешних манифестов нет. Обновление только
+supervisor не меняет Java generation. Исполняемые файлы имеют режим 755, данные — 644.
 
-Сборщик общего релиза запускает `check.sh` до сборки payload вместе с существующими проверками общих Android-контрактов.
+## Установка, обновление и удаление
 
-## Контракт установки и диагностика
+USB и OTA используют единый recipe и порядок обслуживания: блокировка admission,
+quiesce/drain, остановка сервиса, замена компонентов, очистка точных старых путей,
+перезагрузка и postboot-проверка. Если supervisor погиб, установленный loader
+может завершить resident по durable journal через offline quiesce. Ошибка или
+неподтверждённое завершение запрещают замену файлов. Текущий boot marker не даёт
+подключать новую реализацию к процессам со старыми агентами до reboot.
 
-Native/RestoreMode используют общую Java-базу с `driveHookV2` и восстановлением через ACC. APK metadata, manifest и root-служба имеют единственное значение `infrastructure: unified`; классов и переключателей PI/OD нет. OEM-различия определяются по модели и доступным API. Подробности — в [контракте payload](../../Docs/installer-payload.md).
+Первое обновление root-службы выполняется через USB с Installer 1.8.5; требуется
+его пересборка из-за нового порядка установки и встроенных helpers. Последующие
+совместимые OTA сохраняют собственные стабильные компоненты службы. Допуск OTA
+определяет `minimumOtaVersion`: при выпуске первого совместимого релиза минимум
+равен базовой версии этого VoyahTune payload. [Процесс выпуска](../../Docs/releasing.md).
 
-Boot-ресурсы используют существующий сервис `voyahtune_load`. `build.sh` создаёт `build/release-inputs.json`; общий сборщик включает его в единый USB/OTA payload без инфраструктурного суффикса. Штатные исполнители recipe заменяют runtime и удаляют прежние loader, Frida и хуки по точным путям из `config/retired-files.txt` и общего spec. Смена eternalized-хуков требует перезагрузки Android.
+Удаление quiesces native runtime до остановки, очищает компоненты и журналы,
+выполняет reboot и завершает очистку собственных настроек. Имена прежней Frida
+остаются только для распознавания старых установок и их очистки/восстановления.
+`Utils/frida` сохранён как отдельный инструмент ручной диагностики и не включён
+в сборку, runtime, payload или автоматическое восстановление. APK Native/RestoreMode
+не резервируются.
 
-В общем архиве есть RunYN с условием `except-h97xy`: USB и OTA пропускают его на H97X/H97Y, устанавливают на остальных моделях. Проверяется несколько свойств, поскольку `frombrand=H97C` может встречаться на H97X. Текущий пакет требует Installer 1.8.2 со встроенным патчем навигационных шрифтов и root-службу с `unified-runtime-v1`; дальнейшие совместимые OTA сохраняют бинарник службы. [Состав, минимумы и команды выпуска](../../Docs/installer-payload.md).
-
-Сам `build.sh` не собирает APK, payload или GUI и ничего не устанавливает. Полный релиз должен содержать APK с подписанными хешами именно этого runtime/recipe; старые APK без пересборки не дают проверенного payload.
-
-На Android после размещения runtime:
+## Диагностика
 
 ```sh
 /data/local/bin/voyahtune-new/voyahtune-loader --check
 /data/local/bin/voyahtune-new/voyahtune-loader --health
 /data/local/bin/voyahtune-new/voyahtune-loader --check-hooks
-/data/local/bin/voyahtune-new/stop-loader.sh
+/data/local/bin/voyahtune-new/voyahtune-loader --control-status
+/data/local/bin/voyahtune-new/voyahtune-loader --quiesce --control-timeout 60s
 ```
 
-`--check` проверяет манифест и наличие ресурсов без инъекций. `--health` проверяет свежесть heartbeat и личность процесса загрузчика. Частные статусы, причины ошибок и логи находятся в `/data/local/tmp/voyahtune-new/`; Native получает прежний `publishHookStatusV1`. Отдельные health/status OEM-агентов находятся в `/data/local/open_voyah/new/`. Остановка сервиса прекращает supervisor и его дочерние процессы; eternalized-хуки остаются до завершения целевого процесса.
+`--check` валидирует компоненты без инъекций; `--check-hooks` дополнительно
+проверяет живые identity и полные ACK. Состояние находится в
+`/data/local/tmp/voyahtune-new/`; Native получает совместимый `publishHookStatusV1`.
+Остановка сервиса сама по себе не подтверждает выгрузку resident: сначала нужен
+успешный quiesce. `stop-loader.sh` соблюдает этот порядок.
+После quiesce тот же resident требует перезапуска процесса, даже если поколение
+кода не изменилось. Ошибки Java содержат ограниченную цепочку причин; полный стек
+пишется в logcat с тегом `VoyahTuneAgent`.
 
-`--check-hooks` дополнительно проверяет записи всех агентов из manifest и опубликованных динамических агентов. Для запущенного целевого процесса нужны active и совпадающие PID/startTicks. Waiting допустим только без процесса, disabled — у условного или динамического агента. USB и OTA используют эту проверку после перезагрузки; failed, unsupported и restart-required не подтверждают установку.
-
-Известное ограничение: остановка между ready и завершением Frida может сохранить преждевременный active, который переживает restart. Проверка статусов не доказывает успешную инъекцию в этом случае; исправление lifecycle отложено.
-
-Перед использованием на машине остаются проверки на конкретных OEM-прошивках: холодный старт, ACC OFF/ON и сон, явный выбор режимов, Power Hold, оба экрана и NAVI_FULL/RunYN. Локальные декомпиляции H97C и VehicleSettings PI Rest 2023 rc7.2 подтверждают исследованные точки расширения, но не доказывают совместимость всех версий OEM-пакетов.
-
-## Локальный комплект VoyEmu
-
-`sh Packaging/new/build-voyemu.sh` собирает runtime и общие Native/RestoreMode с контрактом `acc-hooks`/`driveHookV2` и хешами нового runtime. Нужны JDK 21, Android SDK/NDK, локальный Gradle cache и ранее собранный release APK RunYN. Результат находится в `build/voyemu/`; `build-manifest.json` содержит хеши комплекта. Скрипт не устанавливает и не публикует его.
-
-Только staged init для VoyEmu сохраняет SELinux Enforcing и отключает ART JIT: политика Android 11 запрещает Frida изменять исполняемый JIT-cache system_server. Автомобильный init этим не меняется. Общий bootstrap использует cache приложения для DEX, а supervisor сериализует Frida-инъекции и управляет Frida напрямую: завершает группу при ошибке/таймауте и задаёт Android parent-death signal. Health-файлы получают права и SELinux-метку целевого приложения. Готовность eternalized-агента требует ready-маркеров и успешного выхода Frida.
-
-CAN-заглушка VoyEmu не содержит OEM H97C; отсутствие ACC-адаптера здесь означает непроверенное восстановление режимов. Отсутствующие QGIME, BluetoothPhone, cluster, RDS и навигаторы также требуют отдельной проверки на системе с соответствующими APK.
+Проверки на VoyEmu A11 подтверждают ARM64 attach/recovery/cancellation и отдельные
+UI/OEM ABI, но не выполнение CAN-команд и всех функций на автомобиле. Производственный
+init сохраняет существующую SELinux-политику проекта; Enforcing на стенде с su-доменом
+не доказывает совместимость политики автомобиля. VoyEmu staging не отключает JIT.

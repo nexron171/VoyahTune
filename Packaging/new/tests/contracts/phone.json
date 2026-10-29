@@ -1,0 +1,2445 @@
+{
+  "schema": 1,
+  "cases": [
+    {
+      "id": "phone.number-00",
+      "contract": "phone.number",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "number": null
+      },
+      "expected": {
+        "number": "",
+        "idempotent": true
+      }
+    },
+    {
+      "id": "phone.number-01",
+      "contract": "phone.number",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "number": ""
+      },
+      "expected": {
+        "number": "",
+        "idempotent": true
+      }
+    },
+    {
+      "id": "phone.number-02",
+      "contract": "phone.number",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "number": " \t\n"
+      },
+      "expected": {
+        "number": "",
+        "idempotent": true
+      }
+    },
+    {
+      "id": "phone.number-03",
+      "contract": "phone.number",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "number": "+7 (999) 123-45-67"
+      },
+      "expected": {
+        "number": "+79991234567",
+        "idempotent": true
+      }
+    },
+    {
+      "id": "phone.number-04",
+      "contract": "phone.number",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "number": "7 (999) 123-45-67"
+      },
+      "expected": {
+        "number": "+79991234567",
+        "idempotent": true
+      }
+    },
+    {
+      "id": "phone.number-05",
+      "contract": "phone.number",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "number": "+375 (29) 123-45-67"
+      },
+      "expected": {
+        "number": "+375291234567",
+        "idempotent": true
+      }
+    },
+    {
+      "id": "phone.number-06",
+      "contract": "phone.number",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "number": "375 (29) 123-45-67"
+      },
+      "expected": {
+        "number": "+375291234567",
+        "idempotent": true
+      }
+    },
+    {
+      "id": "phone.number-07",
+      "contract": "phone.number",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "number": "+375 (17) 123-45-67"
+      },
+      "expected": {
+        "number": "+375171234567",
+        "idempotent": true
+      }
+    },
+    {
+      "id": "phone.number-08",
+      "contract": "phone.number",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "number": "375 (17) 123-45-67"
+      },
+      "expected": {
+        "number": "+375171234567",
+        "idempotent": true
+      }
+    },
+    {
+      "id": "phone.number-09",
+      "contract": "phone.number",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "number": "8 (999) 123-45-67"
+      },
+      "expected": {
+        "number": "89991234567",
+        "idempotent": true
+      }
+    },
+    {
+      "id": "phone.number-10",
+      "contract": "phone.number",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "number": "8 (029) 123-45-67"
+      },
+      "expected": {
+        "number": "80291234567",
+        "idempotent": true
+      }
+    },
+    {
+      "id": "phone.number-11",
+      "contract": "phone.number",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "number": "+36 (52) 123-456"
+      },
+      "expected": {
+        "number": "+3652123456",
+        "idempotent": true
+      }
+    },
+    {
+      "id": "phone.number-12",
+      "contract": "phone.number",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "number": "+86 138-1234-5678"
+      },
+      "expected": {
+        "number": "+8613812345678",
+        "idempotent": true
+      }
+    },
+    {
+      "id": "phone.number-13",
+      "contract": "phone.number",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "number": "8613812345678"
+      },
+      "expected": {
+        "number": "8613812345678",
+        "idempotent": true
+      }
+    },
+    {
+      "id": "phone.number-14",
+      "contract": "phone.number",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "number": "+44 20 1234 5678"
+      },
+      "expected": {
+        "number": "+442012345678",
+        "idempotent": true
+      }
+    },
+    {
+      "id": "phone.number-15",
+      "contract": "phone.number",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "number": "112"
+      },
+      "expected": {
+        "number": "112",
+        "idempotent": true
+      }
+    },
+    {
+      "id": "phone.number-16",
+      "contract": "phone.number",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "number": "103"
+      },
+      "expected": {
+        "number": "103",
+        "idempotent": true
+      }
+    },
+    {
+      "id": "phone.number-17",
+      "contract": "phone.number",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "number": "375"
+      },
+      "expected": {
+        "number": "375",
+        "idempotent": true
+      }
+    },
+    {
+      "id": "phone.number-18",
+      "contract": "phone.number",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "number": "7999123456"
+      },
+      "expected": {
+        "number": "7999123456",
+        "idempotent": true
+      }
+    },
+    {
+      "id": "phone.number-19",
+      "contract": "phone.number",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "number": "799912345678"
+      },
+      "expected": {
+        "number": "799912345678",
+        "idempotent": true
+      }
+    },
+    {
+      "id": "phone.number-20",
+      "contract": "phone.number",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "number": "37529123456"
+      },
+      "expected": {
+        "number": "37529123456",
+        "idempotent": true
+      }
+    },
+    {
+      "id": "phone.number-21",
+      "contract": "phone.number",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "number": "3752912345678"
+      },
+      "expected": {
+        "number": "3752912345678",
+        "idempotent": true
+      }
+    },
+    {
+      "id": "phone.number-22",
+      "contract": "phone.number",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "number": "*100#"
+      },
+      "expected": {
+        "number": "*100#",
+        "idempotent": true
+      }
+    },
+    {
+      "id": "phone.number-23",
+      "contract": "phone.number",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "number": "*#06#"
+      },
+      "expected": {
+        "number": "*#06#",
+        "idempotent": true
+      }
+    },
+    {
+      "id": "phone.number-24",
+      "contract": "phone.number",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "number": "*21*79991234567#"
+      },
+      "expected": {
+        "number": "*21*79991234567#",
+        "idempotent": true
+      }
+    },
+    {
+      "id": "phone.number-25",
+      "contract": "phone.number",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "number": "375291234567#"
+      },
+      "expected": {
+        "number": "375291234567#",
+        "idempotent": true
+      }
+    },
+    {
+      "id": "phone.number-26",
+      "contract": "phone.number",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "number": "79991234567,123"
+      },
+      "expected": {
+        "number": "+79991234567,123",
+        "idempotent": true
+      }
+    },
+    {
+      "id": "phone.number-27",
+      "contract": "phone.number",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "number": "375291234567;123#"
+      },
+      "expected": {
+        "number": "+375291234567;123#",
+        "idempotent": true
+      }
+    },
+    {
+      "id": "phone.number-28",
+      "contract": "phone.number",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "number": "79991234567p12w34"
+      },
+      "expected": {
+        "number": "+79991234567p12w34",
+        "idempotent": true
+      }
+    },
+    {
+      "id": "phone.number-29",
+      "contract": "phone.number",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "number": "375291234567P12W34"
+      },
+      "expected": {
+        "number": "+375291234567P12W34",
+        "idempotent": true
+      }
+    },
+    {
+      "id": "phone.number-30",
+      "contract": "phone.number",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "number": "+375291234567,12;34"
+      },
+      "expected": {
+        "number": "+375291234567,12;34",
+        "idempotent": true
+      }
+    },
+    {
+      "id": "phone.number-31",
+      "contract": "phone.number",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "number": "89991234567,123"
+      },
+      "expected": {
+        "number": "89991234567,123",
+        "idempotent": true
+      }
+    },
+    {
+      "id": "phone.number-32",
+      "contract": "phone.number",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "number": "79991234567ext123"
+      },
+      "expected": {
+        "number": "79991234567ext123",
+        "idempotent": true
+      }
+    },
+    {
+      "id": "phone.number-33",
+      "contract": "phone.number",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "number": "00375291234567"
+      },
+      "expected": {
+        "number": "00375291234567",
+        "idempotent": true
+      }
+    },
+    {
+      "id": "phone.original-failure",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "single",
+        "number": "79991234567",
+        "originalError": "OEM call failed"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "+79991234567",
+            "device": null
+          }
+        ],
+        "error": "OEM call failed",
+        "sameException": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.missing-amend",
+      "contract": "agent.installation",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "module": "phone",
+        "failure": "missing-amend"
+      },
+      "expected": {
+        "state": "failed",
+        "ready": false,
+        "remainingHooks": 0
+      }
+    },
+    {
+      "id": "phone.missing-dial-class",
+      "contract": "agent.installation",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "module": "phone",
+        "failure": "missing-dial-class"
+      },
+      "expected": {
+        "state": "failed",
+        "ready": false,
+        "remainingHooks": 0
+      }
+    },
+    {
+      "id": "phone.no-dial-overload",
+      "contract": "agent.installation",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "module": "phone",
+        "failure": "no-dial-overload"
+      },
+      "expected": {
+        "state": "failed",
+        "ready": false,
+        "remainingHooks": 0
+      }
+    },
+    {
+      "id": "phone.install-single",
+      "contract": "agent.installation",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "module": "phone",
+        "failure": "install-single"
+      },
+      "expected": {
+        "state": "failed",
+        "ready": false,
+        "remainingHooks": 0
+      }
+    },
+    {
+      "id": "phone.install-device",
+      "contract": "agent.installation",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "module": "phone",
+        "failure": "install-device"
+      },
+      "expected": {
+        "state": "failed",
+        "ready": false,
+        "remainingHooks": 0
+      }
+    },
+    {
+      "id": "phone.unicode-space",
+      "contract": "phone.number",
+      "agents": [
+        "phone"
+      ],
+      "reference": "../agents/phone-numbers.js",
+      "input": {
+        "number": "7 999 1234567"
+      },
+      "expected": {
+        "number": "+79991234567",
+        "idempotent": true
+      }
+    },
+    {
+      "id": "phone.byte-order-mark",
+      "contract": "phone.number",
+      "agents": [
+        "phone"
+      ],
+      "reference": "../agents/phone-numbers.js",
+      "input": {
+        "number": "﻿79991234567"
+      },
+      "expected": {
+        "number": "+79991234567",
+        "idempotent": true
+      }
+    },
+    {
+      "id": "phone.non-separator",
+      "contract": "phone.number",
+      "agents": [
+        "phone"
+      ],
+      "reference": "../agents/phone-numbers.js",
+      "input": {
+        "number": "79991234567"
+      },
+      "expected": {
+        "number": "79991234567",
+        "idempotent": true
+      }
+    },
+    {
+      "id": "phone.number-00.single",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "single",
+        "number": null,
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "",
+            "device": null
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-00.device",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "device",
+        "number": null,
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "",
+            "device": "device-A"
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-01.single",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "single",
+        "number": "",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "",
+            "device": null
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-01.device",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "device",
+        "number": "",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "",
+            "device": "device-A"
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-02.single",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "single",
+        "number": " \t\n",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "",
+            "device": null
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-02.device",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "device",
+        "number": " \t\n",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "",
+            "device": "device-A"
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-03.single",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "single",
+        "number": "+7 (999) 123-45-67",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "+79991234567",
+            "device": null
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-03.device",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "device",
+        "number": "+7 (999) 123-45-67",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "+79991234567",
+            "device": "device-A"
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-04.single",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "single",
+        "number": "7 (999) 123-45-67",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "+79991234567",
+            "device": null
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-04.device",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "device",
+        "number": "7 (999) 123-45-67",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "+79991234567",
+            "device": "device-A"
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-05.single",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "single",
+        "number": "+375 (29) 123-45-67",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "+375291234567",
+            "device": null
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-05.device",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "device",
+        "number": "+375 (29) 123-45-67",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "+375291234567",
+            "device": "device-A"
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-06.single",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "single",
+        "number": "375 (29) 123-45-67",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "+375291234567",
+            "device": null
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-06.device",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "device",
+        "number": "375 (29) 123-45-67",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "+375291234567",
+            "device": "device-A"
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-07.single",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "single",
+        "number": "+375 (17) 123-45-67",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "+375171234567",
+            "device": null
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-07.device",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "device",
+        "number": "+375 (17) 123-45-67",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "+375171234567",
+            "device": "device-A"
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-08.single",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "single",
+        "number": "375 (17) 123-45-67",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "+375171234567",
+            "device": null
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-08.device",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "device",
+        "number": "375 (17) 123-45-67",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "+375171234567",
+            "device": "device-A"
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-09.single",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "single",
+        "number": "8 (999) 123-45-67",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "89991234567",
+            "device": null
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-09.device",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "device",
+        "number": "8 (999) 123-45-67",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "89991234567",
+            "device": "device-A"
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-10.single",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "single",
+        "number": "8 (029) 123-45-67",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "80291234567",
+            "device": null
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-10.device",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "device",
+        "number": "8 (029) 123-45-67",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "80291234567",
+            "device": "device-A"
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-11.single",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "single",
+        "number": "+36 (52) 123-456",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "+3652123456",
+            "device": null
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-11.device",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "device",
+        "number": "+36 (52) 123-456",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "+3652123456",
+            "device": "device-A"
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-12.single",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "single",
+        "number": "+86 138-1234-5678",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "+8613812345678",
+            "device": null
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-12.device",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "device",
+        "number": "+86 138-1234-5678",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "+8613812345678",
+            "device": "device-A"
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-13.single",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "single",
+        "number": "8613812345678",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "8613812345678",
+            "device": null
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-13.device",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "device",
+        "number": "8613812345678",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "8613812345678",
+            "device": "device-A"
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-14.single",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "single",
+        "number": "+44 20 1234 5678",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "+442012345678",
+            "device": null
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-14.device",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "device",
+        "number": "+44 20 1234 5678",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "+442012345678",
+            "device": "device-A"
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-15.single",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "single",
+        "number": "112",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "112",
+            "device": null
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-15.device",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "device",
+        "number": "112",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "112",
+            "device": "device-A"
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-16.single",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "single",
+        "number": "103",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "103",
+            "device": null
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-16.device",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "device",
+        "number": "103",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "103",
+            "device": "device-A"
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-17.single",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "single",
+        "number": "375",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "375",
+            "device": null
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-17.device",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "device",
+        "number": "375",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "375",
+            "device": "device-A"
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-18.single",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "single",
+        "number": "7999123456",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "7999123456",
+            "device": null
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-18.device",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "device",
+        "number": "7999123456",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "7999123456",
+            "device": "device-A"
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-19.single",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "single",
+        "number": "799912345678",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "799912345678",
+            "device": null
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-19.device",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "device",
+        "number": "799912345678",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "799912345678",
+            "device": "device-A"
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-20.single",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "single",
+        "number": "37529123456",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "37529123456",
+            "device": null
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-20.device",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "device",
+        "number": "37529123456",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "37529123456",
+            "device": "device-A"
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-21.single",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "single",
+        "number": "3752912345678",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "3752912345678",
+            "device": null
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-21.device",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "device",
+        "number": "3752912345678",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "3752912345678",
+            "device": "device-A"
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-22.single",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "single",
+        "number": "*100#",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "*100#",
+            "device": null
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-22.device",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "device",
+        "number": "*100#",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "*100#",
+            "device": "device-A"
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-23.single",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "single",
+        "number": "*#06#",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "*#06#",
+            "device": null
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-23.device",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "device",
+        "number": "*#06#",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "*#06#",
+            "device": "device-A"
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-24.single",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "single",
+        "number": "*21*79991234567#",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "*21*79991234567#",
+            "device": null
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-24.device",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "device",
+        "number": "*21*79991234567#",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "*21*79991234567#",
+            "device": "device-A"
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-25.single",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "single",
+        "number": "375291234567#",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "375291234567#",
+            "device": null
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-25.device",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "device",
+        "number": "375291234567#",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "375291234567#",
+            "device": "device-A"
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-26.single",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "single",
+        "number": "79991234567,123",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "+79991234567,123",
+            "device": null
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-26.device",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "device",
+        "number": "79991234567,123",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "+79991234567,123",
+            "device": "device-A"
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-27.single",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "single",
+        "number": "375291234567;123#",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "+375291234567;123#",
+            "device": null
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-27.device",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "device",
+        "number": "375291234567;123#",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "+375291234567;123#",
+            "device": "device-A"
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-28.single",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "single",
+        "number": "79991234567p12w34",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "+79991234567p12w34",
+            "device": null
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-28.device",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "device",
+        "number": "79991234567p12w34",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "+79991234567p12w34",
+            "device": "device-A"
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-29.single",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "single",
+        "number": "375291234567P12W34",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "+375291234567P12W34",
+            "device": null
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-29.device",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "device",
+        "number": "375291234567P12W34",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "+375291234567P12W34",
+            "device": "device-A"
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-30.single",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "single",
+        "number": "+375291234567,12;34",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "+375291234567,12;34",
+            "device": null
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-30.device",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "device",
+        "number": "+375291234567,12;34",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "+375291234567,12;34",
+            "device": "device-A"
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-31.single",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "single",
+        "number": "89991234567,123",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "89991234567,123",
+            "device": null
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-31.device",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "device",
+        "number": "89991234567,123",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "89991234567,123",
+            "device": "device-A"
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-32.single",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "single",
+        "number": "79991234567ext123",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "79991234567ext123",
+            "device": null
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-32.device",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "device",
+        "number": "79991234567ext123",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "79991234567ext123",
+            "device": "device-A"
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-33.single",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "single",
+        "number": "00375291234567",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "00375291234567",
+            "device": null
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.number-33.device",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "device",
+        "number": "00375291234567",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "00375291234567",
+            "device": "device-A"
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.unicode-space.single",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "single",
+        "number": "7 999 1234567",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "+79991234567",
+            "device": null
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.unicode-space.device",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "device",
+        "number": "7 999 1234567",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "+79991234567",
+            "device": "device-A"
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.byte-order-mark.single",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "single",
+        "number": "﻿79991234567",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "+79991234567",
+            "device": null
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.byte-order-mark.device",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "device",
+        "number": "﻿79991234567",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "+79991234567",
+            "device": "device-A"
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.non-separator.single",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "single",
+        "number": "79991234567",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "79991234567",
+            "device": null
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    },
+    {
+      "id": "phone.non-separator.device",
+      "contract": "phone.dial",
+      "agents": [
+        "phone"
+      ],
+      "reference": "phone-numbers.test.js",
+      "input": {
+        "overload": "device",
+        "number": "79991234567",
+        "device": "device-A"
+      },
+      "expected": {
+        "calls": [
+          {
+            "number": "79991234567",
+            "device": "device-A"
+          }
+        ],
+        "result": "oem-result",
+        "receiverPreserved": true,
+        "loggedSensitive": false
+      }
+    }
+  ]
+}

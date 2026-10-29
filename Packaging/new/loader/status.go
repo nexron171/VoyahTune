@@ -10,10 +10,17 @@ import (
 )
 
 type agentStatus struct {
-	Identity processIdentity `json:"identity"`
-	Target   string          `json:"target"`
-	State    string          `json:"state"`
-	Reason   string          `json:"reason,omitempty"`
+	UpdatedUptime int64           `json:"updatedUptime"`
+	Architecture  string          `json:"architecture,omitempty"`
+	Identity      processIdentity `json:"identity"`
+	Target        string          `json:"target"`
+	State         string          `json:"state"`
+	Reason        string          `json:"reason,omitempty"`
+	UID           uint32          `json:"uid,omitempty"`
+	NativeID      string          `json:"nativeId,omitempty"`
+	RuntimeID     string          `json:"runtimeId,omitempty"`
+	Revision      int64           `json:"revision,omitempty"`
+	Modules       []string        `json:"modules,omitempty"`
 }
 
 type loaderStatus struct {
@@ -28,12 +35,6 @@ type loaderStatus struct {
 type statusStore struct {
 	mutex  sync.Mutex
 	agents map[string]agentStatus
-}
-
-func (store *statusStore) set(agent agentConfig, identity processIdentity, state, reason string) {
-	store.mutex.Lock()
-	defer store.mutex.Unlock()
-	store.agents[agent.ID] = agentStatus{identity, agent.Target, state, reason}
 }
 
 func (store *statusStore) snapshot(procRoot string) map[string]agentStatus {
@@ -56,18 +57,29 @@ func (store *statusStore) snapshot(procRoot string) map[string]agentStatus {
 
 func publicStatus(snapshot loaderStatus) string {
 	pid := snapshot.Loader.PID
-	if snapshot.State == "stopped" {
+	state := snapshot.State
+	if state != "running" {
+		state = "stopped"
 		pid = 0
 	}
-	payload := fmt.Sprintf("v=1;loader=%s;pid=%d", snapshot.State, pid)
+	payload := fmt.Sprintf("v=1;loader=%s;pid=%d", state, pid)
 	for _, mapping := range [][2]string{{"vd-bypass", "windows"}, {"steering-wheel", "steering"}, {"launcher-dock", "launcher"}, {"multi-display", "multidisplay"}, {"apollo-tech", "apollo"}, {"keyboard-en", "keyboard-en"}, {"keyboard-ru", "keyboard-ru"}} {
 		status, present := snapshot.Agents[mapping[1]]
 		if !present {
 			status.State = "waiting"
 		}
-		switch status.State {
-		case "unsupported", "restart-required":
-			status.State = "failed"
+		if snapshot.State == "quiesced" {
+			status.State = "disabled"
+		} else if snapshot.State != "running" {
+			status.State = "unknown"
+		} else {
+			switch status.State {
+			case "active", "waiting", "injecting", "failed", "disabled":
+			case "unsupported", "restart-required":
+				status.State = "failed"
+			default:
+				status.State = "unknown"
+			}
 		}
 		payload += fmt.Sprintf(";%s=%s:%d", mapping[0], status.State, status.Identity.PID)
 	}
@@ -141,38 +153,7 @@ func healthyStatus(statusPath, procRoot string) (loaderStatus, error) {
 	return snapshot, nil
 }
 
-func checkHooks(statusPath, procRoot string, config loaderConfig) error {
-	snapshot, err := healthyStatus(statusPath, procRoot)
-	if err != nil {
-		return err
-	}
-	configured := make(map[string]bool, len(config.Agents))
-	for _, agent := range config.Agents {
-		configured[agent.ID] = true
-		status, present := snapshot.Agents[agent.ID]
-		if !present || status.Target != agent.Target {
-			return fmt.Errorf("hook %s: missing or mismatched target status", agent.ID)
-		}
-		if err := checkAgentStatus(procRoot, agent, status); err != nil {
-			return err
-		}
-	}
-	for id, status := range snapshot.Agents {
-		if configured[id] {
-			continue
-		}
-		if id != "client."+status.Target || !safeName(status.Target) {
-			return fmt.Errorf("hook %s: unrecognized agent", id)
-		}
-		agent := agentConfig{ID: id, Target: status.Target, Dynamic: true}
-		if err := checkAgentStatus(procRoot, agent, status); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func checkAgentStatus(procRoot string, agent agentConfig, status agentStatus) error {
+func checkAgentStatus(procRoot string, agent nativeAgentConfig, status agentStatus) error {
 	identity, err := findProcess(procRoot, agent.Target)
 	if err != nil {
 		return fmt.Errorf("hook %s: %w", agent.ID, err)

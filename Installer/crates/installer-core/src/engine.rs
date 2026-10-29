@@ -20,11 +20,13 @@ use crate::{
     payload::{self, Payload, NATIVE, NATIVE_PATH, RESTORE},
     plans::{self, Action, Dns, Request},
     recovery::{self, Operation, DEVICE_STATE},
-    Error, Result,
+    vehicle_options, Error, Result,
+};
+use release_core::runtime_maintenance::{
+    Operation as RuntimeOperation, RuntimeMaintenance, Step as RuntimeStep,
 };
 use serde_json::json;
 use std::{
-    collections::BTreeSet,
     fs,
     path::{Path, PathBuf},
     sync::{
@@ -102,9 +104,9 @@ pub struct Engine {
     pub restore_cunba: bool,
     pub canbus_consent: Option<Arc<RemovalConsent>>,
     restart_loader: bool,
+    runtime_maintenance: Option<RuntimeMaintenance>,
     legacy_migrated: bool,
     ota_locked: bool,
-    installed_runtime_hashes: BTreeSet<(String, String)>,
 }
 impl Engine {
     pub fn new(
@@ -130,9 +132,9 @@ impl Engine {
             canbus_consent: None,
             restore_cunba: false,
             restart_loader: false,
+            runtime_maintenance: None,
             legacy_migrated: false,
             ota_locked: false,
-            installed_runtime_hashes: BTreeSet::new(),
         })
     }
     pub fn run(&mut self, request: Request) -> Result<()> {
@@ -174,8 +176,7 @@ impl Engine {
         report["cunbaRestorationRequested"] = json!(self.restore_cunba);
         report["releaseVersion"] = json!(self.payload.manifest.release_version);
         report["installerVersion"] = json!(crate::compatibility::INSTALLER_VERSION);
-        report["manifestSha256"] =
-            json!(payload::sha256(&self.payload.root.join("manifest.json"))?);
+        report["payloadSha256"] = json!(self.payload.identity()?);
         report["payloadManifest"] = json!(self.payload.manifest);
         if let Ok(bytes) = fs::read(self.operation.dir.join("mode.json")) {
             report["mode"] = serde_json::from_slice(&bytes)?;
@@ -311,6 +312,7 @@ impl Engine {
         Ok(())
     }
     fn execute(&mut self, r: Request) -> Result<()> {
+        r.options.validate(r.action, true)?;
         if self.restore_cunba && r.action != Action::Remove {
             return Err(Error::new(
                 "CUNBA_RESTORE_UNAVAILABLE",
@@ -340,6 +342,9 @@ impl Engine {
                 if r.action == Action::Install {
                     e.package_model()?;
                 }
+                if r.options.any() {
+                    r.options.validate(r.action, vehicle_options::available(&e.adb)?)?;
+                }
                 if e.restore_cunba && !crate::cunba_recovery::restoration_available(&e.adb)? {
                     return Err(Error::new("CUNBA_RESTORE_UNAVAILABLE", "Резервные данные Cunba недоступны. Повторите проверку или удалите VoyahTune без восстановления Cunba."));
                 }
@@ -360,10 +365,16 @@ impl Engine {
         self.step(
             "system",
             "Подготовка системного раздела",
-            |e| e.writable(r.action == Action::Remove),
+            |e| {
+                e.writable(r.action == Action::Remove)?;
+                e.ota_lock()?;
+                e.ignore("setprop ctl.stop voyahtune_updater 2>/dev/null || true\n");
+                if r.options.disable_chinese_navigation {
+                    vehicle_options::disable_chinese_navigation(&e.adb)?;
+                }
+                Ok(())
+            },
         )?;
-        self.ota_lock()?; // remount may have rebooted; retain this desktop operation across boot.
-        self.ignore("setprop ctl.stop voyahtune_updater 2>/dev/null || true\n");
         if r.action == Action::Install {
             {
                 self.step(
@@ -389,15 +400,15 @@ impl Engine {
 
             self.step("backup", "Сохранение файлов перед заменой", |e| e.backup())?;
 
+            self.step("runtime", "Остановка старых hooks", |e| {
+                e.freeze()
+            })?;
+
             self.step(
                 "signing-reset",
                 "Переустановка при смене подписи",
                 |e| e.signing_reset(r.action),
             )?;
-
-            self.step("runtime", "Остановка старых hooks", |e| {
-                e.freeze()
-            })?;
 
             self.step(
                 "apollo-migration",
@@ -438,6 +449,13 @@ impl Engine {
                     |e| e.packages(),
                 )?;
             }
+            if r.options.fake_account {
+                self.step(
+                    "fake-account",
+                    "Активация Fake аккаунта",
+                    |e| vehicle_options::activate_fake_account(&e.adb),
+                )?;
+            }
             self.optional_step(
                 "navigation-fonts",
                 "Шрифты навигации приборки",
@@ -449,7 +467,7 @@ impl Engine {
                 |e| {
                     e.shell("am force-stop ru.big.town.anative && am force-stop ru.big.town.restoremode\n")?;
                     e.ota_unlock()?;
-                    e.raw(&["reboot"])?.checked("ADB не принял перезагрузку")?;
+                    e.maintenance_step(RuntimeStep::Reboot, |engine| engine.raw(&["reboot"])?.checked("ADB не принял перезагрузку").map(|_| ()))?;
                     e.restart_loader = false;
                     Ok(())
                 },
@@ -458,7 +476,9 @@ impl Engine {
                 "verify",
                 "Проверка Native и готовности OTA",
                 |e| {
-                    return e.verify_installation();
+                    return e.maintenance_step(RuntimeStep::Check, |engine| {
+                        engine.verify_installation()
+                    });
                 },
             )?;
         } else {
@@ -510,7 +530,12 @@ impl Engine {
                 "Перезагрузка автомобиля",
                 |e| {
                     e.ota_unlock()?;
-                    e.raw(&["reboot"])?.checked("ADB не принял перезагрузку")?;
+                    e.maintenance_step(RuntimeStep::Reboot, |engine| {
+                        engine
+                            .raw(&["reboot"])?
+                            .checked("ADB не принял перезагрузку")
+                            .map(|_| ())
+                    })?;
                     Ok(())
                 },
             )?;
@@ -809,69 +834,33 @@ fi
         self.operation.dir.parent().unwrap().join("backup")
     }
     fn backup(&mut self) -> Result<()> {
-        self.installed_runtime_hashes = inventory::signed_runtime_hashes(&self.adb);
-        let dir = self.backup_dir();
-        let made = fs::create_dir_all(&dir);
-
-        made?;
-
-        let mut paths = vec![(
-            payload::WHITELIST.to_owned(),
-            "privapp-permissions-ru.big.town.anative.xml".to_owned(),
-        )];
-
-        let mut runtime_backup = vec![];
-        for name in [
-            "loaderFrida",
-            "injects.json",
-            "clusternavi.js",
-            "phone-num.js",
-            "load.bin",
-            "steeringwheelkeys.js",
-            "launcherdock.js",
-            "multidisplay.js",
-            "vd_bypass.js",
-            "frida-inject",
-        ] {
-            runtime_backup.push((format!("/data/local/bin/{name}"), name.into()));
+        let directory = self.backup_dir();
+        fs::create_dir_all(&directory)?;
+        let name = "privapp-permissions-ru.big.town.anative.xml";
+        let destination = directory.join(name);
+        if destination.exists() {
+            if destination.is_file() && destination.metadata()?.len() > 0 {
+                return Ok(());
+            }
+            return Err(self.fail(
+                "Существующий backup пуст или не является файлом",
+                destination.display(),
+            ));
         }
-        runtime_backup.extend(paths);
-        paths = runtime_backup;
-
-        for (remote, name) in paths {
-            let dst = dir.join(&name);
-
-            if dst.exists() {
-                if dst.is_file() && dst.metadata()?.len() > 0 {
-                    continue;
-                }
-                return Err(self.fail(
-                    "Существующий backup пуст или не является файлом",
-                    dst.display(),
-                ));
-            }
-            let q = quote(&remote);
-            match self.shell(&format!("if [ -f {q} ]; then echo PRESENT; elif [ -e {q} ]; then echo ERROR; else echo ABSENT; fi\n"))?.as_str(){
-                "ABSENT"=>continue,"PRESENT"=>{},other=>return Err(self.fail("Не удалось сохранить существующий файл",format!("{remote}: {other}"))),}
-            if self
-                .installed_runtime_hashes
-                .iter()
-                .any(|(artifact, _)| artifact == &name)
-                && inventory::file_hash(&self.adb, &remote)?.is_some_and(|hash| {
-                    self.installed_runtime_hashes
-                        .contains(&(name.clone(), hash))
-                })
-            {
-                continue;
-            }
-            let tmp = dir.join(format!("{name}.new"));
-            let _ = fs::remove_file(&tmp);
-            self.adb.pull(&remote, &tmp)?;
-            if tmp.metadata()?.len() == 0 {
-                return Err(self.fail("Резервная копия пуста", remote));
-            }
-            fs::rename(tmp, dst)?;
+        let remote = quote(payload::WHITELIST);
+        let state = self.shell(&format!("if [ -f {remote} ]; then echo PRESENT; elif [ -e {remote} ]; then echo ERROR; else echo ABSENT; fi\n"))?;
+        match state.as_str() {
+            "ABSENT" => return Ok(()),
+            "PRESENT" => {}
+            _ => return Err(self.fail("Не удалось сохранить существующий файл", state)),
         }
+        let temporary = directory.join(format!("{name}.new"));
+        let _ = fs::remove_file(&temporary);
+        self.adb.pull(payload::WHITELIST, &temporary)?;
+        if temporary.metadata()?.len() == 0 {
+            return Err(self.fail("Резервная копия пуста", payload::WHITELIST));
+        }
+        fs::rename(temporary, destination)?;
         Ok(())
     }
     fn apollo_safe(&self, install: bool) -> Result<()> {
@@ -900,14 +889,34 @@ fi
         }
         Ok(())
     }
+    fn maintenance_step<T>(
+        &mut self,
+        step: RuntimeStep,
+        action: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        let mut transaction = self.runtime_maintenance.take().ok_or_else(|| {
+            self.fail(
+                "Runtime не подготовлен к изменению файлов",
+                "maintenance transaction absent",
+            )
+        })?;
+        let result = transaction.execute(step, || action(self));
+        self.runtime_maintenance = Some(transaction);
+        result
+    }
+
     fn freeze(&mut self) -> Result<()> {
+        self.runtime_maintenance = Some(RuntimeMaintenance::new(RuntimeOperation::Install));
+        self.maintenance_step(RuntimeStep::Block, |engine| {
+            engine
+                .shell(include_str!(
+                    "../../../../Packaging/installer/common/prepare-runtime-maintenance-device.sh"
+                ))
+                .map(|_| ())
+        })?;
         self.restart_loader = true;
-        // An absent init service is already stopped, not a failure.
-        if let Err(error) = self.stop_runtime_for_update() {
-            {
-                return Err(error);
-            }
-        }
+        self.maintenance_step(RuntimeStep::Quiesce, |engine| engine.quiesce_runtime())?;
+        self.maintenance_step(RuntimeStep::Stop, |engine| engine.stop_runtime_for_update())?;
         self.apollo_safe(true)?;
         self.ignore("am force-stop com.qinggan.app.vehiclesetting\n");
 
@@ -934,6 +943,8 @@ fi
         mode: u32,
         system: bool,
     ) -> Result<()> {
+        self.validate_install_destination(stage)?;
+        self.validate_install_destination(target)?;
         let result = (|| {
             self.adb.push(local, stage)?;
             let q = quote(stage);
@@ -958,10 +969,27 @@ fi
         }
         result
     }
-    fn recipe_files(&self) -> Result<()> {
+    fn validate_install_destination(&self, path: &str) -> Result<()> {
+        self.shell(&format!(
+            "{}\nreject_install_symlinks {}\n",
+            include_str!(
+                "../../../../Packaging/installer/common/validate-install-destination-device.sh"
+            ),
+            quote(path),
+        ))
+        .map(|_| ())
+    }
+
+    fn recipe_files(&mut self) -> Result<()> {
+        self.maintenance_step(RuntimeStep::Copy, |engine| engine.deliver_recipe_files())?;
+        self.maintenance_step(RuntimeStep::Cleanup, |engine| engine.cleanup_recipe_files())
+    }
+
+    fn deliver_recipe_files(&self) -> Result<()> {
         self.shell(c::PREPARE_DATA_DIRECTORIES)?;
         let recipe = &self.payload.manifest.recipe;
         for directory in recipe.directories.iter() {
+            self.validate_install_destination(&directory.path)?;
             let p = quote(&directory.path);
             self.shell(&format!(
                 "mkdir -p {p} && chown 0:0 {p} && chmod {:o} {p}\n",
@@ -985,10 +1013,16 @@ fi
             )?;
         }
         for attr in recipe.attributes.iter() {
+            self.validate_install_destination(&attr.path)?;
             let p = quote(&attr.path);
             self.shell(&format!("chown 0:0 {p} && chmod {:o} {p}\n", attr.mode))?;
         }
 
+        Ok(())
+    }
+
+    fn cleanup_recipe_files(&self) -> Result<()> {
+        let recipe = &self.payload.manifest.recipe;
         // Retired exact paths are cumulative. Never delete an active target.
         for path in &recipe.remove_files {
             if !recipe.files.iter().any(|f| f.destination == *path) {
@@ -1340,6 +1374,13 @@ fi
         self.shell("rm -f /data/local/tmp/voyahtune_load.v2.lock /data/local/tmp/voyah_load.v2.lock && rm -rf /data/local/tmp/voyah_load.lock\n")?;
         Ok(())
     }
+    fn quiesce_runtime(&self) -> Result<()> {
+        self.shell(include_str!(
+            "../../../../Packaging/installer/common/quiesce-runtime-device.sh"
+        ))
+        .map(|_| ())
+    }
+
     fn stop_service(&self) -> Result<()> {
         let state = self.shell("getprop init.svc.voyahtune_load\n")?;
         if state.is_empty() || state == "stopped" {
@@ -1356,11 +1397,22 @@ fi
         Err(self.fail("voyahtune_load не остановлен", "init.svc.voyahtune_load"))
     }
     fn remove_boot(&mut self) -> Result<()> {
-        if let Err(e) = self.stop_service() {
+        self.runtime_maintenance = Some(RuntimeMaintenance::new(RuntimeOperation::Remove));
+        self.maintenance_step(RuntimeStep::Block, |engine| {
+            engine
+                .shell(include_str!(
+                    "../../../../Packaging/installer/common/prepare-runtime-maintenance-device.sh"
+                ))
+                .map(|_| ())
+        })?;
+        self.maintenance_step(RuntimeStep::Quiesce, |engine| engine.quiesce_runtime())?;
+        if let Err(error) =
+            self.maintenance_step(RuntimeStep::Stop, |engine| engine.stop_runtime_for_update())
+        {
             if let Err(rollback) = self.rollback_legacy() {
                 self.warning(&rollback);
             }
-            return Err(e);
+            return Err(error);
         }
         self.shell(c::REMOVE_BOOT)?;
         self.legacy_migrated = false;
@@ -1368,7 +1420,10 @@ fi
         Ok(())
     }
     fn remove_files(&mut self) -> Result<()> {
-        self.installed_runtime_hashes = inventory::signed_runtime_hashes(&self.adb);
+        self.maintenance_step(RuntimeStep::Remove, |engine| engine.remove_runtime_files())
+    }
+
+    fn remove_runtime_files(&mut self) -> Result<()> {
         self.ignore(STOP_LOADER);
         self.ignore(
             "rm -f /data/local/tmp/voyahtune_load.v2.lock /data/local/tmp/voyah_load.v2.lock\n",
@@ -1385,10 +1440,6 @@ fi
         ] {
             self.ignore(&format!("am force-stop {}\n", quote(package)));
         }
-        // The classic remover restores host backups when present and otherwise
-        // removes these generic files. No ownership/hash database is consulted.
-        self.restore_host_file("load.bin");
-        self.restore_host_file("loaderFrida");
         for command in [
             c::REMOVE_EARLY_VD,
             c::REMOVE_EARLY_HOOKS,
@@ -1399,7 +1450,6 @@ fi
         ] {
             self.ignore(command);
         }
-        self.restore_host_file("frida-inject");
         self.shell(c::REMOVE_FILES)?;
         self.shell("test ! -e /data/local/bin/voyahtune-hook-manifest.json && test ! -e /data/local/tmp/voyahtune-hook-status.v1\n")?;
         self.shell(c::REMOVE_CLIENT_CHECK)?;
@@ -1409,11 +1459,6 @@ fi
         self.shell("rm -f /data/local/bin/voyahtune-update.block && rm -rf /data/local/voyahtune-updater /system/priv-app/VoyahTuneUpdater\n")?;
 
         for path in self.payload.manifest.recipe.cleanup_files() {
-            // The exact loader path was already removed or restored from a foreign
-            // host backup above. Do not erase that restored foreign file again.
-            if path == "/data/local/bin/loaderFrida" {
-                continue;
-            }
             self.shell(&format!("rm -f {}\n", quote(&path)))?;
         }
         for path in self.payload.manifest.recipe.cleanup_directories() {
@@ -1421,24 +1466,6 @@ fi
         }
 
         Ok(())
-    }
-    fn restore_host_file(&self, name: &str) {
-        let backup = self.backup_dir().join(name);
-        let target = format!("/data/local/bin/{name}");
-        if backup.is_file() {
-            if payload::sha256(&backup).is_ok_and(|hash| {
-                self.payload.artifact(name).is_ok_and(|a| a.sha256 == hash)
-                    || self
-                        .installed_runtime_hashes
-                        .contains(&(name.to_owned(), hash))
-            }) {
-                self.ignore(&format!("rm -f {target}\n"));
-                return;
-            }
-            let _ = self.adb.push(&backup, &target);
-        } else {
-            self.ignore(&format!("rm -f {target}\n"));
-        }
     }
     fn dns(&self, action: &str) -> Result<()> {
         self.adb.push(
@@ -1700,7 +1727,7 @@ exit 0
             }))
             .unwrap(),
         };
-        let mut engine = Engine::new(
+        let engine = Engine::new(
             &adb_path,
             payload,
             "CAR-001",

@@ -2,7 +2,7 @@ package ru.big.town.anative;
 
 import java.util.LinkedHashSet;
 
-/** Чистая нормализация списка полноэкранных пакетов для Native и Frida-конфига. */
+/** Чистая нормализация списка полноэкранных пакетов для Native и Java-agent-конфига. */
 final class FullscreenPackagePolicy {
     private FullscreenPackagePolicy() {}
 

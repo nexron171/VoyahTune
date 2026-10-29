@@ -28,11 +28,7 @@ use std::{
 struct Cli {
     #[arg(long, global = true, help = "Папка bundle, содержащая payload и adb")]
     bundle: Option<PathBuf>,
-    #[arg(
-        long,
-        global = true,
-        help = "Внешняя папка payload или её manifest.json"
-    )]
+    #[arg(long, global = true, help = "Внешний каталог payload")]
     payload: Option<PathBuf>,
     #[command(subcommand)]
     command: Commands,
@@ -105,6 +101,10 @@ enum Commands {
         action: Choice,
         #[arg(long, value_enum, default_value = "keep")]
         dns: DnsChoice,
+        #[arg(long)]
+        fake_account: bool,
+        #[arg(long)]
+        disable_chinese_navigation: bool,
         #[arg(long, help = "Сохранить план для apply-plan без внешнего JSON-парсера")]
         output: Option<PathBuf>,
     },
@@ -133,6 +133,10 @@ enum Commands {
         action: Choice,
         #[arg(long, value_enum, default_value = "keep")]
         dns: DnsChoice,
+        #[arg(long)]
+        fake_account: bool,
+        #[arg(long)]
+        disable_chinese_navigation: bool,
         #[arg(long)]
         yes: bool,
         #[arg(long)]
@@ -227,6 +231,8 @@ fn run(cli: Cli) -> Result<()> {
                     Dns::On => DnsChoice::On,
                     Dns::Off => DnsChoice::Off,
                 },
+                fake_account: plan.request.options.fake_account,
+                disable_chinese_navigation: plan.request.options.disable_chinese_navigation,
                 yes,
                 logs,
                 interactive,
@@ -296,15 +302,21 @@ fn run(cli: Cli) -> Result<()> {
             device,
             action,
             dns,
+            fake_account,
+            disable_chinese_navigation,
             output,
         } => {
-            let plan = installer_core::session::plan(
+            let mut plan = installer_core::session::plan(
                 &default_adb(&bundle),
                 &payload,
                 &device,
                 action.into(),
                 dns.into(),
             )?;
+            plan.set_options(installer_core::vehicle_options::InstallOptions {
+                fake_account,
+                disable_chinese_navigation,
+            })?;
             if let Some(path) = output {
                 recovery::write_json(&path, &plan)?;
             }
@@ -315,6 +327,8 @@ fn run(cli: Cli) -> Result<()> {
             token,
             action,
             dns,
+            fake_account,
+            disable_chinese_navigation,
             yes,
             logs,
             interactive,
@@ -370,6 +384,10 @@ fn run(cli: Cli) -> Result<()> {
             engine.run(Request {
                 action: action.into(),
                 dns: dns.into(),
+                options: installer_core::vehicle_options::InstallOptions {
+                    fake_account,
+                    disable_chinese_navigation,
+                },
                 serial: device,
                 inventory_token: token,
                 confirmed: yes,

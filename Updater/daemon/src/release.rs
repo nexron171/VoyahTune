@@ -3,12 +3,11 @@ use release_core::{
     catalog::{Catalog, Release, UpdateRelease},
     infrastructure::{release_version, Infrastructure},
     ota::Claims,
-    payload::{Artifact, Manifest, Payload},
-    recipe::Recipe,
+    payload::Payload,
     Error, Result,
 };
 use serde::Deserialize;
-use std::{fs::File, io, path::Path};
+use std::{io, path::Path};
 
 #[derive(Deserialize)]
 struct DownloadCatalog {
@@ -78,48 +77,8 @@ pub fn select(release: &Release, installed: &str) -> Result<Claims> {
     })
 }
 
-#[derive(Deserialize)]
-struct ArtifactPath {
-    name: String,
-    path: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct InstallFiles {
-    #[serde(default)]
-    release_version: String,
-    artifacts: Vec<ArtifactPath>,
-    recipe: Recipe,
-}
-
 pub fn payload(directory: &Path) -> io::Result<Payload> {
-    // Only installation instructions are read; release metadata is not an admission gate.
-    let files: InstallFiles = serde_json::from_reader(File::open(directory.join("manifest.json"))?)
-        .map_err(|error| invalid(&error.to_string()))?;
-    Ok(Payload {
-        root: directory.canonicalize()?,
-        manifest: Manifest {
-            infrastructure: Infrastructure::Unified,
-            removal_only: false,
-            requirements: None,
-            recipe: files.recipe,
-            schema: 4,
-            product: "VoyahTune".into(),
-            release_version: files.release_version,
-            build_revision: String::new(),
-            artifacts: files
-                .artifacts
-                .into_iter()
-                .map(|artifact| Artifact {
-                    name: artifact.name,
-                    path: artifact.path,
-                    sha256: String::new(),
-                    size: 0,
-                })
-                .collect(),
-        },
-    })
+    Payload::for_ota(directory).map_err(|error| invalid(&error.to_string()))
 }
 
 #[cfg(test)]
@@ -155,26 +114,15 @@ mod tests {
     }
 
     #[test]
-    fn payload_reads_file_instructions_without_metadata_or_hashes() {
+    fn payload_uses_compiled_paths_without_metadata_admission_checks() {
         let directory = tempfile::tempdir().unwrap();
-        let mut recipe = serde_json::to_value(Recipe::default()).unwrap();
-        recipe["schema"] = json!(99);
-        recipe["engine"] = json!("future");
-        std::fs::write(
-            directory.path().join("manifest.json"),
-            serde_json::to_vec(&json!({
-                "schema": 99, "releaseVersion": "catalog-label-differs", "requirements": "ignored",
-                "artifacts": [{"name": "native.apk", "path": "native.apk", "sha256": "wrong"}],
-                "recipe": recipe
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-        std::fs::write(directory.path().join("native.apk"), "APK bytes").unwrap();
+        std::fs::create_dir_all(directory.path().join("common")).unwrap();
+        std::fs::write(directory.path().join("common/native.apk"), "APK bytes").unwrap();
         let payload = payload(directory.path()).unwrap();
         assert_eq!(
             std::fs::read_to_string(payload.file("native.apk").unwrap()).unwrap(),
             "APK bytes"
         );
+        assert!(payload.manifest.requirements.is_some());
     }
 }

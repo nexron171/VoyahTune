@@ -7,7 +7,7 @@ use installer_core::{
     engineering_menu,
     events::{Event, Events},
     installation_log::{InstallationLog, Status as SessionStatus, UploadProgress},
-    payload::{self, Payload},
+    payload::Payload,
     plans::{Action, Dns, Plan, Request},
     recovery, session, Error, Result,
 };
@@ -65,7 +65,7 @@ async fn log_session_begin(app: tauri::AppHandle) -> Result<Value> {
         .map(|p| {
             json!({
                 "version":p.manifest.release_version,"infrastructure":p.manifest.infrastructure,
-                "manifestSha256":payload::sha256(&p.root.join("manifest.json")).ok()
+                "payloadSha256":p.identity().ok()
             })
         });
     let session =
@@ -511,7 +511,7 @@ async fn plan(app: tauri::AppHandle, serial: String, action: Action, dns: Dns) -
         } else {
             false
         };
-        let digest = payload::sha256(&payload.root.join("manifest.json"))?;
+        let digest = payload.identity()?;
         let runtime = handle.state::<Runtime>();
         let mut state = runtime.0.lock().unwrap();
         state.verification_pending = false;
@@ -525,6 +525,27 @@ async fn plan(app: tauri::AppHandle, serial: String, action: Action, dns: Dns) -
     .and_then(|v| v);
     release(&app.state::<Runtime>());
     result
+}
+
+#[tauri::command]
+fn update_install_options(
+    app: tauri::AppHandle,
+    options: installer_core::vehicle_options::InstallOptions,
+) -> Result<Plan> {
+    let runtime = app.state::<Runtime>();
+    let mut state = runtime.0.lock().unwrap();
+    if state.busy {
+        return Err(Error::new(
+            "OPERATION_BUSY",
+            "Дождитесь завершения текущей операции",
+        ));
+    }
+    let (plan, _, _) = state
+        .prepared
+        .as_mut()
+        .ok_or_else(|| Error::new("PLAN_REQUIRED", "Сначала проверьте автомобиль и план"))?;
+    plan.set_options(options)?;
+    Ok(plan.clone())
 }
 #[tauri::command]
 async fn disable_cunba(app: tauri::AppHandle, serial: String, confirmed: bool) -> Result<Value> {
@@ -743,13 +764,14 @@ fn run_operation(
         None
     };
     let payload = Payload::open(&root)?;
-    if payload::sha256(&payload.root.join("manifest.json"))? != digest {
+    if payload.identity()? != digest {
         return Err(Error::new(
             "PAYLOAD_CHANGED",
             "Релиз изменился. Постройте план заново.",
         ));
     }
-    // DNS is an explicit choice on the review page, after initial diagnosis.
+    plan.set_options(request.options)?;
+    // Choices are confirmed on the review page after initial diagnosis.
     plan.request = request.clone();
     if restore_cunba {
         plan.steps.push(installer_core::plans::Step {
@@ -770,7 +792,7 @@ fn run_operation(
     let session_log = installation_log(app);
     if let Some(session) = &session_log {
         session.bind_device(&request.serial)?;
-        session.metadata(Some(json!({"version":payload.manifest.release_version,"infrastructure":payload.manifest.infrastructure,"manifestSha256":digest})), Some(match request.dns { Dns::Keep => "keep", Dns::On => "on", Dns::Off => "off" }))?;
+        session.metadata(Some(json!({"version":payload.manifest.release_version,"infrastructure":payload.manifest.infrastructure,"payloadSha256":digest})), Some(match request.dns { Dns::Keep => "keep", Dns::On => "on", Dns::Off => "off" }))?;
     }
     let handle = app.clone();
     let output_cancel = cancel.clone();
@@ -1007,6 +1029,7 @@ fn main() {
             release_info,
             devices,
             plan,
+            update_install_options,
             apply,
             retry_verification,
             disable_cunba,

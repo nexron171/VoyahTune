@@ -8,16 +8,16 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-pub const MANIFEST_SCHEMA: u32 = 4;
+pub const PAYLOAD_FORMAT: u32 = 5;
 
 pub fn validate_schema(schema: u32) -> Result<()> {
-    if schema < MANIFEST_SCHEMA {
+    if schema < PAYLOAD_FORMAT {
         return Err(Error::new(
             "PAYLOAD_SCHEMA_UNSUPPORTED",
             "Архив прежнего формата не поддерживается. Выберите новый релиз VoyahTune.",
         ));
     }
-    if schema != MANIFEST_SCHEMA {
+    if schema != PAYLOAD_FORMAT {
         return Err(Error::new(
             "INSTALLER_UPDATE_REQUIRED",
             "Этот формат релиза требует обновления установщика",
@@ -31,28 +31,41 @@ pub const RESTORE: &str = "ru.big.town.restoremode";
 pub const RUNYN: &str = "big.town.runyn";
 pub const NATIVE_PATH: &str = "/system/priv-app/Native/Native.apk";
 pub const WHITELIST: &str = "/system/etc/permissions/privapp-permissions-ru.big.town.anative.xml";
-pub const RUNTIME_NAMES: &[&str] = &[
-    "load.bin",
-    "loaderFrida",
-    "injects.json",
-    "clusternavi.js",
-    "phone-num.js",
-    "steeringwheelkeys.js",
-    "launcherdock.js",
-    "multidisplay.js",
-    "vd_bypass.js",
-    "app_client.js",
-    "apollo_tech.js",
-    "voyahtune_drive_reset.js",
-    "voyahtune_acc_restore.js",
-    "keyboard_lock_en.js",
-    "keyboard_ru.js",
-    "voyahtune_keyboard_en_config.json",
-    "voyahtune_keyboard_ru_config.json",
-    "voyahtune_skb_qwerty_ru.json",
-    "frida-inject",
-    "voyahtune.load.rc",
-    "voyahtune.load.sh",
+pub const NATIVE_RUNTIME_ROLES: &[(&str, &str, u32)] = &[
+    ("voyahtune-new-voyahtune-loader", "voyahtune-loader", 0o755),
+    ("voyahtune-new-voyahtune-inject", "voyahtune-inject", 0o755),
+    (
+        "voyahtune-new-voyahtune-inject-arm",
+        "voyahtune-inject-arm",
+        0o755,
+    ),
+    (
+        "voyahtune-new-libvoyahtune-agent.so",
+        "libvoyahtune-agent.so",
+        0o644,
+    ),
+    (
+        "voyahtune-new-libvoyahtune-agent-arm.so",
+        "libvoyahtune-agent-arm.so",
+        0o644,
+    ),
+    ("voyahtune-new-agents.dex", "agents.dex", 0o644),
+    ("voyahtune-new-stop-loader.sh", "stop-loader.sh", 0o755),
+    (
+        "voyahtune-new-voyahtune_keyboard_en_config.json",
+        "voyahtune_keyboard_en_config.json",
+        0o644,
+    ),
+    (
+        "voyahtune-new-voyahtune_keyboard_ru_config.json",
+        "voyahtune_keyboard_ru_config.json",
+        0o644,
+    ),
+    (
+        "voyahtune-new-voyahtune_skb_qwerty_ru.json",
+        "voyahtune_skb_qwerty_ru.json",
+        0o644,
+    ),
 ];
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -60,6 +73,10 @@ pub struct BuildMetadata {
     pub infrastructure: crate::infrastructure::Infrastructure,
     #[serde(default)]
     pub recipe_sha256: Option<String>,
+    #[serde(default)]
+    pub payload_format: u32,
+    #[serde(default)]
+    pub minimum_installer_version: Option<String>,
     pub schema: u32,
     pub product: String,
     pub component: String,
@@ -109,51 +126,117 @@ impl Payload {
     }
 
     pub fn load(root: &Path) -> Result<Self> {
+        Self::from_layout(root, true)
+    }
+
+    pub fn for_ota(root: &Path) -> Result<Self> {
+        Self::from_layout(root, false)
+    }
+
+    fn from_layout(root: &Path, verify_metadata: bool) -> Result<Self> {
         let root = root.canonicalize()?;
-        let value: serde_json::Value =
-            serde_json::from_reader(File::open(root.join("manifest.json"))?)?;
-        let schema = value["schema"]
-            .as_u64()
-            .and_then(|schema| u32::try_from(schema).ok())
-            .ok_or_else(|| Error::new("PAYLOAD_SCHEMA", "Нет допустимой версии формата релиза"))?;
-        validate_schema(schema)?;
-        if let Some(requirements) = value.get("requirements") {
-            serde_json::from_value::<crate::compatibility::Requirements>(requirements.clone())?
-                .validate()?;
-        }
-        let manifest: Manifest = serde_json::from_value(value)?;
-        if !manifest.removal_only {
-            manifest
-                .infrastructure
-                .require_version(&manifest.release_version)?;
-        }
-        if manifest.schema != 4
-            || manifest.product != "VoyahTune"
-            || semver::Version::parse(&manifest.release_version).is_err()
-        {
-            return Err(Error::new(
-                "PAYLOAD_SCHEMA",
-                "Неподдерживаемый формат или версия релиза",
-            ));
-        }
-        if manifest.schema == 4 {
-            let requirements = manifest.requirements.as_ref().ok_or_else(|| {
-                Error::new(
-                    "REQUIREMENTS_MISSING",
-                    "Нет требований к версии установщика",
-                )
-            })?;
-            requirements.validate()?;
-            if manifest.recipe.schema != 3 {
-                return Err(Error::new(
-                    "RECIPE_INVALID",
-                    "Новый payload требует recipe schema 3",
-                ));
+        let restore = root.join("common/restore_mode.apk");
+        let removal_only = !restore.exists()
+            && !root.join("common/native.apk").exists()
+            && root.join("common/dns-helper.sh").is_file()
+            && root.join("common/init.logcat.original.sh").is_file();
+        let mut requirements = crate::compatibility::Requirements::unified();
+        let (release_version, build_revision) = if removal_only {
+            (env!("CARGO_PKG_VERSION").into(), "builtin-remover".into())
+        } else if verify_metadata {
+            let metadata = apk_metadata(&restore)?
+                .ok_or_else(|| Error::new("APK_METADATA", "Нет метаданных релиза в RestoreMode"))?;
+            validate_schema(metadata.payload_format)?;
+            if let Some(minimum) = metadata.minimum_installer_version {
+                requirements.min_installer_version = minimum;
             }
-            manifest.recipe.validate()?;
+            requirements.validate()?;
+            metadata
+                .infrastructure
+                .require_version(&metadata.release_version)?;
+            (metadata.release_version, metadata.build_revision)
+        } else {
+            let metadata = apk_metadata_value(&restore)
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            (
+                metadata["releaseVersion"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .into(),
+                metadata["buildRevision"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .into(),
+            )
+        };
+        let mut recipe = crate::recipe::Recipe::default();
+        if removal_only {
+            recipe.remove_directories = recipe.cleanup_directories();
         }
-        let payload = Self { root, manifest };
-        Ok(payload)
+        let names: BTreeSet<&str> = if removal_only {
+            ["dns-helper.sh", "init.logcat.original.sh"]
+                .into_iter()
+                .collect()
+        } else {
+            recipe
+                .files
+                .iter()
+                .map(|file| file.artifact.as_str())
+                .chain(
+                    recipe
+                        .packages
+                        .iter()
+                        .map(|package| package.artifact.as_str()),
+                )
+                .chain(["dns-helper.sh", "dns.apk", "init.logcat.original.sh"])
+                .collect()
+        };
+        let mut artifacts = Vec::new();
+        for name in names {
+            let path = format!("common/{name}");
+            let source = root.join(&path);
+            let (size, digest) = if verify_metadata {
+                let canonical = source.canonicalize()?;
+                if !canonical.starts_with(&root)
+                    || source.symlink_metadata()?.file_type().is_symlink()
+                {
+                    return Err(Error::new("PAYLOAD_PATH", "Файл выходит за пределы релиза"));
+                }
+                (source.metadata()?.len(), sha256(&source)?)
+            } else {
+                (0, String::new())
+            };
+            artifacts.push(Artifact {
+                name: name.into(),
+                path,
+                size,
+                sha256: digest,
+            });
+        }
+        let manifest = Manifest {
+            schema: PAYLOAD_FORMAT,
+            infrastructure: crate::infrastructure::Infrastructure::Unified,
+            removal_only,
+            requirements: Some(requirements),
+            recipe,
+            product: "VoyahTune".into(),
+            release_version,
+            build_revision,
+            artifacts,
+        };
+        Ok(Self { root, manifest })
+    }
+
+    pub fn identity(&self) -> Result<String> {
+        let mut hash = Sha256::new();
+        for artifact in &self.manifest.artifacts {
+            hash.update((artifact.name.len() as u64).to_le_bytes());
+            hash.update(artifact.name.as_bytes());
+            hash.update(sha256(&self.path(artifact)?)?.as_bytes());
+        }
+        Ok(hex::encode(hash.finalize()))
     }
 
     pub fn save_removal(&self, destination: &Path) -> Result<()> {
@@ -172,7 +255,6 @@ impl Payload {
             std::fs::create_dir_all(target.parent().unwrap())?;
             std::fs::copy(self.path(artifact)?, target)?;
         }
-        crate::storage::write_json(&stage.path().join("manifest.json"), &manifest)?;
         Self::open(stage.path())?;
         // Versioned recovery directories are immutable and separate from download cache.
         if !destination.exists() {
@@ -280,7 +362,7 @@ impl Payload {
             if metadata.recipe_sha256.as_deref() != Some(&recipe_sha) {
                 return Err(Error::new(
                     "RECIPE_SIGNATURE",
-                    "Манифест действий не совпадает с подписанным APK",
+                    "План установки не совпадает с подписанным APK",
                 )
                 .detail(name));
             }
@@ -313,6 +395,7 @@ impl Payload {
                 }
             }
             if metadata.schema != 3
+                || metadata.payload_format != PAYLOAD_FORMAT
                 || metadata.infrastructure != self.manifest.infrastructure
                 || metadata.product != "VoyahTune"
                 || metadata.component != component
@@ -352,14 +435,13 @@ impl Payload {
 }
 
 pub fn destination(name: &str) -> Option<(String, u32)> {
+    if let Some((_, filename, mode)) = NATIVE_RUNTIME_ROLES
+        .iter()
+        .find(|(role, _, _)| *role == name)
+    {
+        return Some((format!("/data/local/bin/voyahtune-new/{filename}"), *mode));
+    }
     match name {
-        "voyahtune-new-voyahtune-loader" => Some((
-            "/data/local/bin/voyahtune-new/voyahtune-loader".into(),
-            0o755,
-        )),
-        "voyahtune-new-frida-inject" => {
-            Some(("/data/local/bin/voyahtune-new/frida-inject".into(), 0o755))
-        }
         "native.apk" => Some((NATIVE_PATH.into(), 0o644)),
         "voyahtune-updater" => Some(("/data/local/bin/voyahtune-updater".into(), 0o755)),
         "voyahtune-updater.apk" => Some((
@@ -373,14 +455,6 @@ pub fn destination(name: &str) -> Option<(String, u32)> {
         "whitelist.xml" => Some((WHITELIST.into(), 0o644)),
         "voyahtune.load.rc" => Some(("/system/etc/init/voyahtune.load.rc".into(), 0o644)),
         "voyahtune.load.sh" => Some(("/system/etc/init.voyahtune.load.sh".into(), 0o755)),
-        name if RUNTIME_NAMES.contains(&name) => Some((
-            format!("/data/local/bin/{name}"),
-            if ["load.bin", "loaderFrida", "frida-inject"].contains(&name) {
-                0o755
-            } else {
-                0o644
-            },
-        )),
         _ => None,
     }
 }
@@ -399,7 +473,7 @@ pub fn sha256(path: &Path) -> Result<String> {
     Ok(hex::encode(hash.finalize()))
 }
 
-pub fn apk_metadata(path: &Path) -> Result<Option<BuildMetadata>> {
+fn apk_metadata_value(path: &Path) -> Result<Option<serde_json::Value>> {
     let mut zip = zip::ZipArchive::new(File::open(path)?)
         .map_err(|error| Error::new("APK_FORMAT", "Не удалось прочитать APK").detail(error))?;
     let mut metadata_file = match zip.by_name("assets/voyahtune-build.json") {
@@ -416,11 +490,14 @@ pub fn apk_metadata(path: &Path) -> Result<Option<BuildMetadata>> {
     let mut bytes = Vec::new();
     metadata_file.by_ref().take(65537).read_to_end(&mut bytes)?;
     let value: serde_json::Value = serde_json::from_slice(&bytes)?;
-    let metadata: BuildMetadata = serde_json::from_value(value)?;
-    metadata
-        .infrastructure
-        .require_version(&metadata.release_version)?;
-    Ok(Some(metadata))
+    Ok(Some(value))
+}
+
+pub fn apk_metadata(path: &Path) -> Result<Option<BuildMetadata>> {
+    apk_metadata_value(path)?
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(Into::into)
 }
 /// Verify v2 signatures AND the APK content digest. apksig::Apk::verify alone only
 /// verifies the signing block, so it must not be used as a content-integrity check.
@@ -574,19 +651,14 @@ pub fn locate(bundle: &Path, executable: &Path, explicit: Option<&Path>) -> Resu
         }
     }
     for candidate in candidates {
-        let directory = if candidate
-            .file_name()
-            .is_some_and(|filename| filename == "manifest.json")
+        let directory = candidate;
+        if directory.join("common/restore_mode.apk").is_file()
+            || directory.join("common/dns-helper.sh").is_file()
         {
-            candidate.parent().unwrap().to_path_buf()
-        } else {
-            candidate
-        };
-        if directory.join("manifest.json").is_file() {
             return Ok(directory);
         }
     }
-    Err(Error::new("PAYLOAD_MISSING", "Не найден встроенный релиз VoyahTune").retry("Повторно распакуйте или переустановите полный установщик. Для диагностики можно указать путь к manifest.json."))
+    Err(Error::new("PAYLOAD_MISSING", "Не найден встроенный релиз VoyahTune").retry("Повторно распакуйте или переустановите полный установщик. Для диагностики можно указать каталог payload."))
 }
 
 #[cfg(test)]
@@ -594,57 +666,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn payload_requires_explicit_unified_metadata() {
-        let root = tempfile::tempdir().unwrap();
-        let original = serde_json::json!({
-            "infrastructure": "unified", "requirements": crate::compatibility::Requirements::unified(),
-            "schema": 4, "product": "VoyahTune", "releaseVersion": "4.4.1", "buildRevision": "test",
-            "recipe": crate::recipe::Recipe::default(), "artifacts": []
-        });
-        let load = |value: &serde_json::Value| {
-            std::fs::write(
-                root.path().join("manifest.json"),
-                serde_json::to_vec(value).unwrap(),
-            )
-            .unwrap();
-            Payload::load(root.path())
-        };
-        assert!(load(&original).is_ok());
-        for identity in ["pi", "od", "unknown"] {
-            let mut value = original.clone();
-            value["infrastructure"] = serde_json::json!(identity);
-            assert!(load(&value).is_err());
-        }
-        let mut missing = original.clone();
-        missing.as_object_mut().unwrap().remove("infrastructure");
-        assert!(load(&missing).is_err());
-        for version in ["4.4.1-od", "4.4.1-pi", "invalid"] {
-            let mut value = original.clone();
-            value["releaseVersion"] = serde_json::json!(version);
-            assert!(load(&value).is_err());
-        }
-    }
-
-    #[test]
-    fn rejects_retired_and_future_archives_before_reading_artifacts() {
-        let root = tempfile::tempdir().unwrap();
-        for (schema, expected) in [
-            (3, "PAYLOAD_SCHEMA_UNSUPPORTED"),
-            (99, "INSTALLER_UPDATE_REQUIRED"),
-        ] {
-            std::fs::write(
-                root.path().join("manifest.json"),
-                format!("{{\"schema\":{schema}}}"),
-            )
-            .unwrap();
-            assert_eq!(Payload::load(root.path()).err().unwrap().code, expected);
-        }
-    }
-
-    #[test]
     fn only_owned_destinations() {
         assert!(destination("/system/bin/sh").is_none());
         assert!(destination("../../bin/sh").is_none());
-        assert_eq!(destination("load.bin").unwrap().1, 0o755);
+        assert!(destination("load.bin").is_none());
+        assert_eq!(
+            destination("voyahtune-new-voyahtune-inject").unwrap().1,
+            0o755
+        );
+        assert_eq!(
+            destination("voyahtune-new-libvoyahtune-agent.so")
+                .unwrap()
+                .1,
+            0o644
+        );
     }
 }

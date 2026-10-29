@@ -1,0 +1,568 @@
+{
+  "schema": 1,
+  "cases": [
+    {
+      "id": "launcher.shared-navigation-carplay-default",
+      "contract": "launcher.chrome",
+      "agents": [
+        "launcher"
+      ],
+      "reference": "carplay-chrome.test.js",
+      "input": {
+        "adapter": "shared-navigation",
+        "fullscreen": true,
+        "hideSystemBars": false,
+        "top": "ru.big.town.anative.CarPlayFullscreenActivity"
+      },
+      "expected": {
+        "dockVisible": true,
+        "duplicateListeners": 0
+      }
+    },
+    {
+      "id": "launcher.shared-navigation-carplay-hide",
+      "contract": "launcher.chrome",
+      "agents": [
+        "launcher"
+      ],
+      "reference": "carplay-chrome.test.js",
+      "input": {
+        "adapter": "shared-navigation",
+        "fullscreen": true,
+        "hideSystemBars": true,
+        "top": "ru.big.town.anative.CarPlayFullscreenActivity"
+      },
+      "expected": {
+        "dockVisible": false,
+        "duplicateListeners": 0
+      }
+    },
+    {
+      "id": "launcher.shared-navigation-windowed",
+      "contract": "launcher.chrome",
+      "agents": [
+        "launcher"
+      ],
+      "reference": "carplay-chrome.test.js",
+      "input": {
+        "adapter": "shared-navigation",
+        "fullscreen": false,
+        "hideSystemBars": true,
+        "top": "ru.big.town.anative.CarPlayWindowedActivity"
+      },
+      "expected": {
+        "dockVisible": true,
+        "duplicateListeners": 0
+      }
+    },
+    {
+      "id": "launcher.shared-navigation-home",
+      "contract": "launcher.chrome",
+      "agents": [
+        "launcher"
+      ],
+      "reference": "carplay-chrome.test.js",
+      "input": {
+        "adapter": "shared-navigation",
+        "fullscreen": false,
+        "hideSystemBars": true,
+        "top": "Home"
+      },
+      "expected": {
+        "dockVisible": true,
+        "duplicateListeners": 0
+      }
+    },
+    {
+      "id": "launcher.split-navigation-carplay-default",
+      "contract": "launcher.chrome",
+      "agents": [
+        "launcher"
+      ],
+      "reference": "carplay-chrome.test.js",
+      "input": {
+        "adapter": "split-navigation",
+        "fullscreen": true,
+        "hideSystemBars": false,
+        "top": "ru.big.town.anative.CarPlayFullscreenActivity"
+      },
+      "expected": {
+        "dockVisible": true,
+        "duplicateListeners": 0
+      }
+    },
+    {
+      "id": "launcher.split-navigation-carplay-hide",
+      "contract": "launcher.chrome",
+      "agents": [
+        "launcher"
+      ],
+      "reference": "carplay-chrome.test.js",
+      "input": {
+        "adapter": "split-navigation",
+        "fullscreen": true,
+        "hideSystemBars": true,
+        "top": "ru.big.town.anative.CarPlayFullscreenActivity"
+      },
+      "expected": {
+        "dockVisible": false,
+        "duplicateListeners": 0
+      }
+    },
+    {
+      "id": "launcher.split-navigation-windowed",
+      "contract": "launcher.chrome",
+      "agents": [
+        "launcher"
+      ],
+      "reference": "carplay-chrome.test.js",
+      "input": {
+        "adapter": "split-navigation",
+        "fullscreen": false,
+        "hideSystemBars": true,
+        "top": "ru.big.town.anative.CarPlayWindowedActivity"
+      },
+      "expected": {
+        "dockVisible": true,
+        "duplicateListeners": 0
+      }
+    },
+    {
+      "id": "launcher.split-navigation-home",
+      "contract": "launcher.chrome",
+      "agents": [
+        "launcher"
+      ],
+      "reference": "carplay-chrome.test.js",
+      "input": {
+        "adapter": "split-navigation",
+        "fullscreen": false,
+        "hideSystemBars": true,
+        "top": "Home"
+      },
+      "expected": {
+        "dockVisible": true,
+        "duplicateListeners": 0
+      }
+    },
+    {
+      "id": "launcher.allapps-0-False",
+      "contract": "launcher.all-apps",
+      "agents": [
+        "launcher"
+      ],
+      "reference": "carplay-allapps.test.js",
+      "input": {
+        "display": 0,
+        "carPlayEnabled": false,
+        "existing": [
+          "oem.app",
+          "ru.big.town.restoremode"
+        ],
+        "installed": [
+          "app.music"
+        ],
+        "reconcileCount": 2
+      },
+      "expected": {
+        "packages": [
+          "oem.app",
+          "ru.big.town.restoremode",
+          "app.music"
+        ],
+        "duplicateEntries": 0
+      }
+    },
+    {
+      "id": "launcher.allapps-0-True",
+      "contract": "launcher.all-apps",
+      "agents": [
+        "launcher"
+      ],
+      "reference": "carplay-allapps.test.js",
+      "input": {
+        "display": 0,
+        "carPlayEnabled": true,
+        "existing": [
+          "oem.app",
+          "ru.big.town.restoremode"
+        ],
+        "installed": [
+          "app.music"
+        ],
+        "reconcileCount": 2,
+        "legacyCarPlayEntries": 2
+      },
+      "expected": {
+        "packages": [
+          "oem.app",
+          "ru.big.town.restoremode/ru.big.town.restoremode.carplay.CarPlayLauncherActivity",
+          "ru.big.town.restoremode",
+          "app.music"
+        ],
+        "duplicateEntries": 0
+      }
+    },
+    {
+      "id": "launcher.allapps-1-False",
+      "contract": "launcher.all-apps",
+      "agents": [
+        "launcher"
+      ],
+      "reference": "carplay-allapps.test.js",
+      "input": {
+        "display": 1,
+        "carPlayEnabled": false,
+        "existing": [
+          "oem.app",
+          "ru.big.town.restoremode"
+        ],
+        "installed": [
+          "app.music"
+        ],
+        "reconcileCount": 2
+      },
+      "expected": {
+        "packages": [
+          "oem.app",
+          "app.music",
+          "ru.big.town.restoremode/ru.big.town.restoremode.passenger.PassengerDashboardActivity"
+        ],
+        "duplicateEntries": 0
+      }
+    },
+    {
+      "id": "launcher.allapps-1-True",
+      "contract": "launcher.all-apps",
+      "agents": [
+        "launcher"
+      ],
+      "reference": "carplay-allapps.test.js",
+      "input": {
+        "display": 1,
+        "carPlayEnabled": true,
+        "existing": [
+          "oem.app",
+          "ru.big.town.restoremode"
+        ],
+        "installed": [
+          "app.music"
+        ],
+        "reconcileCount": 2
+      },
+      "expected": {
+        "packages": [
+          "oem.app",
+          "ru.big.town.restoremode/ru.big.town.restoremode.carplay.CarPlayLauncherActivity",
+          "app.music",
+          "ru.big.town.restoremode/ru.big.town.restoremode.passenger.PassengerDashboardActivity"
+        ],
+        "duplicateEntries": 0
+      }
+    },
+    {
+      "id": "launcher.icons-shared-navigation-0-navigation",
+      "contract": "launcher.icons",
+      "agents": [
+        "launcher"
+      ],
+      "reference": "dock-icon-selection.test.js",
+      "input": {
+        "adapter": "shared-navigation",
+        "display": 0,
+        "packages": [
+          "same.app",
+          "same.app"
+        ],
+        "styles": [
+          "navigation",
+          "music"
+        ]
+      },
+      "expected": {
+        "icons": [
+          "dock_navigation_icon",
+          "dock_music_icon"
+        ],
+        "sizes": [
+          [
+            116,
+            90
+          ],
+          [
+            116,
+            90
+          ]
+        ]
+      }
+    },
+    {
+      "id": "launcher.icons-shared-navigation-0-default",
+      "contract": "launcher.icons",
+      "agents": [
+        "launcher"
+      ],
+      "reference": "dock-icon-selection.test.js",
+      "input": {
+        "adapter": "shared-navigation",
+        "display": 0,
+        "packages": [
+          "same.app",
+          "same.app"
+        ],
+        "styles": [
+          "default",
+          "music"
+        ]
+      },
+      "expected": {
+        "icons": [
+          "default:same.app",
+          "dock_music_icon"
+        ],
+        "sizes": [
+          [
+            116,
+            90
+          ],
+          [
+            116,
+            90
+          ]
+        ]
+      }
+    },
+    {
+      "id": "launcher.icons-shared-navigation-1-navigation",
+      "contract": "launcher.icons",
+      "agents": [
+        "launcher"
+      ],
+      "reference": "dock-icon-selection.test.js",
+      "input": {
+        "adapter": "shared-navigation",
+        "display": 1,
+        "packages": [
+          "same.app",
+          "same.app"
+        ],
+        "styles": [
+          "navigation",
+          "music"
+        ],
+        "initialStyles": [
+          "default",
+          "music"
+        ]
+      },
+      "expected": {
+        "icons": [
+          "default:same.app",
+          "dock_music_icon"
+        ],
+        "sizes": [
+          [
+            116,
+            90
+          ],
+          [
+            116,
+            90
+          ]
+        ]
+      }
+    },
+    {
+      "id": "launcher.icons-split-navigation-0-navigation",
+      "contract": "launcher.icons",
+      "agents": [
+        "launcher"
+      ],
+      "reference": "dock-icon-selection.test.js",
+      "input": {
+        "adapter": "split-navigation",
+        "display": 0,
+        "packages": [
+          "same.app",
+          "same.app"
+        ],
+        "styles": [
+          "navigation",
+          "music"
+        ]
+      },
+      "expected": {
+        "icons": [
+          "dock_navigation_icon",
+          "dock_music_icon"
+        ],
+        "sizes": [
+          [
+            116,
+            90
+          ],
+          [
+            116,
+            90
+          ]
+        ]
+      }
+    },
+    {
+      "id": "launcher.icons-split-navigation-0-default",
+      "contract": "launcher.icons",
+      "agents": [
+        "launcher"
+      ],
+      "reference": "dock-icon-selection.test.js",
+      "input": {
+        "adapter": "split-navigation",
+        "display": 0,
+        "packages": [
+          "same.app",
+          "same.app"
+        ],
+        "styles": [
+          "default",
+          "music"
+        ]
+      },
+      "expected": {
+        "icons": [
+          "default:same.app",
+          "dock_music_icon"
+        ],
+        "sizes": [
+          [
+            116,
+            90
+          ],
+          [
+            116,
+            90
+          ]
+        ]
+      }
+    },
+    {
+      "id": "launcher.icons-split-navigation-1-navigation",
+      "contract": "launcher.icons",
+      "agents": [
+        "launcher"
+      ],
+      "reference": "dock-icon-selection.test.js",
+      "input": {
+        "adapter": "split-navigation",
+        "display": 1,
+        "packages": [
+          "same.app",
+          "same.app"
+        ],
+        "styles": [
+          "navigation",
+          "music"
+        ],
+        "initialStyles": [
+          "default",
+          "music"
+        ]
+      },
+      "expected": {
+        "icons": [
+          "default:same.app",
+          "dock_music_icon"
+        ],
+        "sizes": [
+          [
+            116,
+            90
+          ],
+          [
+            116,
+            90
+          ]
+        ]
+      }
+    },
+    {
+      "id": "launcher.gesture-home-0",
+      "contract": "launcher.navigation-action",
+      "agents": [
+        "launcher"
+      ],
+      "reference": "dock-navigation-actions.test.js",
+      "input": {
+        "slot": "home",
+        "display": 0,
+        "voyahtuneShort": true,
+        "gesture": "short"
+      },
+      "expected": {
+        "calls": [
+          "voyahtune:home"
+        ],
+        "stockBypassCleared": true
+      }
+    },
+    {
+      "id": "launcher.gesture-home-1",
+      "contract": "launcher.navigation-action",
+      "agents": [
+        "launcher"
+      ],
+      "reference": "dock-navigation-actions.test.js",
+      "input": {
+        "slot": "home",
+        "display": 1,
+        "voyahtuneShort": true,
+        "gesture": "short"
+      },
+      "expected": {
+        "calls": [
+          "stock:home"
+        ],
+        "stockBypassCleared": true
+      }
+    },
+    {
+      "id": "launcher.gesture-all-apps-0",
+      "contract": "launcher.navigation-action",
+      "agents": [
+        "launcher"
+      ],
+      "reference": "dock-navigation-actions.test.js",
+      "input": {
+        "slot": "all-apps",
+        "display": 0,
+        "voyahtuneShort": true,
+        "gesture": "short"
+      },
+      "expected": {
+        "calls": [
+          "voyahtune:all-apps"
+        ],
+        "stockBypassCleared": true
+      }
+    },
+    {
+      "id": "launcher.gesture-all-apps-1",
+      "contract": "launcher.navigation-action",
+      "agents": [
+        "launcher"
+      ],
+      "reference": "dock-navigation-actions.test.js",
+      "input": {
+        "slot": "all-apps",
+        "display": 1,
+        "voyahtuneShort": true,
+        "gesture": "short"
+      },
+      "expected": {
+        "calls": [
+          "stock:all-apps"
+        ],
+        "stockBypassCleared": true
+      }
+    }
+  ]
+}

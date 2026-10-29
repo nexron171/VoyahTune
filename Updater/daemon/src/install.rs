@@ -3,7 +3,10 @@ use crate::{
     device::{self, command},
     workflow::{self, Shared},
 };
-use release_core::payload::{self, Payload};
+use release_core::{
+    payload::{self, Payload},
+    runtime_maintenance::{Operation as RuntimeOperation, RuntimeMaintenance, Step as RuntimeStep},
+};
 use std::{
     fs,
     io::{self, Write},
@@ -17,12 +20,6 @@ mod postboot_check;
 
 pub const BLOCK: &str = "/data/local/bin/voyahtune-update.block";
 pub const LOCK: &str = "/data/local/voyahtune-install.lock";
-const STABLE: &[&str] = &[
-    "voyahtune-updater",
-    "voyahtune-updater.apk",
-    "voyahtune.updater.rc",
-    "voyahtune-ota-bootstrap.json",
-];
 fn error(e: impl ToString) -> io::Error {
     invalid(&e.to_string())
 }
@@ -35,6 +32,7 @@ mod tests {
     use super::*;
     use release_core::{
         payload::Artifact,
+        recipe::OTA_STABLE_ARTIFACTS as STABLE,
         recipe::{CopyFile, Phase},
     };
 
@@ -179,7 +177,7 @@ mod tests {
     fn runtime_files_are_copied_by_the_ota_executor() {
         let dir = tempfile::tempdir().unwrap();
         let mut p = compatibility_fixture(dir.path());
-        for name in ["voyahtune-new-voyahtune-loader", "voyahtune-new-agent.js"] {
+        for name in ["voyahtune-new-voyahtune-loader", "voyahtune-new-agents.dex"] {
             assert!(!STABLE.contains(&name));
             let source = p.root.join(name);
             fs::write(&source, b"new delivery").unwrap();
@@ -331,50 +329,78 @@ pub fn apply(shared: &Shared) -> io::Result<()> {
     workflow::update(shared, |s| s.completed_steps = 1)?;
     // Persist the non-retryable boundary before blocking app launches or changing release files.
     workflow::phase(shared, "applying", "Блокировка запуска приложений")?;
-    let mut block = fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o644)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(BLOCK)?;
-    block.write_all(b"OTA in progress; USB repair required if interrupted\n")?;
-    block.sync_all()?;
-    fs::File::open("/data/local/bin")?.sync_all()?;
-    workflow::phase(shared, "applying", "Остановка приложений и загрузчика")?;
-    command("/system/bin/setprop", &["ctl.stop", "voyahtune_load"], 10)?;
-    for _ in 0..20 {
-        let state = device::prop("init.svc.voyahtune_load")?;
-        if state == "stopped" || (state.is_empty()) {
-            break;
-        }
-        thread::sleep(Duration::from_millis(250));
-    }
-    let loader_state = device::prop("init.svc.voyahtune_load")?;
-    if loader_state != "stopped" && !(loader_state.is_empty()) {
-        return Err(invalid("Загрузчик hooks не остановился"));
-    }
-    {
+    let mut maintenance = RuntimeMaintenance::new(RuntimeOperation::Install);
+    maintenance.execute(RuntimeStep::Block, || {
+        let mut block = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o644)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(BLOCK)?;
+        block.write_all(b"OTA in progress; USB repair required if interrupted\n")?;
+        block.sync_all()?;
+        fs::File::open("/data/local/bin")?.sync_all()?;
+        workflow::phase(shared, "applying", "Остановка приложений и загрузчика")?;
         command(
             "/system/bin/sh",
             &[
                 "-c",
-                include_str!("../../../Packaging/installer/common/stop-loader-device.sh"),
+                include_str!(
+                    "../../../Packaging/installer/common/prepare-runtime-maintenance-device.sh"
+                ),
             ],
             30,
         )?;
-    }
-    for package in [payload::NATIVE, payload::RESTORE] {
-        if package == payload::RESTORE {
-            crate::restore_ui::stop_runtime()?;
-            continue;
-        }
+        Ok::<_, io::Error>(())
+    })?;
+    maintenance.execute(RuntimeStep::Quiesce, || {
         command(
-            "/system/bin/am",
-            &["force-stop", "--user", "0", package],
-            20,
+            "/system/bin/sh",
+            &[
+                "-c",
+                include_str!("../../../Packaging/installer/common/quiesce-runtime-device.sh"),
+            ],
+            90,
         )?;
-    }
+        Ok::<_, io::Error>(())
+    })?;
+    maintenance.execute(RuntimeStep::Stop, || {
+        command("/system/bin/setprop", &["ctl.stop", "voyahtune_load"], 10)?;
+        for _ in 0..20 {
+            let state = device::prop("init.svc.voyahtune_load")?;
+            if state == "stopped" || (state.is_empty()) {
+                break;
+            }
+            thread::sleep(Duration::from_millis(250));
+        }
+        let loader_state = device::prop("init.svc.voyahtune_load")?;
+        if loader_state != "stopped" && !(loader_state.is_empty()) {
+            return Err(invalid("Загрузчик hooks не остановился"));
+        }
+        {
+            command(
+                "/system/bin/sh",
+                &[
+                    "-c",
+                    include_str!("../../../Packaging/installer/common/stop-loader-device.sh"),
+                ],
+                30,
+            )?;
+        }
+        for package in [payload::NATIVE, payload::RESTORE] {
+            if package == payload::RESTORE {
+                crate::restore_ui::stop_runtime()?;
+                continue;
+            }
+            command(
+                "/system/bin/am",
+                &["force-stop", "--user", "0", package],
+                20,
+            )?;
+        }
+        Ok::<_, io::Error>(())
+    })?;
     {
         device::atomic_copy(
             &p.file("init.logcat.original.sh").map_err(error)?,
@@ -406,56 +432,62 @@ pub fn apply(shared: &Shared) -> io::Result<()> {
         10,
     );
     workflow::update(shared, |s| s.completed_steps = 2)?;
-    for f in &p.manifest.recipe.files {
-        if STABLE.contains(&f.artifact.as_str()) {
-            continue;
+    maintenance.execute(RuntimeStep::Copy, || {
+        for f in &p.manifest.recipe.files {
+            if !f.delivered_by_ota() {
+                continue;
+            }
+            workflow::phase(shared, "applying", &format!("Установка {}", f.artifact))?;
+            device::atomic_copy(
+                &p.file(&f.artifact).map_err(error)?,
+                Path::new(&f.destination),
+                f.mode,
+            )?;
         }
-        workflow::phase(shared, "applying", &format!("Установка {}", f.artifact))?;
-        device::atomic_copy(
-            &p.file(&f.artifact).map_err(error)?,
-            Path::new(&f.destination),
-            f.mode,
-        )?;
-    }
+        Ok::<_, io::Error>(())
+    })?;
     workflow::update(shared, |s| s.completed_steps = 3)?;
     workflow::phase(shared, "applying", "Права доступа и очистка старых файлов")?;
-    for dir in &p.manifest.recipe.directories {
-        device::no_links(Path::new(&dir.path))?;
-        fs::create_dir_all(&dir.path)?;
-        fs::set_permissions(&dir.path, fs::Permissions::from_mode(dir.mode))?;
-    }
-    for attr in &p.manifest.recipe.attributes {
-        device::no_links(Path::new(&attr.path))?;
-        fs::set_permissions(&attr.path, fs::Permissions::from_mode(attr.mode))?;
-    }
-    for path in &p.manifest.recipe.remove_files {
-        if p.manifest
-            .recipe
-            .files
-            .iter()
-            .any(|f| f.destination == *path)
-        {
-            continue;
+    maintenance.execute(RuntimeStep::Cleanup, || {
+        for dir in &p.manifest.recipe.directories {
+            device::no_links(Path::new(&dir.path))?;
+            fs::create_dir_all(&dir.path)?;
+            fs::set_permissions(&dir.path, fs::Permissions::from_mode(dir.mode))?;
         }
-        if path.starts_with("/sdcard/") {
-            continue;
-        } // Legacy external logs are outside OTA ownership.
-          // Unlink an obsolete symlink itself; never traverse its target.
-        device::no_links(Path::new(path).parent().unwrap())?;
-        match fs::remove_file(path) {
-            Ok(()) => {}
-            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e),
+        for attr in &p.manifest.recipe.attributes {
+            device::no_links(Path::new(&attr.path))?;
+            fs::set_permissions(&attr.path, fs::Permissions::from_mode(attr.mode))?;
         }
-    }
-    for path in &p.manifest.recipe.remove_directories {
-        device::no_links(Path::new(path))?;
-        match fs::remove_dir_all(path) {
-            Ok(()) => {}
-            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e),
+        for path in &p.manifest.recipe.remove_files {
+            if p.manifest
+                .recipe
+                .files
+                .iter()
+                .any(|f| f.destination == *path)
+            {
+                continue;
+            }
+            if path.starts_with("/sdcard/") {
+                continue;
+            } // Legacy external logs are outside OTA ownership.
+              // Unlink an obsolete symlink itself; never traverse its target.
+            device::no_links(Path::new(path).parent().unwrap())?;
+            match fs::remove_file(path) {
+                Ok(()) => {}
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e),
+            }
         }
-    }
+        for path in &p.manifest.recipe.remove_directories {
+            device::no_links(Path::new(path))?;
+            match fs::remove_dir_all(path) {
+                Ok(()) => {}
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e),
+            }
+        }
+        Ok::<_, io::Error>(())
+    })?;
     workflow::update(shared, |s| s.completed_steps = 4)?;
     let restore = Path::new("/data/local/tmp/voyahtune-restore-ota.apk");
     device::atomic_copy(&p.file("restore_mode.apk").map_err(error)?, restore, 0o644)?;
@@ -522,22 +554,25 @@ pub fn apply(shared: &Shared) -> io::Result<()> {
                     command("/system/bin/sync", &[], 30)?;
                 }
                 Step::Reboot => {
-                    workflow::update(shared, |s| s.completed_steps = 8)?;
-                    // Persist reboot intent only after every file and APK operation succeeded.
-                    workflow::update(shared, |s| {
-                        s.phase = "reboot-pending".into();
-                        s.step = "Перезагрузка ГУ".into();
-                        s.apply_boot = device::boot();
+                    maintenance.execute(RuntimeStep::Reboot, || {
+                        workflow::update(shared, |s| s.completed_steps = 8)?;
+                        // Persist reboot intent only after every file and APK operation succeeded.
+                        workflow::update(shared, |s| {
+                            s.phase = "reboot-pending".into();
+                            s.step = "Перезагрузка ГУ".into();
+                            s.apply_boot = device::boot();
+                        })?;
+                        crate::log(
+                            root(),
+                            &format!("reboot_pending version={}", claims.version),
+                        )?;
+                        fs::remove_file(BLOCK)?;
+                        fs::File::open("/data/local/bin")?.sync_all()?;
+                        command("/system/bin/sync", &[], 30)?;
+                        crate::telemetry::before_reboot()?;
+                        command("/system/bin/reboot", &[], 15)?;
+                        Ok::<_, io::Error>(())
                     })?;
-                    crate::log(
-                        root(),
-                        &format!("reboot_pending version={}", claims.version),
-                    )?;
-                    fs::remove_file(BLOCK)?;
-                    fs::File::open("/data/local/bin")?.sync_all()?;
-                    command("/system/bin/sync", &[], 30)?;
-                    crate::telemetry::before_reboot()?;
-                    command("/system/bin/reboot", &[], 15)?;
                 }
             }
             Ok(())
@@ -564,6 +599,12 @@ fn apply_navigation_fonts(model: release_core::vehicle_model::VehicleModel) -> i
 }
 
 pub fn validate(shared: &Shared) -> io::Result<()> {
+    let previous_boot = shared.lock().unwrap().state.apply_boot.clone();
+    let mut maintenance = RuntimeMaintenance::after_reboot(&previous_boot, &device::boot())?;
+    maintenance.execute(RuntimeStep::Check, || validate_after_reboot(shared))
+}
+
+fn validate_after_reboot(shared: &Shared) -> io::Result<()> {
     workflow::phase(shared, "validating", "Ожидание запуска Android и служб")?;
     let start = Instant::now();
     while device::prop("sys.boot_completed")? != "1" {

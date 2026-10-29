@@ -11,6 +11,7 @@ pub const CAPABILITIES: &[&str] = &[
     "infrastructure-v1",
     "restoremode-ota-ui-v1",
     "unified-runtime-v1",
+    "fixed-payload-v1",
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -29,7 +30,7 @@ impl Default for Requirements {
 impl Requirements {
     pub fn unified() -> Self {
         Self {
-            min_installer_version: "1.8.3".into(),
+            min_installer_version: "1.8.5".into(),
             required_capabilities: CAPABILITIES
                 .iter()
                 .map(|capability| capability.to_string())

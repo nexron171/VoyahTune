@@ -88,20 +88,33 @@ def zip_payload(folder, output):
 
 
 def payload_entry(folder, archive, minimum_ota_version):
-    manifest = json.loads((folder / "manifest.json").read_text())
-    version = manifest["releaseVersion"]
-    entry = {
+    metadata = payload_metadata(folder)
+    version = metadata["releaseVersion"]
+    return {
         "version": version,
         "url": f"https://github.com/nexron171/VoyahTune/releases/download/v{version}/{archive.name}",
         "size": archive.stat().st_size,
         "sha256": sha(archive),
+        "minimumInstallerVersion": metadata["minimumInstallerVersion"],
+        "minimumOtaVersion": minimum_ota_version,
     }
-    if manifest.get("infrastructure") == "unified":
-        entry["minimumInstallerVersion"] = manifest["requirements"][
-            "minInstallerVersion"
-        ]
-        entry["minimumOtaVersion"] = minimum_ota_version
-    return entry
+
+
+def payload_metadata(folder):
+    with zipfile.ZipFile(folder / "common/restore_mode.apk") as apk:
+        return json.loads(apk.read("assets/voyahtune-build.json"))
+
+
+def payload_identity(folder):
+    digest = hashlib.sha256()
+    for path in sorted((folder / "common").iterdir()):
+        if path.is_symlink() or not path.is_file():
+            raise ValueError(f"Invalid payload entry: {path}")
+        name = path.name.encode()
+        digest.update(len(name).to_bytes(8, "little"))
+        digest.update(name)
+        digest.update(sha(path).encode())
+    return digest.hexdigest()
 
 
 def normalize_version(value):

@@ -1,0 +1,563 @@
+{
+  "schema": 1,
+  "cases": [
+    {
+      "id": "windows.task-native",
+      "contract": "windows.task-removal",
+      "agents": [
+        "windows"
+      ],
+      "reference": "native-task-removal.test.js",
+      "input": {
+        "nativeUid": 10060,
+        "callerUid": 10060,
+        "task": 42,
+        "originalError": false
+      },
+      "expected": {
+        "trace": [
+          [
+            "clear"
+          ],
+          [
+            "remove",
+            42,
+            1000
+          ],
+          [
+            "restore",
+            10060
+          ]
+        ],
+        "finalUid": 10060,
+        "errorPreserved": false
+      }
+    },
+    {
+      "id": "windows.task-foreign",
+      "contract": "windows.task-removal",
+      "agents": [
+        "windows"
+      ],
+      "reference": "native-task-removal.test.js",
+      "input": {
+        "nativeUid": 10060,
+        "callerUid": 10123,
+        "task": 42,
+        "originalError": false
+      },
+      "expected": {
+        "trace": [
+          [
+            "remove",
+            42,
+            10123
+          ]
+        ],
+        "finalUid": 10123,
+        "errorPreserved": false
+      }
+    },
+    {
+      "id": "windows.task-unresolved",
+      "contract": "windows.task-removal",
+      "agents": [
+        "windows"
+      ],
+      "reference": "native-task-removal.test.js",
+      "input": {
+        "nativeUid": -1,
+        "callerUid": 10060,
+        "task": 42,
+        "originalError": false
+      },
+      "expected": {
+        "trace": [
+          [
+            "remove",
+            42,
+            10060
+          ]
+        ],
+        "finalUid": 10060,
+        "errorPreserved": false
+      }
+    },
+    {
+      "id": "windows.task-original-error",
+      "contract": "windows.task-removal",
+      "agents": [
+        "windows"
+      ],
+      "reference": "native-task-removal.test.js",
+      "input": {
+        "nativeUid": 10060,
+        "callerUid": 10060,
+        "task": 42,
+        "originalError": true
+      },
+      "expected": {
+        "trace": [
+          [
+            "clear"
+          ],
+          [
+            "remove",
+            42,
+            1000
+          ],
+          [
+            "restore",
+            10060
+          ]
+        ],
+        "finalUid": 10060,
+        "errorPreserved": true
+      }
+    },
+    {
+      "id": "windows.ime-owned",
+      "contract": "windows.ime",
+      "agents": [
+        "windows"
+      ],
+      "reference": "vd-stability.test.js",
+      "input": {
+        "display": {},
+        "stockResult": false
+      },
+      "expected": {
+        "result": true,
+        "originalCalls": 0
+      }
+    },
+    {
+      "id": "windows.ime-physical-driver",
+      "contract": "windows.ime",
+      "agents": [
+        "windows"
+      ],
+      "reference": "vd-stability.test.js",
+      "input": {
+        "display": {
+          "type": 1,
+          "id": 0
+        },
+        "stockResult": false
+      },
+      "expected": {
+        "result": false,
+        "originalCalls": 1
+      }
+    },
+    {
+      "id": "windows.ime-physical-passenger",
+      "contract": "windows.ime",
+      "agents": [
+        "windows"
+      ],
+      "reference": "vd-stability.test.js",
+      "input": {
+        "display": {
+          "type": 1,
+          "id": 1
+        },
+        "stockResult": true
+      },
+      "expected": {
+        "result": true,
+        "originalCalls": 1
+      }
+    },
+    {
+      "id": "windows.ime-foreign-uid",
+      "contract": "windows.ime",
+      "agents": [
+        "windows"
+      ],
+      "reference": "vd-stability.test.js",
+      "input": {
+        "display": {
+          "uid": 10100
+        },
+        "stockResult": false
+      },
+      "expected": {
+        "result": false,
+        "originalCalls": 1
+      }
+    },
+    {
+      "id": "windows.ime-foreign-package",
+      "contract": "windows.ime",
+      "agents": [
+        "windows"
+      ],
+      "reference": "vd-stability.test.js",
+      "input": {
+        "display": {
+          "package": "another.package"
+        },
+        "stockResult": false
+      },
+      "expected": {
+        "result": false,
+        "originalCalls": 1
+      }
+    },
+    {
+      "id": "windows.ime-untrusted",
+      "contract": "windows.ime",
+      "agents": [
+        "windows"
+      ],
+      "reference": "vd-stability.test.js",
+      "input": {
+        "display": {
+          "trusted": false
+        },
+        "stockResult": false
+      },
+      "expected": {
+        "result": false,
+        "originalCalls": 1
+      }
+    },
+    {
+      "id": "windows.ime-metadata-error",
+      "contract": "windows.ime",
+      "agents": [
+        "windows"
+      ],
+      "reference": "vd-stability.test.js",
+      "input": {
+        "display": {
+          "metadataError": true
+        },
+        "stockResult": true
+      },
+      "expected": {
+        "result": true,
+        "originalCalls": 1
+      }
+    },
+    {
+      "id": "windows.prepare-wait",
+      "contract": "windows.bootstrap",
+      "agents": [
+        "windows"
+      ],
+      "reference": "vd-stability.test.js",
+      "input": {
+        "readyAt": 5000,
+        "advance": 0
+      },
+      "expected": {
+        "state": "preparing",
+        "hookCount": 0,
+        "receiverCount": 0
+      }
+    },
+    {
+      "id": "windows.prepare-deadline",
+      "contract": "windows.bootstrap",
+      "agents": [
+        "windows"
+      ],
+      "reference": "vd-stability.test.js",
+      "input": {
+        "readyAt": 999999,
+        "advance": 40000
+      },
+      "expected": {
+        "state": "failed",
+        "hookCount": 0,
+        "receiverCount": 0
+      }
+    },
+    {
+      "id": "windows.abi-mismatch",
+      "contract": "windows.bootstrap",
+      "agents": [
+        "windows"
+      ],
+      "reference": "vd-stability.test.js",
+      "input": {
+        "missingRequiredMethod": true
+      },
+      "expected": {
+        "state": "failed",
+        "hookCount": 0,
+        "receiverCount": 0
+      }
+    },
+    {
+      "id": "windows.partial-install",
+      "contract": "windows.bootstrap",
+      "agents": [
+        "windows"
+      ],
+      "reference": "vd-stability.test.js",
+      "input": {
+        "failInstallAt": 3
+      },
+      "expected": {
+        "state": "failed",
+        "hookCount": 0,
+        "receiverCount": 0
+      }
+    },
+    {
+      "id": "windows.wifi-release",
+      "contract": "windows.wifi-lease",
+      "agents": [
+        "windows"
+      ],
+      "reference": "carplay-wifi-scan-pause.test.js",
+      "input": {
+        "initial": {},
+        "events": [
+          "flush",
+          "release",
+          [
+            "advance",
+            1000
+          ]
+        ]
+      },
+      "expected": {
+        "writes": [
+          false,
+          true
+        ],
+        "enabled": true
+      }
+    },
+    {
+      "id": "windows.wifi-dead-client",
+      "contract": "windows.wifi-lease",
+      "agents": [
+        "windows"
+      ],
+      "reference": "carplay-wifi-scan-pause.test.js",
+      "input": {
+        "initial": {},
+        "events": [
+          [
+            "advance",
+            10000
+          ]
+        ]
+      },
+      "expected": {
+        "writes": [
+          false,
+          true
+        ],
+        "enabled": true
+      }
+    },
+    {
+      "id": "windows.wifi-invalid-lease",
+      "contract": "windows.wifi-lease",
+      "agents": [
+        "windows"
+      ],
+      "reference": "carplay-wifi-scan-pause.test.js",
+      "input": {
+        "initial": {
+          "lease": "6:1000"
+        },
+        "events": [
+          "flush"
+        ]
+      },
+      "expected": {
+        "writes": [],
+        "enabled": true
+      }
+    },
+    {
+      "id": "windows.wifi-mutation-failure",
+      "contract": "windows.wifi-lease",
+      "agents": [
+        "windows"
+      ],
+      "reference": "carplay-wifi-scan-pause.test.js",
+      "input": {
+        "initial": {},
+        "events": [
+          "fail-next-mutation",
+          "flush"
+        ]
+      },
+      "expected": {
+        "writes": [
+          false,
+          true
+        ],
+        "enabled": true
+      }
+    },
+    {
+      "id": "windows.wifi-settings-error",
+      "contract": "windows.wifi-lease",
+      "agents": [
+        "windows"
+      ],
+      "reference": "carplay-wifi-scan-pause.test.js",
+      "input": {
+        "initial": {},
+        "events": [
+          "flush",
+          "settings-failure",
+          [
+            "advance",
+            1000
+          ]
+        ]
+      },
+      "expected": {
+        "writes": [
+          false,
+          true
+        ],
+        "enabled": true
+      }
+    },
+    {
+      "id": "windows.wifi-agent-failure",
+      "contract": "windows.wifi-lease",
+      "agents": [
+        "windows"
+      ],
+      "reference": "carplay-wifi-scan-pause.test.js",
+      "input": {
+        "initial": {},
+        "events": [
+          "flush",
+          "agent-failure",
+          [
+            "advance",
+            1000
+          ]
+        ]
+      },
+      "expected": {
+        "writes": [
+          false,
+          true
+        ],
+        "enabled": true
+      }
+    },
+    {
+      "id": "windows.memory-session",
+      "contract": "windows.memory-protection",
+      "agents": [
+        "windows"
+      ],
+      "reference": "carplay-memory-protection.test.js",
+      "input": {
+        "process": "ru.big.town.restoremode",
+        "foreground": true,
+        "activity": "CarPlayHostActivity",
+        "adjustment": 200
+      },
+      "expected": {
+        "adjustment": 0,
+        "destroyable": false
+      }
+    },
+    {
+      "id": "windows.memory-ended",
+      "contract": "windows.memory-protection",
+      "agents": [
+        "windows"
+      ],
+      "reference": "carplay-memory-protection.test.js",
+      "input": {
+        "process": "ru.big.town.restoremode",
+        "foreground": false,
+        "activity": "CarPlayHostActivity",
+        "adjustment": 200
+      },
+      "expected": {
+        "adjustment": 200,
+        "destroyable": true
+      }
+    },
+    {
+      "id": "windows.memory-other-process",
+      "contract": "windows.memory-protection",
+      "agents": [
+        "windows"
+      ],
+      "reference": "carplay-memory-protection.test.js",
+      "input": {
+        "process": "other.package",
+        "foreground": true,
+        "activity": "CarPlayHostActivity",
+        "adjustment": 200
+      },
+      "expected": {
+        "adjustment": 200,
+        "destroyable": true
+      }
+    },
+    {
+      "id": "windows.memory-updater",
+      "contract": "windows.memory-protection",
+      "agents": [
+        "windows"
+      ],
+      "reference": "carplay-memory-protection.test.js",
+      "input": {
+        "process": "ru.big.town.restoremode:ota",
+        "foreground": true,
+        "activity": "CarPlayHostActivity",
+        "adjustment": 200
+      },
+      "expected": {
+        "adjustment": 200,
+        "destroyable": true
+      }
+    },
+    {
+      "id": "windows.memory-other-activity",
+      "contract": "windows.memory-protection",
+      "agents": [
+        "windows"
+      ],
+      "reference": "carplay-memory-protection.test.js",
+      "input": {
+        "process": "ru.big.town.restoremode",
+        "foreground": true,
+        "activity": "DiPlayActivity",
+        "adjustment": 200
+      },
+      "expected": {
+        "adjustment": 0,
+        "destroyable": true
+      }
+    },
+    {
+      "id": "windows.memory-higher-priority",
+      "contract": "windows.memory-protection",
+      "agents": [
+        "windows"
+      ],
+      "reference": "carplay-memory-protection.test.js",
+      "input": {
+        "process": "ru.big.town.restoremode",
+        "foreground": true,
+        "activity": "CarPlayHostActivity",
+        "adjustment": -100
+      },
+      "expected": {
+        "adjustment": -100,
+        "destroyable": false
+      }
+    }
+  ]
+}

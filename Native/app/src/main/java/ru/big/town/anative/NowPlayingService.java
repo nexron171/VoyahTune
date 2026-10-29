@@ -53,7 +53,7 @@ import java.util.concurrent.atomic.AtomicLong;
  *   <li>broadcast {@link #ACTION_NOW_PLAYING} с текстовыми extras (push: живое обновление UI).
  * </ul>
  *
- * <p>Фича не завязана на Frida/VD — Native является priv-app.
+ * <p>Native is a privileged app and owns media-session access.
  */
 public class NowPlayingService extends Service {
 

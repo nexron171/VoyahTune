@@ -1,7 +1,6 @@
 #!/bin/bash
 # Rebuild selected desktop tools using macOS and the prepared Colima builders.
 set -euo pipefail
-
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$ROOT"
 
@@ -13,7 +12,6 @@ MAC=0
 WINDOWS=0
 WINDOWS_ARCH=''
 LINUX_BUILD=0
-
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --help|-h)
@@ -22,69 +20,31 @@ while [[ $# -gt 0 ]]; do
       echo '--windows builds all three architectures; --windows-arch selects one. Linux requires --linux.'
       echo 'Use ./make_release.sh VERSION --minimum-ota-version VERSION --installers for the complete release.'
       echo '--check: check the prepared build environment without building.'
-      exit 0
-      ;;
-    --pi|--od)
-      echo 'Only the unified runtime is supported; omit --pi/--od.' >&2
-      exit 2
-      ;;
+      exit 0 ;;
+    --pi|--od) echo 'Only the unified runtime is supported; omit --pi/--od.' >&2; exit 2 ;;
     --catalog-url)
       [[ $# -ge 2 ]] || { echo 'Missing --catalog-url value' >&2; exit 2; }
-      CATALOG_URL=$2
-      shift 2
-      ;;
-    --check)
-      CHECK=1
-      shift
-      ;;
-    --mac)
-      MAC=1
-      shift
-      ;;
-    --windows)
-      WINDOWS=1
-      shift
-      ;;
-    --linux)
-      LINUX_BUILD=1
-      shift
-      ;;
+      CATALOG_URL=$2; shift 2 ;;
+    --check) CHECK=1; shift ;;
+    --mac) MAC=1; shift ;;
+    --windows) WINDOWS=1; shift ;;
+    --linux) LINUX_BUILD=1; shift ;;
     --windows-arch)
       [[ $# -ge 2 ]] || { echo 'Missing --windows-arch value' >&2; exit 2; }
       [[ $2 == x64 || $2 == x86 || $2 == arm64 ]] || { echo 'Windows architecture must be x64, x86 or arm64' >&2; exit 2; }
-      WINDOWS_ARCH=$2
-      WINDOWS=1
-      shift 2
-      ;;
+      WINDOWS_ARCH=$2; WINDOWS=1; shift 2 ;;
     --payload|--output)
       [[ $# -ge 2 ]] || { echo "Missing value for $1" >&2; exit 2; }
-      if [[ $1 == --payload ]]; then
-        PAYLOAD=$2
-      else
-        OUTPUT=$2
-      fi
-      shift 2
-      ;;
-    *)
-      echo "Unknown argument: $1" >&2
-      exit 2
-      ;;
+      if [[ $1 == --payload ]]; then PAYLOAD=$2; else OUTPUT=$2; fi
+      shift 2 ;;
+    *) echo "Unknown argument: $1" >&2; exit 2 ;;
   esac
 done
-
 CATALOG_ARGS=()
-if [[ -n "$CATALOG_URL" ]]; then
-  CATALOG_ARGS+=(--catalog-url "$CATALOG_URL")
-fi
-if [[ $MAC == 0 && $WINDOWS == 0 && $LINUX_BUILD == 0 ]]; then
-  MAC=1
-  WINDOWS=1
-fi
-
+if [[ -n "$CATALOG_URL" ]]; then CATALOG_ARGS+=(--catalog-url "$CATALOG_URL"); fi
+if [[ $MAC == 0 && $WINDOWS == 0 && $LINUX_BUILD == 0 ]]; then MAC=1; WINDOWS=1; fi
 WINDOWS_ARCHITECTURES=(x64 x86 arm64)
-if [[ -n "$WINDOWS_ARCH" ]]; then
-  WINDOWS_ARCHITECTURES=("$WINDOWS_ARCH")
-fi
+if [[ -n "$WINDOWS_ARCH" ]]; then WINDOWS_ARCHITECTURES=("$WINDOWS_ARCH"); fi
 WINDOWS_TARGETS=()
 for architecture in "${WINDOWS_ARCHITECTURES[@]}"; do
   case "$architecture" in
@@ -93,52 +53,36 @@ for architecture in "${WINDOWS_ARCHITECTURES[@]}"; do
     arm64) WINDOWS_TARGETS+=(aarch64-pc-windows-msvc) ;;
   esac
 done
-
 TOOLCHAIN=$(python3 -c 'import tomllib; print(tomllib.load(open("Installer/rust-toolchain.toml","rb"))["toolchain"]["channel"])')
 REMOTE=0
-if [[ $WINDOWS == 1 || $LINUX_BUILD == 1 ]]; then
-  REMOTE=1
-fi
-
+if [[ $WINDOWS == 1 || $LINUX_BUILD == 1 ]]; then REMOTE=1; fi
 if [[ $CHECK != 1 ]]; then
   PACKAGE_VERSION=$(python3 -c 'import tomllib; print(tomllib.load(open("Installer/Cargo.toml","rb"))["workspace"]["package"]["version"])')
   if [[ -n "$PAYLOAD" ]]; then
     PAYLOAD=$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$PAYLOAD")
   fi
   DEFAULT_OUTPUT="$ROOT/Releases/build/installers-$PACKAGE_VERSION"
-  if [[ -n "$WINDOWS_ARCH" ]]; then
-    DEFAULT_OUTPUT="$DEFAULT_OUTPUT-windows-$WINDOWS_ARCH"
-  fi
+  if [[ -n "$WINDOWS_ARCH" ]]; then DEFAULT_OUTPUT="$DEFAULT_OUTPUT-windows-$WINDOWS_ARCH"; fi
   OUTPUT=${OUTPUT:-"$DEFAULT_OUTPUT"}
   OUTPUT=$(python3 - "$OUTPUT" "$ROOT/Releases" <<'PYLOAD'
 from pathlib import Path
 import sys
-
-output = Path(sys.argv[1]).resolve()
-releases = Path(sys.argv[2]).resolve()
-assert output.is_relative_to(releases) and len(output.relative_to(releases).parts) >= 2, (
-    'Output must be a release subdirectory inside Releases/build or Releases/dist'
-)
-print(output)
+p=Path(sys.argv[1]).resolve()
+root=Path(sys.argv[2]).resolve()
+assert p.is_relative_to(root) and len(p.relative_to(root).parts)>=2, 'Output must be a release subdirectory inside Releases/build or Releases/dist'
+print(p)
 PYLOAD
 )
 fi
-
 [[ $(uname -s) == Darwin ]] || { echo 'This script requires macOS' >&2; exit 1; }
 TOOLS=(node npm python3)
-if [[ $REMOTE == 1 ]]; then
-  TOOLS+=(docker colima rsync)
-fi
-if [[ $MAC == 1 ]]; then
-  TOOLS+=(xcrun lipo)
-fi
+if [[ $REMOTE == 1 ]]; then TOOLS+=(docker colima rsync); fi
+if [[ $MAC == 1 ]]; then TOOLS+=(xcrun lipo); fi
 for tool in "${TOOLS[@]}"; do
   command -v "$tool" >/dev/null || { echo "Missing command: $tool" >&2; exit 1; }
 done
 python3 -c 'import sys; assert sys.version_info >= (3,12), "Python 3.12+ required"'
-if [[ $MAC == 1 ]]; then
-  xcrun --find clang >/dev/null
-fi
+if [[ $MAC == 1 ]]; then xcrun --find clang >/dev/null; fi
 
 export COLIMA_HOME="$ROOT/Releases/cache/colima"
 DOCKER=(docker --host "unix://$COLIMA_HOME/v/docker.sock")
@@ -150,12 +94,9 @@ STAGE=''
 STARTED_VM=0
 STARTED_CONTAINERS=()
 COMPLETED=0
-
 cleanup() {
   result=$?
-  if [[ $result == 0 && $COMPLETED != 1 ]]; then
-    result=1
-  fi
+  if [[ $result == 0 && $COMPLETED != 1 ]]; then result=1; fi
   trap - EXIT
   if [[ ${#STARTED_CONTAINERS[@]} -gt 0 ]]; then
     "${DOCKER[@]}" stop "${STARTED_CONTAINERS[@]}" >>"$LOGS/cleanup.log" 2>&1 || true
@@ -165,140 +106,98 @@ cleanup() {
   fi
   [[ -z "$STAGE" ]] || rm -rf "$STAGE"
   rmdir "$LOCK"
-  if [[ $result != 0 ]]; then
-    echo "Build failed. Logs: $LOGS" >&2
-  fi
+  if [[ $result != 0 ]]; then echo "Build failed. Logs: $LOGS" >&2; fi
   exit "$result"
 }
-
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 echo "Logs: $LOGS"
-
 if [[ $REMOTE == 1 ]]; then
-  # Colima ignores COLIMA_HOME when the directory does not exist.
-  mkdir -p "$COLIMA_HOME"
-  if ! "${DOCKER[@]}" info >"$LOGS/docker.log" 2>&1; then
-    if [[ ! -f "$COLIMA_HOME/v/colima.yaml" ]]; then
-      echo "Missing prepared Colima profile v in $COLIMA_HOME." >&2
-      echo 'See Installer/BUILDING.md, section "Подготовка Colima и контейнеров с нуля".' >&2
-      exit 1
-    fi
-    echo 'Starting Colima profile v…'
-    colima start v --activate=false >"$LOGS/colima.log" 2>&1
-    STARTED_VM=1
-    if ! "${DOCKER[@]}" info >"$LOGS/docker.log" 2>&1; then
-      cat "$LOGS/docker.log" >&2
-      echo "Docker is unavailable at unix://$COLIMA_HOME/v/docker.sock after starting Colima." >&2
-      exit 1
-    fi
-  fi
-
-  PAIRS=()
-  if [[ $WINDOWS == 1 ]]; then
-    PAIRS+=('vti-windows:windows')
-  fi
-  if [[ $LINUX_BUILD == 1 ]]; then
-    PAIRS+=('vti-linux-amd64:linux-amd64')
-  fi
-  for pair in "${PAIRS[@]}"; do
-    container=${pair%%:*}
-    host_directory="$ROOT/Releases/build/hosts/${pair#*:}"
-    if ! "${DOCKER[@]}" container inspect "$container" >"$LOGS/$container.json" 2>"$LOGS/$container-inspect.log"; then
-      cat "$LOGS/$container-inspect.log" >&2
-      echo "Cannot inspect prepared container $container. See Installer/BUILDING.md for setup." >&2
-      exit 1
-    fi
-    python3 - "$LOGS/$container.json" "$host_directory" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-container = json.loads(Path(sys.argv[1]).read_text())[0]
-host_directory = Path(sys.argv[2]).resolve()
-assert any(
-    mount['Destination'] == '/work'
-    and mount['Type'] == 'bind'
-    and mount['RW']
-    and Path(mount['Source']).resolve() == host_directory
-    for mount in container['Mounts']
-), f"Wrong /work mount in {container['Name']}; refusing to build in another checkout"
-PY
-    if [[ $("${DOCKER[@]}" inspect -f '{{.State.Running}}' "$container") != true ]]; then
-      "${DOCKER[@]}" start "$container" >/dev/null
-      STARTED_CONTAINERS+=("$container")
-    fi
-  done
-
-  if [[ $WINDOWS == 1 ]]; then
-    "${DOCKER[@]}" exec vti-windows sh -c 'command -v cargo-xwin && command -v 7z' >"$LOGS/windows-environment.log"
-    if [[ $CHECK != 1 ]]; then
-      "${DOCKER[@]}" exec vti-windows rustup target add --toolchain "$TOOLCHAIN" "${WINDOWS_TARGETS[@]}" >>"$LOGS/windows-environment.log" 2>&1
-    fi
-    "${DOCKER[@]}" exec vti-windows rustup target list --toolchain "$TOOLCHAIN" --installed >"$LOGS/windows-targets.log"
-    for target in "${WINDOWS_TARGETS[@]}"; do
-      if ! grep -Fx "$target" "$LOGS/windows-targets.log" >/dev/null; then
-        echo "Missing Windows Rust target $target for toolchain $TOOLCHAIN. See Installer/BUILDING.md for setup." >&2
-        exit 1
-      fi
-    done
-  fi
-  if [[ $LINUX_BUILD == 1 ]]; then
-    "${DOCKER[@]}" exec vti-linux-amd64 sh -c 'test "$(uname -m)" = x86_64 && command -v node && command -v cargo && command -v patchelf && command -v strip' >"$LOGS/linux-environment.log"
-  fi
+if ! "${DOCKER[@]}" info >/dev/null 2>&1; then
+  echo 'Starting Colima profile v…'
+  colima start v >"$LOGS/colima.log" 2>&1
+  STARTED_VM=1
 fi
 
+PAIRS=()
+if [[ $WINDOWS == 1 ]]; then PAIRS+=('vti-windows:windows'); fi
+if [[ $LINUX_BUILD == 1 ]]; then PAIRS+=('vti-linux-amd64:linux-amd64'); fi
+for pair in "${PAIRS[@]}"; do
+  container=${pair%%:*}
+  hostdir="$ROOT/Releases/build/hosts/${pair#*:}"
+  if ! "${DOCKER[@]}" inspect "$container" >"$LOGS/$container.json" 2>/dev/null; then
+    echo "Missing prepared container $container. See Installer/BUILDING.md." >&2
+    exit 1
+  fi
+  python3 - "$LOGS/$container.json" "$hostdir" <<'PY'
+import json,sys
+from pathlib import Path
+c=json.load(open(sys.argv[1]))[0]
+assert any(m['Destination']=='/work' and m['Type']=='bind' and m['RW']
+           and Path(m['Source']).resolve()==Path(sys.argv[2]).resolve()
+           for m in c['Mounts']), f"Wrong /work mount in {c['Name']}; refusing to build in another checkout"
+PY
+  if [[ $("${DOCKER[@]}" inspect -f '{{.State.Running}}' "$container") != true ]]; then
+    "${DOCKER[@]}" start "$container" >/dev/null
+    STARTED_CONTAINERS+=("$container")
+  fi
+done
+if [[ $WINDOWS == 1 ]]; then
+  "${DOCKER[@]}" exec vti-windows sh -c 'command -v cargo-xwin && command -v 7z' >"$LOGS/windows-environment.log"
+  if [[ $CHECK != 1 ]]; then
+    "${DOCKER[@]}" exec vti-windows rustup target add --toolchain "$TOOLCHAIN" "${WINDOWS_TARGETS[@]}" >>"$LOGS/windows-environment.log" 2>&1
+  fi
+  "${DOCKER[@]}" exec vti-windows rustup target list --toolchain "$TOOLCHAIN" --installed >"$LOGS/windows-targets.log"
+  for target in "${WINDOWS_TARGETS[@]}"; do
+    grep -Fx "$target" "$LOGS/windows-targets.log" >/dev/null
+  done
+fi
+if [[ $LINUX_BUILD == 1 ]]; then "${DOCKER[@]}" exec vti-linux-amd64 sh -c 'test "$(uname -m)" = x86_64 && command -v node && command -v cargo && command -v patchelf && command -v strip' >"$LOGS/linux-environment.log"; fi
+fi
 if [[ -d "$ROOT/Releases/cache/cargo" && -z ${CARGO_HOME:-} ]]; then
   export CARGO_HOME="$ROOT/Releases/cache/cargo"
   export RUSTUP_HOME="$ROOT/Releases/cache/rustup"
   export PATH="$CARGO_HOME/bin:$PATH"
 fi
 if [[ $MAC == 1 ]]; then
-  rustup target list --toolchain "$TOOLCHAIN" --installed >"$LOGS/macos-targets.log"
-  grep -Fx aarch64-apple-darwin "$LOGS/macos-targets.log" >/dev/null
-  grep -Fx x86_64-apple-darwin "$LOGS/macos-targets.log" >/dev/null
+rustup target list --toolchain "$TOOLCHAIN" --installed >"$LOGS/macos-targets.log"
+grep -Fx aarch64-apple-darwin "$LOGS/macos-targets.log" >/dev/null
+grep -Fx x86_64-apple-darwin "$LOGS/macos-targets.log" >/dev/null
 fi
-
 PINNED_DEPLOYER="$ROOT/Releases/cache/linuxdeploy-x86_64-new.AppImage"
 if [[ $LINUX_BUILD == 1 && ( $(uname -m) == arm64 || -f "$PINNED_DEPLOYER" ) ]]; then
   python3 - "$PINNED_DEPLOYER" <<'PY'
 import hashlib
 import sys
 from pathlib import Path
-
 deployer = Path(sys.argv[1])
-assert deployer.is_file(), f"Missing verified Rosetta deployer: {deployer}. See Installer/BUILDING.md."
-expected_checksum = '36a2d7e274d12e1050d0e9ecfe11d339ed54720b2bec464c286d53f8b07f5c62'
-assert hashlib.sha256(deployer.read_bytes()).hexdigest() == expected_checksum, (
-    f"Wrong deployer checksum: {deployer}"
-)
+if not deployer.is_file():
+    raise SystemExit(f"Missing verified Rosetta deployer: {deployer}. See Installer/BUILDING.md.")
+expected_sha256 = '8aea8da0f7f7039d2a2cecb14657d752a222a5e1d3825caeef186c82f751cdd1'
+if hashlib.sha256(deployer.read_bytes()).hexdigest() != expected_sha256:
+    raise SystemExit(f"Wrong deployer checksum: {deployer}. See Installer/BUILDING.md.")
 PY
 fi
-
-if [[ $CHECK == 1 ]]; then
-  COMPLETED=1
-  echo 'Environment checks passed. No tools rebuilt.'
-  exit 0
-fi
+if [[ $CHECK == 1 ]]; then COMPLETED=1; echo 'Environment checks passed. No tools rebuilt.'; exit 0; fi
 
 VERSION=$(python3 -c 'import tomllib; print(tomllib.load(open("Installer/Cargo.toml","rb"))["workspace"]["package"]["version"])')
 STAGE=$(mktemp -d "$ROOT/Releases/build/.installer-tools-XXXXXX")
 
 # Snapshot both container sources before any host build mutates generated resources.
 if [[ $REMOTE == 1 ]]; then
-  for pair in "${PAIRS[@]}"; do
-    host=${pair#*:}
-    rsync -a --delete --exclude target --exclude node_modules --exclude resources \
-      --exclude binaries --exclude dist --exclude gen \
-      Installer/ "Releases/build/hosts/$host/Installer/"
-    mkdir -p "Releases/build/hosts/$host/Packaging"
-    rsync -a --delete Packaging/ "Releases/build/hosts/$host/Packaging/"
-    if [[ -n "$PAYLOAD" ]]; then
-      mkdir -p "Releases/build/hosts/$host/Releases/build/embedded-payload"
-      rsync -a --delete "$PAYLOAD/" "Releases/build/hosts/$host/Releases/build/embedded-payload/"
-    fi
-  done
+for pair in "${PAIRS[@]}"; do
+  host=${pair#*:}
+  rsync -a --delete --exclude target --exclude node_modules --exclude resources \
+    --exclude binaries --exclude dist --exclude gen \
+    Installer/ "Releases/build/hosts/$host/Installer/"
+  mkdir -p "Releases/build/hosts/$host/Packaging"
+  rsync -a --delete Packaging/ "Releases/build/hosts/$host/Packaging/"
+  if [[ -n "$PAYLOAD" ]]; then
+    mkdir -p "Releases/build/hosts/$host/Releases/build/embedded-payload"
+    rsync -a --delete "$PAYLOAD/" "Releases/build/hosts/$host/Releases/build/embedded-payload/"
+  fi
+done
 fi
 if [[ $LINUX_BUILD == 1 && -f "$PINNED_DEPLOYER" ]]; then
   mkdir -p Releases/build/hosts/linux-amd64/Releases/cache
@@ -312,12 +211,12 @@ if [[ -n "$PAYLOAD" ]]; then
   REMOTE_PAYLOAD_ARGS=(--payload /work/Releases/build/embedded-payload)
 fi
 if [[ $MAC == 1 ]]; then
-  echo "macOS Universal tooling ${VERSION}…"
-  CARGO_TARGET_DIR="$ROOT/Installer/target" node Installer/scripts/build.mjs ${CATALOG_ARGS[@]+"${CATALOG_ARGS[@]}"} --bundles app ${PAYLOAD_ARGS[@]+"${PAYLOAD_ARGS[@]}"} >"$LOGS/macos.log" 2>&1
-  MAC_APP="$ROOT/Installer/target/universal-apple-darwin/release/bundle/macos/VoyahTune Installer.app"
-  COPYFILE_DISABLE=1 tar -czf "$STAGE/macos-universal.tar.gz" -C "$(dirname "$MAC_APP")" "$(basename "$MAC_APP")"
-fi
+echo "macOS Universal tooling ${VERSION}…"
+CARGO_TARGET_DIR="$ROOT/Installer/target" node Installer/scripts/build.mjs ${CATALOG_ARGS[@]+"${CATALOG_ARGS[@]}"} --bundles app ${PAYLOAD_ARGS[@]+"${PAYLOAD_ARGS[@]}"} >"$LOGS/macos.log" 2>&1
+MAC_APP="$ROOT/Installer/target/universal-apple-darwin/release/bundle/macos/VoyahTune Installer.app"
+COPYFILE_DISABLE=1 tar -czf "$STAGE/macos-universal.tar.gz" -C "$(dirname "$MAC_APP")" "$(basename "$MAC_APP")"
 
+fi
 # Build the common web frontend natively. In emulated x64 containers esbuild can
 # fail inside the Go garbage collector; only Rust and packaging run there.
 if [[ $REMOTE == 1 ]]; then
@@ -330,7 +229,6 @@ if [[ $REMOTE == 1 ]]; then
     rsync -a --delete Installer/desktop/dist/ "Releases/build/hosts/$host/Releases/build/frontend/"
   done
 fi
-
 if [[ $WINDOWS == 1 ]]; then
   for index in "${!WINDOWS_ARCHITECTURES[@]}"; do
     architecture=${WINDOWS_ARCHITECTURES[$index]}
@@ -343,11 +241,10 @@ if [[ $WINDOWS == 1 ]]; then
     "${DOCKER[@]}" exec vti-windows 7z t "/work/Installer/target/$target/release/bundle/nsis/$installer" >"$LOGS/windows-$architecture-verify.log" 2>&1
   done
 fi
-
 if [[ $LINUX_BUILD == 1 ]]; then
-  echo 'Linux x64 tooling…'
-  "${DOCKER[@]}" exec -w /work vti-linux-amd64 node Installer/scripts/build.mjs ${CATALOG_ARGS[@]+"${CATALOG_ARGS[@]}"} --frontend-dist /work/Releases/build/frontend --no-bundle ${REMOTE_PAYLOAD_ARGS[@]+"${REMOTE_PAYLOAD_ARGS[@]}"} >"$LOGS/linux.log" 2>&1
-  "${DOCKER[@]}" exec -i -w /work vti-linux-amd64 bash -s >"$LOGS/linux-package.log" 2>&1 <<'LINUX'
+echo 'Linux x64 tooling…'
+"${DOCKER[@]}" exec -w /work vti-linux-amd64 node Installer/scripts/build.mjs ${CATALOG_ARGS[@]+"${CATALOG_ARGS[@]}"} --frontend-dist /work/Releases/build/frontend --no-bundle ${REMOTE_PAYLOAD_ARGS[@]+"${REMOTE_PAYLOAD_ARGS[@]}"} >"$LOGS/linux.log" 2>&1
+"${DOCKER[@]}" exec -i -w /work vti-linux-amd64 bash -s >"$LOGS/linux-package.log" 2>&1 <<'LINUX'
 set -euo pipefail
 mkdir -p /opt/target/release
 cp Installer/target/release/voyahtune-desktop /opt/target/release/
@@ -357,7 +254,7 @@ if ! CARGO_TARGET_DIR=/opt/target npm run tauri -- bundle --bundles appimage --c
   cat /tmp/vti-all-bundle.log
   grep -q 'failed to run linuxdeploy' /tmp/vti-all-bundle.log
   # Known Rosetta/static PIE output-plugin failure. Only use the verified deployer.
-  echo '36a2d7e274d12e1050d0e9ecfe11d339ed54720b2bec464c286d53f8b07f5c62  /work/Releases/cache/linuxdeploy-pinned.AppImage' | sha256sum -c -
+  echo '8aea8da0f7f7039d2a2cecb14657d752a222a5e1d3825caeef186c82f751cdd1  /work/Releases/cache/linuxdeploy-pinned.AppImage' | sha256sum -c -
   # Its AppImage runtime is also static PIE. Extract the pinned SquashFS directly;
   # offset 944632 belongs to the SHA-256 checked immediately above.
   rm -rf /opt/vti-linuxdeploy-pinned
@@ -387,63 +284,37 @@ python3 Installer/scripts/package-linux.py \
   --output /work/Releases/dist/linux-all-x64.run
 /work/Installer/target/release/installer-build verify-host /work/Installer/desktop/src-tauri/resources/bundle
 LINUX
-  cp Releases/build/hosts/linux-amd64/Releases/dist/linux-all-x64.run "$STAGE/linux-x64.run"
-  chmod +x "$STAGE/linux-x64.run"
+cp Releases/build/hosts/linux-amd64/Releases/dist/linux-all-x64.run "$STAGE/linux-x64.run"
+chmod +x "$STAGE/linux-x64.run"
 fi
-
 python3 - "$STAGE" "$OUTPUT" "$PAYLOAD" "$VERSION" "$CATALOG_URL" <<'PY'
-import hashlib
-import json
-import sys
+import hashlib,json,sys
 from pathlib import Path
-
-
-def sha256(path):
-    digest = hashlib.sha256()
-    with path.open('rb') as source:
-        for block in iter(lambda: source.read(1024 * 1024), b''):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-stage, destination = map(Path, sys.argv[1:3])
-payload = Path(sys.argv[3]) if sys.argv[3] else None
-manifest = json.loads((payload / 'manifest.json').read_text()) if payload else None
-platforms = {}
-for name, filename in [
-    ('macos', 'macos-universal.tar.gz'),
-    ('windows-x64', 'windows-x64.exe'),
-    ('windows-x86', 'windows-x86.exe'),
-    ('windows-arm64', 'windows-arm64.exe'),
-    ('linux', 'linux-x64.run'),
-]:
-    artifact = stage / filename
-    if not artifact.is_file():
-        continue
-    entry = {
-        'file': filename,
-        'sha256': sha256(artifact),
-        'bytes': artifact.stat().st_size,
-    }
+stage,dest=map(Path,sys.argv[1:3])
+payload=Path(sys.argv[3]) if sys.argv[3] else None
+sys.path.insert(0, str(Path('Installer/scripts').resolve()))
+from release import payload_metadata, payload_identity
+metadata=payload_metadata(payload) if payload else None
+def sha(p):
+    h=hashlib.sha256()
+    with p.open('rb') as f:
+        for block in iter(lambda:f.read(1024*1024),b''): h.update(block)
+    return h.hexdigest()
+platforms={name:{'file':file,'sha256':sha(stage/file),'bytes':(stage/file).stat().st_size}
+    for name,file in [('macos','macos-universal.tar.gz'),('windows-x64','windows-x64.exe'),
+                      ('windows-x86','windows-x86.exe'),('windows-arm64','windows-arm64.exe'),
+                      ('linux','linux-x64.run')] if (stage/file).is_file()}
+for name, entry in platforms.items():
     if name.startswith('windows-'):
         entry['architecture'] = name.removeprefix('windows-')
-    platforms[name] = entry
-
-info = {
-    'catalogUrl': sys.argv[5] or None,
-    'installerVersion': sys.argv[4],
-    'engineVersion': sys.argv[4],
-    'releaseVersion': manifest['releaseVersion'] if manifest else None,
-    'payloadSha256': sha256(payload / 'manifest.json') if payload else None,
-    'embeddedPayload': payload is not None,
-    'platforms': platforms,
-}
-(stage / 'build-info.json').write_text(json.dumps(info, ensure_ascii=False, indent=2) + '\n')
+info={'catalogUrl':sys.argv[5] or None, 'installerVersion':sys.argv[4], 'engineVersion':sys.argv[4],
+      'releaseVersion':metadata['releaseVersion'] if metadata else None,
+      'payloadSha256':payload_identity(payload) if payload else None,'embeddedPayload':payload is not None,'platforms':platforms}
+(stage/'build-info.json').write_text(json.dumps(info,ensure_ascii=False,indent=2)+'\n')
 sys.path.insert(0, str(Path('Installer/scripts').resolve()))
 from release import publish_outputs
-
-publish_outputs([(stage, destination)])
-print(f'Ready: {destination}')
+publish_outputs([(stage,dest)])
+print(f'Ready: {dest}')
 PY
 STAGE=''
 COMPLETED=1

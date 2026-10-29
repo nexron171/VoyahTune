@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """Run after building the dev payload. No system ADB or real devices are used."""
 
-import hashlib, json, os, shutil, subprocess, tempfile, unittest
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import tempfile
+import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -40,6 +46,7 @@ class InstallerTests(unittest.TestCase):
             "id",
             "pm",
             "cmd",
+            "content",
             "dumpsys",
             "settings",
             "restorecon",
@@ -143,10 +150,7 @@ class InstallerTests(unittest.TestCase):
         )
 
     def artifact(self, name):
-        manifest = json.loads((PAYLOAD / "manifest.json").read_text())
-        return PAYLOAD / next(
-            a["path"] for a in manifest["artifacts"] if a["name"] == name
-        )
+        return PAYLOAD / "common" / name
 
     def different_key_apks(self):
         # Generate signature-mismatch fixtures from the tested payload; no historic

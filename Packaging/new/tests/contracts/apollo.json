@@ -1,0 +1,81 @@
+{
+  "schema": 1,
+  "cases": [
+    {
+      "id": "apollo.enabled",
+      "contract": "apollo.installation",
+      "agents": [
+        "apollo"
+      ],
+      "reference": "agent-policies.test.js",
+      "input": {
+        "enabled": true,
+        "sameBoot": true,
+        "missingClass": null
+      },
+      "expected": {
+        "state": "active",
+        "hookCount": 9,
+        "canCommands": 0,
+        "layoutOverrides": 0
+      }
+    },
+    {
+      "id": "apollo.off",
+      "contract": "apollo.installation",
+      "agents": [
+        "apollo"
+      ],
+      "reference": "agent-policies.test.js",
+      "input": {
+        "enabled": false,
+        "sameBoot": true,
+        "missingClass": null
+      },
+      "expected": {
+        "state": "disabled",
+        "hookCount": 0,
+        "canCommands": 0,
+        "layoutOverrides": 0
+      }
+    },
+    {
+      "id": "apollo.stale-boot",
+      "contract": "apollo.installation",
+      "agents": [
+        "apollo"
+      ],
+      "reference": "agent-policies.test.js",
+      "input": {
+        "enabled": true,
+        "sameBoot": false,
+        "missingClass": null
+      },
+      "expected": {
+        "state": "disabled",
+        "hookCount": 0,
+        "canCommands": 0,
+        "layoutOverrides": 0
+      }
+    },
+    {
+      "id": "apollo.rollback",
+      "contract": "apollo.installation",
+      "agents": [
+        "apollo"
+      ],
+      "reference": "agent-policies.test.js",
+      "input": {
+        "enabled": true,
+        "sameBoot": true,
+        "missingClass": "DriveAssistantData"
+      },
+      "expected": {
+        "state": "failed",
+        "hookCount": 0,
+        "canCommands": 0,
+        "layoutOverrides": 0
+      }
+    }
+  ]
+}

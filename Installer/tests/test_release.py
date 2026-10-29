@@ -47,21 +47,13 @@ class ReleaseTests(unittest.TestCase):
             payload = Path(args[args.index("--output") + 1])
             payload.mkdir()
             version = args[args.index("--version") + 1]
-            (payload / "manifest.json").write_text(
-                json.dumps(
-                    {
-                        "schema": 4,
-                        "requirements": {
-                            "minInstallerVersion": "1.0.0",
-                            "requiredCapabilities": ["files-v1"],
-                        },
-                        "releaseVersion": version,
-                        "buildRevision": "fixture",
-                        "infrastructure": "unified",
-                        "generation": self.generation,
-                    }
-                )
-            )
+            (payload / "common").mkdir()
+            with zipfile.ZipFile(payload / "common/restore_mode.apk", "w") as apk:
+                apk.writestr("assets/voyahtune-build.json", json.dumps({
+                    "schema":3,"payloadFormat":5,"minimumInstallerVersion":"1.0.0",
+                    "releaseVersion":version,"buildRevision":"fixture",
+                    "infrastructure":"unified","generation":self.generation,
+                }))
         elif Path(args[0]).name == "build-all-macos.sh":
             dest = Path(args[args.index("--output") + 1])
             dest.mkdir()
@@ -218,17 +210,20 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(entry["minimumOtaVersion"], "4.5.6")
         self.assertEqual(entry["size"], archive.stat().st_size)
         with zipfile.ZipFile(archive) as payload_archive:
-            self.assertIn("manifest.json", payload_archive.namelist())
+            self.assertIn("common/restore_mode.apk", payload_archive.namelist())
+            self.assertNotIn("manifest.json", payload_archive.namelist())
         self.assertFalse((archive.parent / "VoyahTune-Installer-1.0.0").exists())
 
-    def test_common_default_creates_payload_with_root_manifest(self):
+    def test_common_default_creates_fixed_payload_without_manifest(self):
         self.run_release(through_shell=True)
         archive = self.root / "Releases/dist/payload_4.5.6.zip"
         with zipfile.ZipFile(archive) as payload_archive:
-            manifest = json.loads(payload_archive.read("manifest.json"))
-        self.assertEqual(manifest["schema"], 4)
-        self.assertEqual(manifest["releaseVersion"], "4.5.6")
-        self.assertEqual(manifest["infrastructure"], "unified")
+            from io import BytesIO
+            with zipfile.ZipFile(BytesIO(payload_archive.read("common/restore_mode.apk"))) as apk:
+                metadata = json.loads(apk.read("assets/voyahtune-build.json"))
+        self.assertEqual(metadata["payloadFormat"], 5)
+        self.assertEqual(metadata["releaseVersion"], "4.5.6")
+        self.assertEqual(metadata["infrastructure"], "unified")
         self.assertEqual(self.selected, [])
         self.assertFalse((archive.parent / "VoyahTune-Installer-1.0.0").exists())
 
@@ -264,7 +259,7 @@ class ReleaseTests(unittest.TestCase):
 
     def test_failed_rebuild_preserves_previous_outputs(self):
         self.run_release("--mac")
-        payload = self.root / "Releases/build/installer-payload-4.5.6/manifest.json"
+        payload = self.root / "Releases/build/installer-payload-4.5.6/common/restore_mode.apk"
         record = self.root / "Releases/dist/VoyahTune-Installer-1.0.0/release.json"
         previous = (payload.read_bytes(), record.read_bytes())
         self.fail_build = True

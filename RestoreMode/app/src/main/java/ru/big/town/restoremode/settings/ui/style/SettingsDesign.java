@@ -265,7 +265,7 @@ public final class SettingsDesign {
     }
 
     static void applyTypography(TextView text) {
-        if (text.getId() == R.id.rawCanCodes || text.getId() == R.id.textHookStatus) {
+        if (text.getId() == R.id.rawCanCodes) {
             return;
         }
         boolean bold =

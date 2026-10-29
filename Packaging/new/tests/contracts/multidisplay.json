@@ -1,0 +1,93 @@
+{
+  "schema": 1,
+  "cases": [
+    {
+      "id": "multidisplay.one-app",
+      "contract": "multidisplay.transfer",
+      "agents": [
+        "multidisplay"
+      ],
+      "reference": "agent-policies.test.js",
+      "input": {},
+      "expected": {
+        "moves": [
+          [
+            "org.maps",
+            "MainActivity",
+            false
+          ]
+        ],
+        "originalCalls": 0
+      }
+    },
+    {
+      "id": "multidisplay.two-apps",
+      "contract": "multidisplay.transfer",
+      "agents": [
+        "multidisplay"
+      ],
+      "reference": "agent-policies.test.js",
+      "input": {
+        "tops": [
+          "org.maps",
+          "org.music"
+        ]
+      },
+      "expected": {
+        "moves": [],
+        "originalCalls": 1
+      }
+    },
+    {
+      "id": "multidisplay.disabled",
+      "contract": "multidisplay.transfer",
+      "agents": [
+        "multidisplay"
+      ],
+      "reference": "agent-policies.test.js",
+      "input": {
+        "enabled": false
+      },
+      "expected": {
+        "moves": [],
+        "originalCalls": 1
+      }
+    },
+    {
+      "id": "multidisplay.move-rejected",
+      "contract": "multidisplay.transfer",
+      "agents": [
+        "multidisplay"
+      ],
+      "reference": "agent-policies.test.js",
+      "input": {
+        "moveResult": false
+      },
+      "expected": {
+        "moves": [
+          [
+            "org.maps",
+            "MainActivity",
+            false
+          ]
+        ],
+        "originalCalls": 1
+      }
+    },
+    {
+      "id": "multidisplay.metadata-error",
+      "contract": "multidisplay.transfer",
+      "agents": [
+        "multidisplay"
+      ],
+      "reference": "agent-policies.test.js",
+      "input": {
+        "metadataError": true
+      },
+      "expected": {
+        "moves": [],
+        "originalCalls": 1
+      }
+    }
+  ]
+}

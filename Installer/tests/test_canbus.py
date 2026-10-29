@@ -18,12 +18,6 @@ class CanbusTests(unittest.TestCase):
         self.f = fixture.InstallerTests()
         self.f.setUp()
         self.addCleanup(self.f.tearDown)
-        self.assertEqual(
-            json.loads((fixture.PAYLOAD / "manifest.json").read_text())[
-                "infrastructure"
-            ],
-            "unified",
-        )
         self.directory = self.f.device / "system/priv-app/VoyahHlCTRL"
         self.directory.mkdir()
         (self.directory / "service.apk").write_bytes(b"original system APK")

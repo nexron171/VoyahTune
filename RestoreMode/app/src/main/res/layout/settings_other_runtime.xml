@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ru.big.town.restoremode.diagnostics.runtime.SystemDiagnosticsView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/systemDiagnostics"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="20dp"
+    android:background="@drawable/settings_visual">
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Диагностика подсистем"
+        android:textSize="25sp"
+        android:textColor="@color/settings_text" />
+    <TextView
+        android:id="@+id/diagnosticsSummary"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="Чтение текущего состояния…"
+        android:textSize="17sp"
+        android:textColor="@color/settings_muted" />
+    <LinearLayout
+        android:id="@+id/diagnosticsLegend"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:orientation="horizontal" />
+    <ru.big.town.restoremode.settings.ui.layout.SettingsGrid
+        android:id="@+id/diagnosticsInfrastructure"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        app:settingsColumns="5"
+        app:settingsMinimumColumnWidth="200dp" />
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="20dp"
+        android:layout_marginBottom="12dp"
+        android:text="Агенты и приложения"
+        android:textSize="21sp"
+        android:textColor="@color/settings_text" />
+    <ru.big.town.restoremode.settings.ui.layout.SettingsGrid
+        android:id="@+id/diagnosticsAgents"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        app:settingsColumns="5"
+        app:settingsMinimumColumnWidth="200dp" />
+    <TextView
+        android:id="@+id/diagnosticsFreshness"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="Проверка актуальности…"
+        android:textSize="15sp"
+        android:textColor="@color/settings_muted" />
+</ru.big.town.restoremode.diagnostics.runtime.SystemDiagnosticsView>

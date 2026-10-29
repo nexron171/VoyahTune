@@ -1,0 +1,362 @@
+{
+  "schema": 1,
+  "cases": [
+    {
+      "id": "keyboard.ru",
+      "contract": "keyboard.selection",
+      "agents": [
+        "keyboard-en",
+        "keyboard-ru"
+      ],
+      "reference": "../loader/loader_test.go",
+      "input": {
+        "previous": null,
+        "setting": "ru",
+        "boot": "boot",
+        "startTicks": 100
+      },
+      "expected": {
+        "mode": "ru"
+      }
+    },
+    {
+      "id": "keyboard.en",
+      "contract": "keyboard.selection",
+      "agents": [
+        "keyboard-en",
+        "keyboard-ru"
+      ],
+      "reference": "../loader/loader_test.go",
+      "input": {
+        "previous": null,
+        "setting": "en",
+        "boot": "boot",
+        "startTicks": 100
+      },
+      "expected": {
+        "mode": "en"
+      }
+    },
+    {
+      "id": "keyboard.off",
+      "contract": "keyboard.selection",
+      "agents": [
+        "keyboard-en",
+        "keyboard-ru"
+      ],
+      "reference": "../loader/loader_test.go",
+      "input": {
+        "previous": null,
+        "setting": "invalid",
+        "boot": "boot",
+        "startTicks": 100
+      },
+      "expected": {
+        "mode": "off"
+      }
+    },
+    {
+      "id": "keyboard.sticky",
+      "contract": "keyboard.selection",
+      "agents": [
+        "keyboard-en",
+        "keyboard-ru"
+      ],
+      "reference": "../loader/loader_test.go",
+      "input": {
+        "previous": {
+          "mode": "ru",
+          "boot": "boot",
+          "pid": 100
+        },
+        "setting": "en",
+        "boot": "boot",
+        "startTicks": 100
+      },
+      "expected": {
+        "mode": "ru"
+      }
+    },
+    {
+      "id": "keyboard.restart",
+      "contract": "keyboard.selection",
+      "agents": [
+        "keyboard-en",
+        "keyboard-ru"
+      ],
+      "reference": "../loader/loader_test.go",
+      "input": {
+        "previous": {
+          "mode": "ru",
+          "boot": "boot",
+          "pid": 100
+        },
+        "setting": "en",
+        "boot": "boot",
+        "startTicks": 101
+      },
+      "expected": {
+        "mode": "en"
+      }
+    },
+    {
+      "id": "keyboard.new-boot",
+      "contract": "keyboard.selection",
+      "agents": [
+        "keyboard-en",
+        "keyboard-ru"
+      ],
+      "reference": "../loader/loader_test.go",
+      "input": {
+        "previous": {
+          "mode": "ru",
+          "boot": "old",
+          "pid": 100
+        },
+        "setting": "en",
+        "boot": "boot",
+        "startTicks": 100
+      },
+      "expected": {
+        "mode": "en"
+      }
+    },
+    {
+      "id": "keyboard.input-mode-33554432",
+      "contract": "keyboard.input-mode",
+      "agents": [
+        "keyboard-en"
+      ],
+      "reference": "../agents/keyboard-en.js",
+      "input": {
+        "language": "en",
+        "requested": 33554432
+      },
+      "expected": {
+        "savedMode": 33554432,
+        "originalCalls": 1
+      }
+    },
+    {
+      "id": "keyboard.input-mode-36765696",
+      "contract": "keyboard.input-mode",
+      "agents": [
+        "keyboard-en"
+      ],
+      "reference": "../agents/keyboard-en.js",
+      "input": {
+        "language": "en",
+        "requested": 36765696
+      },
+      "expected": {
+        "savedMode": 36765696,
+        "originalCalls": 1
+      }
+    },
+    {
+      "id": "keyboard.input-mode-34668544",
+      "contract": "keyboard.input-mode",
+      "agents": [
+        "keyboard-en"
+      ],
+      "reference": "../agents/keyboard-en.js",
+      "input": {
+        "language": "en",
+        "requested": 34668544
+      },
+      "expected": {
+        "savedMode": 34668544,
+        "originalCalls": 1
+      }
+    },
+    {
+      "id": "keyboard.input-mode-35717120",
+      "contract": "keyboard.input-mode",
+      "agents": [
+        "keyboard-en"
+      ],
+      "reference": "../agents/keyboard-en.js",
+      "input": {
+        "language": "en",
+        "requested": 35717120
+      },
+      "expected": {
+        "savedMode": 35717120,
+        "originalCalls": 1
+      }
+    },
+    {
+      "id": "keyboard.input-mode-33685504",
+      "contract": "keyboard.input-mode",
+      "agents": [
+        "keyboard-en"
+      ],
+      "reference": "../agents/keyboard-en.js",
+      "input": {
+        "language": "en",
+        "requested": 33685504
+      },
+      "expected": {
+        "savedMode": 33685504,
+        "originalCalls": 1
+      }
+    },
+    {
+      "id": "keyboard.input-mode-33751040",
+      "contract": "keyboard.input-mode",
+      "agents": [
+        "keyboard-en"
+      ],
+      "reference": "../agents/keyboard-en.js",
+      "input": {
+        "language": "en",
+        "requested": 33751040
+      },
+      "expected": {
+        "savedMode": 33751040,
+        "originalCalls": 1
+      }
+    },
+    {
+      "id": "keyboard.input-mode-0",
+      "contract": "keyboard.input-mode",
+      "agents": [
+        "keyboard-en"
+      ],
+      "reference": "../agents/keyboard-en.js",
+      "input": {
+        "language": "en",
+        "requested": 0
+      },
+      "expected": {
+        "savedMode": 36765696,
+        "originalCalls": 1
+      }
+    },
+    {
+      "id": "keyboard.input-mode--1",
+      "contract": "keyboard.input-mode",
+      "agents": [
+        "keyboard-en"
+      ],
+      "reference": "../agents/keyboard-en.js",
+      "input": {
+        "language": "en",
+        "requested": -1
+      },
+      "expected": {
+        "savedMode": 36765696,
+        "originalCalls": 1
+      }
+    },
+    {
+      "id": "keyboard.input-mode-999999",
+      "contract": "keyboard.input-mode",
+      "agents": [
+        "keyboard-en"
+      ],
+      "reference": "../agents/keyboard-en.js",
+      "input": {
+        "language": "en",
+        "requested": 999999
+      },
+      "expected": {
+        "savedMode": 36765696,
+        "originalCalls": 1
+      }
+    },
+    {
+      "id": "keyboard.russian-rows-False",
+      "contract": "keyboard.render",
+      "agents": [
+        "keyboard-ru"
+      ],
+      "reference": "../agents/keyboard-ru.js + voyahtune_skb_qwerty_ru.json",
+      "input": {
+        "language": "ru",
+        "uppercase": false
+      },
+      "expected": {
+        "letterRows": [
+          "йцукенгшщзхъ",
+          "фывапролджэ",
+          "ячсмитьбюё"
+        ],
+        "stockControlKeysPreserved": true,
+        "duplicateKeyboards": 0
+      }
+    },
+    {
+      "id": "keyboard.russian-rows-True",
+      "contract": "keyboard.render",
+      "agents": [
+        "keyboard-ru"
+      ],
+      "reference": "../agents/keyboard-ru.js + voyahtune_skb_qwerty_ru.json",
+      "input": {
+        "language": "ru",
+        "uppercase": true
+      },
+      "expected": {
+        "letterRows": [
+          "ЙЦУКЕНГШЩЗХЪ",
+          "ФЫВАПРОЛДЖЭ",
+          "ЯЧСМИТЬБЮЁ"
+        ],
+        "stockControlKeysPreserved": true,
+        "duplicateKeyboards": 0
+      }
+    },
+    {
+      "id": "keyboard.russian-icon-False",
+      "contract": "keyboard.toggle-icon",
+      "agents": [
+        "keyboard-ru"
+      ],
+      "reference": "../agents/keyboard-ru.js",
+      "input": {
+        "keyCode": -2,
+        "state": 2,
+        "theme": "dark",
+        "customIconAvailable": true
+      },
+      "expected": {
+        "icon": "russian_input_method"
+      }
+    },
+    {
+      "id": "keyboard.russian-icon-True",
+      "contract": "keyboard.toggle-icon",
+      "agents": [
+        "keyboard-ru"
+      ],
+      "reference": "../agents/keyboard-ru.js",
+      "input": {
+        "keyCode": -2,
+        "state": 2,
+        "theme": "simple",
+        "customIconAvailable": true
+      },
+      "expected": {
+        "icon": "russian_input_method_white"
+      }
+    },
+    {
+      "id": "keyboard.icon-fallback",
+      "contract": "keyboard.toggle-icon",
+      "agents": [
+        "keyboard-ru"
+      ],
+      "reference": "../agents/keyboard-ru.js",
+      "input": {
+        "keyCode": -2,
+        "state": 2,
+        "theme": "simple",
+        "customIconAvailable": false
+      },
+      "expected": {
+        "icon": "oem-english-white"
+      }
+    }
+  ]
+}
