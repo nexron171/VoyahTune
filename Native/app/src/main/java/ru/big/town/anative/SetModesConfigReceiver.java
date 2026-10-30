@@ -122,6 +122,10 @@ public class SetModesConfigReceiver extends BroadcastReceiver {
             Log.i(TAG, "APP_DPI_CONFIG зеркалирован + reload");
         } else if ("ru.big.town.anative.KEYBOARD_CONFIG".equals(action)) {
             applyKeyboardMode(context, intent.getStringExtra("keyboardMode"));
+        } else if ("ru.big.town.anative.THEME_CONFIG".equals(action)) {
+            if (intent.hasExtra("themeOverride")) {
+                SystemThemeSettings.apply(context, intent.getIntExtra("themeOverride", 0));
+            }
         } else if (ClusterNavigationSettings.ACTION_CONFIG.equals(action)) {
             boolean enabled =
                     intent.getBooleanExtra(

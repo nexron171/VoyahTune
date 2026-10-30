@@ -28,10 +28,10 @@ import ru.big.town.restoremode.LoggingActivity;
 import ru.big.town.restoremode.OtaActivity;
 import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.diagnostics.metrics.SystemMetricsReader;
-import ru.big.town.restoremode.integration.GlobalVars;
-import ru.big.town.restoremode.integration.config.SplitConfigSync;
 import ru.big.town.restoremode.diagnostics.runtime.SystemDiagnosticsReader;
 import ru.big.town.restoremode.diagnostics.runtime.SystemDiagnosticsView;
+import ru.big.town.restoremode.integration.GlobalVars;
+import ru.big.town.restoremode.integration.config.SplitConfigSync;
 import ru.big.town.restoremode.settings.core.SettingsSection;
 import ru.big.town.restoremode.settings.core.SettingsSectionFragment;
 import ru.big.town.restoremode.settings.ui.controls.SettingsControls;
@@ -83,8 +83,6 @@ public final class OtherSettingsFragment extends SettingsSectionFragment {
     static final int MSG_GRANT_INSTALL = 26;
 
     static final int MSG_CLOSE_ALL = 27;
-
-    static final int MSG_SET_THEME = 28;
 
     private static final String NATIVE_PACKAGE = "ru.big.town.anative";
 
@@ -351,7 +349,7 @@ public final class OtherSettingsFragment extends SettingsSectionFragment {
                         if (c != null && c.getTag() != null) {
                             int mode = Integer.parseInt(c.getTag().toString());
                             preferences.edit().putInt("themeOverride", mode).apply();
-                            sendTheme(mode);
+                            SplitConfigSync.pushTheme(requireContext(), preferences);
                         }
                     });
         }
@@ -403,18 +401,6 @@ public final class OtherSettingsFragment extends SettingsSectionFragment {
         try {
             GlobalVars.serviceMessenger.send(
                     Message.obtain(null, MSG_FLOATING_BACK, enable ? 1 : 0, 0));
-        } catch (RemoteException e) {
-            e.printStackTrace();
-        }
-    }
-
-    private void sendTheme(int mode) {
-        if (!GlobalVars.isBound || GlobalVars.serviceMessenger == null) {
-            Log.w("$$$ Advance theme $$$", "SetModesService не забинден");
-            return;
-        }
-        try {
-            GlobalVars.serviceMessenger.send(Message.obtain(null, MSG_SET_THEME, mode, 0));
         } catch (RemoteException e) {
             e.printStackTrace();
         }
