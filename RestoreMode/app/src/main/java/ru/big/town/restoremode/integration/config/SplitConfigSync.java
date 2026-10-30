@@ -19,11 +19,7 @@ import ru.big.town.restoremode.voice.commands.VoiceSteeringPolicy;
 
 import java.util.List;
 
-/**
- * Единая event-driven публикация сохранённой конфигурации в Native.
- * Fullscreen/Dock/steering/DPI/keyboard зеркалируются при изменении, старте и физическом
- * пробуждении без периодического чтения.
- */
+/** Publishes saved configuration on edits, startup and physical wake without polling. */
 public final class SplitConfigSync {
     private static final String NATIVE_PKG = "ru.big.town.anative";
     private static final String CONFIG_RECEIVER = "ru.big.town.anative.SetModesConfigReceiver";
@@ -36,6 +32,7 @@ public final class SplitConfigSync {
         pushDock(context, prefs);
         pushSteering(context, prefs);
         pushKeyboard(context, prefs);
+        pushTheme(context, prefs);
         pushScenarios(context, prefs);
         pushScreenBrightness(context, prefs);
         pushClusterNavigation(context, prefs);
@@ -178,6 +175,15 @@ public final class SplitConfigSync {
         Intent i = configIntent("ru.big.town.anative.KEYBOARD_CONFIG");
         i.putExtra("keyboardMode", mode);
         context.sendBroadcast(i);
+    }
+
+    public static void pushTheme(Context context, SharedPreferences preferences) {
+        if (!preferences.contains("themeOverride")) {
+            return;
+        }
+        Intent intent = configIntent("ru.big.town.anative.THEME_CONFIG");
+        intent.putExtra("themeOverride", preferences.getInt("themeOverride", 0));
+        context.sendBroadcast(intent);
     }
 
     public static String normalizeKeyboardMode(String mode) {

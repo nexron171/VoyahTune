@@ -1698,44 +1698,8 @@ public class SetModesService extends Service {
         }
     }
 
-    /**
-     * Переопределение темы системы (и приложений, следующих системной DayNight-теме). mode: 0=Авто,
-     * 1=Светлая (NIGHT_NO), 2=Тёмная (NIGHT_YES) — совпадает с {@code UiModeManager.MODE_NIGHT_*} и
-     * значениями {@code Settings.Secure.ui_night_mode}. Пишем secure-настройку
-     * (WRITE_SECURE_SETTINGS, переживёт ребут) И зовём {@code UiModeManager.setNightMode} для
-     * мгновенного применения (в try — на части прошивок нужен signature-пермишен
-     * MODIFY_DAY_NIGHT_MODE; тогда применится по secure-настройке).
-     */
     protected void applyTheme(int mode) {
-        if (mode < 0 || mode > 3) mode = 0;
-        try {
-            android.provider.Settings.Secure.putInt(getContentResolver(), "ui_night_mode", mode);
-        } catch (Exception e) {
-            Log.w(TAG, "applyTheme secure ui_night_mode: " + e.getMessage());
-        }
-        try {
-            android.app.UiModeManager ui =
-                    (android.app.UiModeManager) getSystemService(Context.UI_MODE_SERVICE);
-            if (ui != null) {
-                switch (mode) {
-                    case 1:
-                        ui.setNightMode(android.app.UiModeManager.MODE_NIGHT_NO);
-                        break;
-                    case 2:
-                        ui.setNightMode(android.app.UiModeManager.MODE_NIGHT_YES);
-                        break;
-                    case 3:
-                        ui.setNightMode(android.app.UiModeManager.MODE_NIGHT_CUSTOM);
-                        break;
-                    default:
-                        ui.setNightMode(android.app.UiModeManager.MODE_NIGHT_AUTO);
-                        break;
-                }
-            }
-        } catch (Exception e) {
-            Log.w(TAG, "applyTheme setNightMode (нет MODIFY_DAY_NIGHT_MODE?): " + e.getMessage());
-        }
-        Log.i(TAG, "applyTheme mode=" + mode);
+        SystemThemeSettings.apply(this, mode);
     }
 
     private void restoreAutoLightState() {
