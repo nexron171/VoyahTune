@@ -11,6 +11,7 @@ import tarfile
 import tempfile
 import unittest
 import zipfile
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
 
@@ -49,11 +50,22 @@ class ReleaseTests(unittest.TestCase):
             version = args[args.index("--version") + 1]
             (payload / "common").mkdir()
             with zipfile.ZipFile(payload / "common/restore_mode.apk", "w") as apk:
-                apk.writestr("assets/voyahtune-build.json", json.dumps({
-                    "schema":3,"payloadFormat":5,"minimumInstallerVersion":"1.0.0",
-                    "releaseVersion":version,"buildRevision":"fixture",
-                    "infrastructure":"unified","generation":self.generation,
-                }))
+                apk.writestr(
+                    "assets/voyahtune-build.json",
+                    json.dumps(
+                        {
+                            "schema": 3,
+                            "payloadFormat": 5,
+                            "minimumInstallerVersion": args[
+                                args.index("--minimum-installer-version") + 1
+                            ],
+                            "releaseVersion": version,
+                            "buildRevision": "fixture",
+                            "infrastructure": "unified",
+                            "generation": self.generation,
+                        }
+                    ),
+                )
         elif Path(args[0]).name == "build-all-macos.sh":
             dest = Path(args[args.index("--output") + 1])
             dest.mkdir()
@@ -143,6 +155,11 @@ class ReleaseTests(unittest.TestCase):
             "--revision",
             "fixture",
             *(
+                ["--minimum-installer-version", "1.9.0"]
+                if "--minimum-installer-version" not in flags
+                else []
+            ),
+            *(
                 ["--minimum-ota-version", "4.5.6"]
                 if "--minimum-ota-version" not in flags
                 else []
@@ -161,7 +178,7 @@ class ReleaseTests(unittest.TestCase):
     def test_platform_selection_and_same_version_overwrite(self):
         for flags, expected in [
             ([], ["macos", "windows"]),
-            (["--installers"], ["macos", "windows"]),
+            (["--installers"], ["macos", "windows", "linux"]),
             (["--installers", "--linux"], ["macos", "windows", "linux"]),
             (["--mac"], ["macos"]),
             (["--windows"], ["windows"]),
@@ -206,7 +223,7 @@ class ReleaseTests(unittest.TestCase):
                 "minimumOtaVersion",
             },
         )
-        self.assertEqual(entry["minimumInstallerVersion"], "1.0.0")
+        self.assertEqual(entry["minimumInstallerVersion"], "1.9.0")
         self.assertEqual(entry["minimumOtaVersion"], "4.5.6")
         self.assertEqual(entry["size"], archive.stat().st_size)
         with zipfile.ZipFile(archive) as payload_archive:
@@ -218,8 +235,8 @@ class ReleaseTests(unittest.TestCase):
         self.run_release(through_shell=True)
         archive = self.root / "Releases/dist/payload_4.5.6.zip"
         with zipfile.ZipFile(archive) as payload_archive:
-            from io import BytesIO
-            with zipfile.ZipFile(BytesIO(payload_archive.read("common/restore_mode.apk"))) as apk:
+            apk_contents = payload_archive.read("common/restore_mode.apk")
+            with zipfile.ZipFile(BytesIO(apk_contents)) as apk:
                 metadata = json.loads(apk.read("assets/voyahtune-build.json"))
         self.assertEqual(metadata["payloadFormat"], 5)
         self.assertEqual(metadata["releaseVersion"], "4.5.6")
@@ -256,6 +273,46 @@ class ReleaseTests(unittest.TestCase):
         self.run_release("--payload", "--minimum-ota-version", "4.1.0")
         entry = json.loads((self.root / "Releases/dist/payload_4.5.6.json").read_text())
         self.assertEqual(entry["minimumOtaVersion"], "4.1.0")
+
+    def test_installer_minimum_is_forwarded_independently_of_ota(self):
+        self.run_release(
+            "--minimum-installer-version", "1.9.2",
+            "--minimum-ota-version", "4.1.0",
+            through_shell=True,
+        )
+        entry = json.loads((self.root / "Releases/dist/payload_4.5.6.json").read_text())
+        self.assertEqual(entry["minimumInstallerVersion"], "1.9.2")
+        self.assertEqual(entry["minimumOtaVersion"], "4.1.0")
+
+    def test_installer_minimum_mismatch_keeps_previous_payload(self):
+        self.run_release("--payload")
+        archive = self.root / "Releases/dist/payload_4.5.6.zip"
+        previous = archive.read_bytes()
+        with patch.object(release, "payload_metadata", return_value={
+            "minimumInstallerVersion": "1.8.5",
+        }):
+            with self.assertRaisesRegex(ValueError, "minimumInstallerVersion"):
+                self.run_release("--payload", "--no-build")
+        self.assertEqual(archive.read_bytes(), previous)
+
+    def test_minimum_versions_are_required_and_validated_before_build(self):
+        for flags in (
+            [],
+            ["--minimum-ota-version", "4.1.0"],
+            ["--minimum-installer-version", "1.9.0"],
+            *[
+                ["--minimum-installer-version", value, "--minimum-ota-version", "4.1.0"]
+                for value in ["1.9", "01.9.0", "1.9.0-beta", "wrong"]
+            ],
+            ["--minimum-installer-version", "1.9.0", "--minimum-ota-version", "4.1"],
+        ):
+            with self.subTest(flags=flags), patch(
+                "sys.argv", ["release.py", "4.5.6", "--payload", *flags]
+            ), patch.object(release, "run") as build:
+                with self.assertRaises(SystemExit) as raised:
+                    release.main()
+                self.assertEqual(raised.exception.code, 2)
+                build.assert_not_called()
 
     def test_failed_rebuild_preserves_previous_outputs(self):
         self.run_release("--mac")
@@ -364,7 +421,7 @@ class ReleaseTests(unittest.TestCase):
         for flags in (
             [],
             *[
-                [flag, "--minimum-ota-version", "4.5.6"]
+                [flag, "--minimum-ota-version", "4.5.6", "--minimum-installer-version", "1.9.0"]
                 for flag in ["--pi", "--od", "--legacy"]
             ],
         ):

@@ -143,7 +143,13 @@ def main():
     )
     parser.add_argument(
         "--minimum-ota-version",
+        required=True,
         help="Required for unified payloads: minimum VoyahTune version with a compatible root service",
+    )
+    parser.add_argument(
+        "--minimum-installer-version",
+        required=True,
+        help="Minimum desktop Installer version required by the payload (major.minor.patch)",
     )
     parser.add_argument(
         "--windows-arch",
@@ -163,7 +169,7 @@ def main():
     parser.add_argument(
         "--installers",
         action="store_true",
-        help="Build macOS and Windows installers; Linux requires explicit --linux",
+        help="Build macOS Universal, Windows x64/x86/ARM64 and Linux amd64 installers",
     )
     for flag in ["mac", "windows", "linux"]:
         parser.add_argument(
@@ -185,14 +191,12 @@ def main():
         "--revision", help="Defaults to Git HEAD plus -dirty if modified"
     )
     args = parser.parse_args()
-    if args.minimum_ota_version is None:
-        parser.error(
-            "Specify --minimum-ota-version from root-service compatibility; the first common release requires its own base version"
-        )
-    if args.minimum_ota_version is not None and not re.fullmatch(
-        r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", args.minimum_ota_version
+    for flag, minimum in (
+        ("--minimum-installer-version", args.minimum_installer_version),
+        ("--minimum-ota-version", args.minimum_ota_version),
     ):
-        parser.error("--minimum-ota-version must have the format major.minor.patch")
+        if not re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", minimum):
+            parser.error(f"{flag} must have the format major.minor.patch")
     if args.windows_arch:
         args.windows = True
     if args.payload and (args.installers or args.mac or args.windows or args.linux):
@@ -200,6 +204,7 @@ def main():
     if args.installers:
         args.mac = True
         args.windows = True
+        args.linux = True
     desktop_build = not args.payload and not args.no_zip
     selected = [
         name
@@ -314,6 +319,8 @@ def main():
                     ROOT,
                     "--version",
                     version,
+                    "--minimum-installer-version",
+                    args.minimum_installer_version,
                     "--revision",
                     revision,
                     "--output",
@@ -322,6 +329,12 @@ def main():
                 ],
                 env=env,
             )
+            actual_minimum = payload_metadata(payload)["minimumInstallerVersion"]
+            if actual_minimum != args.minimum_installer_version:
+                raise ValueError(
+                    f"APK minimumInstallerVersion is {actual_minimum}, "
+                    f"expected {args.minimum_installer_version}; rebuild the Android APKs"
+                )
             packages = work / "packages"
             packages.mkdir()
             if desktop_build:

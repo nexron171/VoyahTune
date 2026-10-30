@@ -52,6 +52,8 @@ struct Args {
     #[arg(long)]
     version: String,
     #[arg(long)]
+    minimum_installer_version: String,
+    #[arg(long)]
     revision: String,
     #[arg(long)]
     output: PathBuf,
@@ -120,6 +122,9 @@ fn run(args: Args) -> Result<()> {
         return Err(Error::new("BUILD_ARGUMENTS", "Укажите версию и revision"));
     }
     Infrastructure::Unified.require_version(&args.version)?;
+    let mut requirements = installer_core::compatibility::Requirements::unified();
+    requirements.min_installer_version = args.minimum_installer_version.clone();
+    requirements.validate()?;
     let status = Command::new("sh")
         .arg(root.join("Packaging/new/build.sh"))
         .status()?;
@@ -182,8 +187,7 @@ fn run(args: Args) -> Result<()> {
                     &format!("-PvoyahPayloadFormat={}", payload::PAYLOAD_FORMAT),
                     &format!(
                         "-PvoyahMinimumInstallerVersion={}",
-                        installer_core::compatibility::Requirements::unified()
-                            .min_installer_version
+                        args.minimum_installer_version
                     ),
                     &format!("-PvoyahReleaseVersion={}", args.version),
                     &format!("-PvoyahBuildRevision={}", args.revision),
@@ -216,7 +220,7 @@ fn run(args: Args) -> Result<()> {
             infrastructure: Infrastructure::Unified,
             schema: payload::PAYLOAD_FORMAT,
             removal_only: false,
-            requirements: Some(installer_core::compatibility::Requirements::unified()),
+            requirements: Some(requirements),
             recipe,
             product: "VoyahTune".into(),
             release_version: args.version,
@@ -248,7 +252,19 @@ fn run(args: Args) -> Result<()> {
             }
             copy(&stage, &source, name, &mut manifest)?;
         }
-        Payload::open(&stage)?;
+        let payload = Payload::open(&stage)?;
+        if payload
+            .manifest
+            .requirements
+            .as_ref()
+            .map(|value| value.min_installer_version.as_str())
+            != Some(args.minimum_installer_version.as_str())
+        {
+            return Err(Error::new(
+                "BUILD_ARGUMENTS",
+                "minimumInstallerVersion в APK не совпадает с --minimum-installer-version; пересоберите APK",
+            ));
+        }
         if args.output.exists() {
             return Err(Error::new("OUTPUT_EXISTS","Папка payload уже существует. Укажите новый output; готовый релиз не перезаписывается."));
         }
@@ -437,6 +453,8 @@ mod tests {
             "out",
             "--version",
             "4.5.0",
+            "--minimum-installer-version",
+            "1.9.0",
             "--revision",
             "test",
         ];
@@ -447,6 +465,9 @@ mod tests {
             panic!("Expected build")
         };
         assert_eq!(args.version, "4.5.0");
+        assert_eq!(args.minimum_installer_version, "1.9.0");
+        let missing_minimum: Vec<_> = argv[..8].iter().chain(argv[10..].iter()).copied().collect();
+        assert!(Cli::try_parse_from(missing_minimum).is_err());
         for infrastructure in ["pi", "od", "unified"] {
             let mut obsolete = argv.to_vec();
             obsolete.extend(["--infrastructure", infrastructure]);

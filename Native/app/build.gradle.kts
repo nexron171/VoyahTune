@@ -113,7 +113,7 @@ androidComponents {
             infrastructure.set("unified")
             val runtime = packaging.resolve("new")
             payloadFormat.set(providers.gradleProperty("voyahPayloadFormat").map { it.toInt() }.orElse(5))
-            minimumInstallerVersion.set(providers.gradleProperty("voyahMinimumInstallerVersion").orElse("1.8.5"))
+            minimumInstallerVersion.set(providers.gradleProperty("voyahMinimumInstallerVersion").orElse("1.9.0"))
             runtimeAliases.convention(emptyMap())
             val recipePath = providers.gradleProperty("voyahInstallRecipe").orNull
             if (recipePath != null) {

@@ -4,7 +4,7 @@ members = ["crates/release-core", "crates/qnx-fonts", "crates/installer-core", "
 default-members = ["crates/release-core", "crates/qnx-fonts", "crates/installer-core", "crates/installer-build"]
 
 [workspace.package]
-version = "1.8.7"
+version = "1.9.0"
 edition = "2021"
 rust-version = "1.88"
 

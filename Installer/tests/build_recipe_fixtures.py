@@ -48,6 +48,8 @@ def main():
                 str(source),
                 "--version",
                 version,
+                "--minimum-installer-version",
+                "1.9.0",
                 "--revision",
                 f"acceptance-unified-{label}",
                 "--output",
