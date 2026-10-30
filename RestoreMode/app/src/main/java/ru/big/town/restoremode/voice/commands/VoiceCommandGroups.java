@@ -33,7 +33,9 @@ public final class VoiceCommandGroups {
                 || action.equals("can:65080000c1c020000000")
                 || action.equals("can:65080000c1c010000000")) {
             groups.add(Group.HEATING);
-        } else if (action.startsWith("drive:")
+        } else if (action.startsWith("climate:")
+                || action.startsWith("fragrance:")
+                || action.startsWith("drive:")
                 || action.startsWith("energy:")
                 || action.startsWith(VoiceFuelCommand.PREFIX)
                 || action.startsWith("recycle:")

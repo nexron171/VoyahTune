@@ -19,6 +19,112 @@ public class VoiceCommandCatalogTest {
     }
 
     @Test
+    public void fragranceStrengthAndDurationAreIndependentOptionalParameters() {
+        assertAction("fragrance:2:intensity:1", "включи пион слабо");
+        assertAction("fragrance:2:intensity:2", "пион средне");
+        assertAction("fragrance:2:intensity:3", "включи пион сильно");
+        assertAction("fragrance:2:duration:1", "пион тридцать минут", "пион 30 минут");
+        assertAction("fragrance:2:duration:2", "пион шестьдесят минут", "пион 60 минут");
+        assertAction("fragrance:2:duration:0", "пион безлимит", "пион без ограничения времени");
+        assertAction("fragrance:2:intensity:3:duration:1", "включи пион сильно на тридцать минут");
+        assertAction("fragrance:1:intensity:1:duration:0", "бамбук слабо безлимит");
+        assertAction("fragrance:3:intensity:2:duration:2", "включи утреннюю росу средне на час");
+        for (String phrase :
+                new String[] {
+                    "пион десять минут",
+                    "пион девяносто минут",
+                    "пион слабо сильно",
+                    "пион тридцать шестьдесят минут",
+                    "не включай пион сильно"
+                }) assertNull(phrase, VoiceCommandCatalog.match(commands, phrase));
+    }
+
+    @Test
+    public void fragranceNamesSelectTheCorrespondingCartridge() {
+        assertAction(
+                "fragrance:1", "включи свежесть бамбука", "включи бамбук", "ароматизатор бамбук");
+        assertAction(
+                "fragrance:2",
+                "включи пионовая красота",
+                "включи пионовую красоту",
+                "включи пион",
+                "аромат пион");
+        assertAction(
+                "fragrance:3",
+                "включи туман",
+                "включи утренняя роса",
+                "включи роса",
+                "включи утреннюю росу",
+                "включи росу",
+                "ароматизатор утренняя роса",
+                "аромат роса");
+        assertNull(VoiceCommandCatalog.match(commands, "не включай бамбук"));
+        assertNull(VoiceCommandCatalog.match(commands, "включи бамбук или пион"));
+    }
+
+    @Test
+    public void automaticRecirculationRequiresExplicitAutoPhrase() {
+        assertAction("climate:recirculation:1", "включить рециркуляцию", "климат рециркуляция");
+        assertAction("climate:recirculation:0", "выключи рециркуляцию");
+        assertAction(
+                "climate:recirculationAuto:1",
+                "рециркуляция авто",
+                "включи рециркуляцию авто",
+                "климат рециркуляция авто");
+        assertAction("climate:auto:1", "климат авто");
+        assertNull(VoiceCommandCatalog.match(commands, "не включай рециркуляцию авто"));
+    }
+
+    @Test
+    public void shortClimatePhrasesKeepTargetsDistinct() {
+        assertAction("climate:ventMode:2", "климат в ноги");
+        assertAction("climate:ventMode:3", "климат на стекло и ноги");
+        assertAction("climate:auto:1", "климат авто", "включи климат авто");
+        assertAction("climate:auto:0", "выключи климат авто");
+        assertAction("climate:temperature:20", "климат двадцать", "климат 20 градусов");
+        assertAction("climate:temperature:21", "климат двадцать один градус");
+        assertAction("climate:temperature:22.5", "климат двадцать два с половиной");
+        assertAction("climate:driverTemperature:22", "климат водителя двадцать два");
+        assertAction("climate:passengerTemperature:23", "климат пассажира двадцать три");
+        assertAction("climate:fan:3", "климат скорость три");
+        assertAction("climate:recirculation:1", "климат рециркуляция");
+        for (String phrase :
+                new String[] {
+                    "не климат двадцать", "климат тридцать пять", "климат пятнадцать",
+                    "климат три", "климат скорость восемь", "выключи климат двадцать"
+                }) {
+            assertNull(phrase, VoiceCommandCatalog.match(commands, phrase));
+        }
+    }
+
+    @Test
+    public void everyClimatePhraseResolvesToItsOwnAction() {
+        for (VoiceCommandCatalog.Command command : commands) {
+            if (command.action.startsWith("climate:") || command.action.startsWith("fragrance:")) {
+                for (String phrase : command.phrases) {
+                    assertAction(command.action, phrase);
+                    assertNull(phrase, VoiceCommandCatalog.match(commands, "не " + phrase));
+                }
+            }
+        }
+    }
+
+    @Test
+    public void climateAndFragranceCommandsAreExplicit() {
+        assertAction("climate:power:1", "включи климат");
+        assertAction("climate:power:0", "выключи климат");
+        assertAction("climate:driverTemperature:22", "температура водителя двадцать два");
+        assertAction(
+                "climate:passengerTemperature:15.5",
+                "температура пассажира пятнадцать с половиной");
+        assertAction("climate:fan:7", "скорость обдува семь");
+        assertAction("fragrance:3", "выбери третий ароматизатор");
+        assertNull(VoiceCommandCatalog.match(commands, "не включай климат"));
+        assertNull(VoiceCommandCatalog.match(commands, "температура водителя тридцать пять"));
+        assertNull(VoiceCommandCatalog.match(commands, "выбери четвертый ароматизатор"));
+    }
+
+    @Test
     public void rearFogAndHotspotKeepOnOffAndNegationDistinct() {
         assertAction(
                 "rear_fog:on",

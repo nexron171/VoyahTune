@@ -1071,7 +1071,7 @@ public final class ScenarioSettingsPage {
                                                 Toast.makeText(
                                                                 activity,
                                                                 "Выберите длительность не менее 1"
-                                                                    + " секунды",
+                                                                        + " секунды",
                                                                 Toast.LENGTH_SHORT)
                                                         .show();
                                                 return;
@@ -1137,6 +1137,8 @@ public final class ScenarioSettingsPage {
                         ? "Люк и шторка"
                         : "Окна";
             case CAR:
+                if (action.startsWith("climate:")) return "Климат";
+                if (action.startsWith("fragrance:")) return "Ароматизатор";
                 if (action.startsWith("drive:")) {
                     return "Режим движения";
                 }

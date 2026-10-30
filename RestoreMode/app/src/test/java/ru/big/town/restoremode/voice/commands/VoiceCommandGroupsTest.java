@@ -29,7 +29,8 @@ public class VoiceCommandGroupsTest {
                         command.action.equals("open_voyahtune")
                                 || command.action.equals("system_back")
                                 || command.action.equals("close_all")
-                                || command.action.equals("reboot"));
+                                || command.action.equals("reboot")
+                                || command.action.startsWith("hotspot:"));
             }
         }
         assertEquals(10, duplicated); // Two seats, on/off and three levels each.
