@@ -278,9 +278,11 @@ esac""",
         self.action("rollback")
         self.assert_original()
 
-    def test_ota_lock_is_preserved(self):
+    def test_old_install_lock_does_not_block_recovery(self):
         self.write("data/local/voyahtune-install.lock/owner", "ota:other")
-        self.action("prepare", success=False)
+        self.action("prepare")
+        self.action("apply")
+        self.action("rollback")
         self.assertEqual(
             (self.root / "data/local/voyahtune-install.lock/owner").read_text(),
             "ota:other",

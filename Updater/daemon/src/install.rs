@@ -16,10 +16,10 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod application_data;
 mod postboot_check;
 
 pub const BLOCK: &str = "/data/local/bin/voyahtune-update.block";
-pub const LOCK: &str = "/data/local/voyahtune-install.lock";
 fn error(e: impl ToString) -> io::Error {
     invalid(&e.to_string())
 }
@@ -227,39 +227,6 @@ fn prepare_system() -> io::Result<()> {
         return Ok(());
     }
 }
-struct OperationLock;
-impl OperationLock {
-    fn acquire() -> io::Result<Self> {
-        match fs::create_dir(LOCK) {
-            Ok(()) => {}
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
-                if fs::read_to_string(Path::new(LOCK).join("owner"))?.trim() != "ota" {
-                    return Err(invalid("Компьютерный установщик использует ГУ"));
-                }
-                let old = fs::read_to_string(Path::new(LOCK).join("boot"))?;
-                if old.trim() == device::boot() {
-                    return Err(invalid("Другая установка использует ГУ"));
-                }
-                device::no_links(Path::new(LOCK))?;
-                fs::remove_file(Path::new(LOCK).join("boot"))?;
-                fs::remove_file(Path::new(LOCK).join("owner"))?;
-                fs::remove_dir(LOCK)?;
-                fs::create_dir(LOCK)?;
-            }
-            Err(e) => return Err(e),
-        }
-        fs::write(Path::new(LOCK).join("boot"), device::boot())?;
-        fs::write(Path::new(LOCK).join("owner"), "ota")?;
-        Ok(Self)
-    }
-}
-impl Drop for OperationLock {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(Path::new(LOCK).join("boot"));
-        let _ = fs::remove_file(Path::new(LOCK).join("owner"));
-        let _ = fs::remove_dir(LOCK);
-    }
-}
 fn install_apk(package: &str, apk: &Path) -> io::Result<()> {
     let mut arguments = vec!["install", "-r"];
     {
@@ -270,12 +237,24 @@ fn install_apk(package: &str, apk: &Path) -> io::Result<()> {
         "0",
         apk.to_str().ok_or_else(|| invalid("Invalid APK path"))?,
     ]);
-    let reset_runyn_on_conflict = package == payload::RUNYN;
-    install_apk_command(&arguments, reset_runyn_on_conflict, |arguments| {
-        command("/system/bin/pm", arguments, 180)
-    })?;
-    {
-        Ok(())
+    let install = || {
+        install_apk_command(&arguments, package == payload::RUNYN, |arguments| {
+            command("/system/bin/pm", arguments, 180)
+        })
+    };
+    if package == payload::RESTORE {
+        application_data::reinstall(
+            package,
+            install,
+            || application_data::transfer("backup", package),
+            || {
+                let output = command("/system/bin/pm", &["uninstall", package], 180)?;
+                require_package_success(output)
+            },
+            || application_data::transfer("restore", package),
+        )
+    } else {
+        install()
     }
 }
 
@@ -284,14 +263,7 @@ fn install_apk_command(
     reset_runyn_on_conflict: bool,
     mut run: impl FnMut(&[&str]) -> io::Result<String>,
 ) -> io::Result<()> {
-    let require_success = |output: String| {
-        if output.lines().any(|line| line.trim() == "Success") {
-            Ok(())
-        } else {
-            Err(invalid(&format!("PackageManager: {output}")))
-        }
-    };
-    let mut result = run(arguments).and_then(require_success);
+    let mut result = run(arguments).and_then(require_package_success);
     if reset_runyn_on_conflict
         && result.as_ref().is_err_and(|error| {
             error
@@ -300,17 +272,71 @@ fn install_apk_command(
         })
     {
         // Full removal clears the old signing identity and RunYN's disposable data.
-        run(&["uninstall", payload::RUNYN]).and_then(require_success)?;
-        result = run(arguments).and_then(require_success);
+        run(&["uninstall", payload::RUNYN]).and_then(require_package_success)?;
+        result = run(arguments).and_then(require_package_success);
     }
     result
 }
 
+fn require_package_success(output: String) -> io::Result<()> {
+    if output.lines().any(|line| line.trim() == "Success") {
+        Ok(())
+    } else {
+        Err(invalid(&format!("PackageManager: {output}")))
+    }
+}
+
+fn reset_native_signature(shared: &Shared) -> io::Result<()> {
+    application_data::transfer("backup", payload::NATIVE)?;
+    command(
+        "/system/bin/sh",
+        &[
+            "-c",
+            include_str!("../../../Packaging/installer/common/reset-native-signature.sh"),
+        ],
+        180,
+    )?;
+    workflow::update(shared, |state| {
+        state.phase = "signature-reboot-pending".into();
+        state.step = "Перезагрузка для смены подписи Native".into();
+        state.apply_boot = device::boot();
+    })?;
+    command("/system/bin/sync", &[], 30)?;
+    crate::telemetry::before_reboot()?;
+    command("/system/bin/reboot", &[], 15)?;
+    thread::sleep(Duration::from_secs(30));
+    Err(invalid("ГУ не перезагрузилось для смены подписи Native"))
+}
+
+pub fn resume_signature_change(shared: &Shared) -> io::Result<()> {
+    let start = Instant::now();
+    while device::prop("sys.boot_completed")? != "1" {
+        if start.elapsed() > Duration::from_secs(180) {
+            return Err(invalid(
+                "Android не завершил загрузку для продолжения установки",
+            ));
+        }
+        thread::sleep(Duration::from_secs(3));
+    }
+    apply_with_signature_reset(shared, false)
+}
+
 pub fn apply(shared: &Shared) -> io::Result<()> {
-    let _lock = OperationLock::acquire()?;
+    apply_with_signature_reset(shared, true)
+}
+
+fn apply_with_signature_reset(shared: &Shared, allow_native_reset: bool) -> io::Result<()> {
     let (p, claims) = workflow::verified(shared)?;
     let model = package_model(&p)?;
-    workflow::phase(shared, "preparing", "Проверка условий установки")?;
+    workflow::phase(
+        shared,
+        if allow_native_reset {
+            "preparing"
+        } else {
+            "applying"
+        },
+        "Проверка условий установки",
+    )?;
     workflow::update(shared, |s| {
         s.completed_steps = 0;
         s.total_steps = 8;
@@ -502,9 +528,20 @@ pub fn apply(shared: &Shared) -> io::Result<()> {
             match step {
                 Step::Native => {
                     workflow::phase(shared, "applying", "Установка Native")?;
-                    install_apk(payload::NATIVE, Path::new(payload::NATIVE_PATH))?;
+                    let result = install_apk(payload::NATIVE, Path::new(payload::NATIVE_PATH));
+                    if allow_native_reset
+                        && result.as_ref().is_err_and(|error| {
+                            error
+                                .to_string()
+                                .contains("INSTALL_FAILED_UPDATE_INCOMPATIBLE")
+                        })
+                    {
+                        return reset_native_signature(shared);
+                    }
+                    result?;
                     {
                         repair_native_data()?;
+                        application_data::transfer("restore", payload::NATIVE)?;
                     }
                     workflow::update(shared, |s| s.completed_steps = 5)?;
                 }
@@ -649,6 +686,9 @@ fn finish_installation(
     p: &Payload,
     claims: &release_core::ota::Claims,
 ) -> io::Result<()> {
+    for package in [payload::NATIVE, payload::RESTORE] {
+        application_data::transfer("cleanup", package)?;
+    }
     workflow::update(shared, |s| {
         s.phase = "committed".into();
         s.step = { "Обновление установлено" }.into();

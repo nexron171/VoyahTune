@@ -1,6 +1,5 @@
 set -eu
 journal=/data/local/voyahtune-cunba-recovery
-lock=/data/local/voyahtune-install.lock
 source_directory=/data/media/0/Download/cunba
 saved_directory=$journal/directory
 injector=/data/local/bin/frida-inject2
@@ -52,25 +51,6 @@ state() {
 
 require_root() {
     [ "$(id -u)" = 0 ] || fail 'Root access required'
-}
-
-require_lock() {
-    [ ! -L "$lock" ] && [ -d "$lock" ] || fail 'Installation lock missing'
-    [ "$(cat "$lock/owner")" = 'desktop:cunba-recovery' ] || fail 'Installation lock belongs to another operation'
-}
-
-acquire_lock() {
-    mkdir "$lock" 2>/dev/null || fail 'Another installation or OTA owns the device'
-    printf '%s' 'desktop:cunba-recovery' > "$lock/owner"
-    cat /proc/sys/kernel/random/boot_id > "$lock/boot"
-    chmod 700 "$lock"
-}
-
-release_lock() {
-    require_lock
-    rm "$lock/owner" "$lock/boot"
-    rmdir "$lock"
-    sync
 }
 
 verify_rollback() {
@@ -165,8 +145,6 @@ require_root
 [ ! -L "$journal" ] || fail 'Recovery journal is a symbolic link'
 case "$action" in
     archive-rollback)
-        acquire_lock
-        trap 'release_lock' EXIT
         verify_rollback
         history=/data/local/voyahtune-cunba-history
         [ ! -L "$history" ] || fail 'Recovery history is a symbolic link'
@@ -199,9 +177,6 @@ case "$action" in
             package_state=$(printf '%s\n' "$package_dump" | sed -n 's/.*User 0:.* enabled=\([0-4]\).*/\1/p')
             case "$package_state" in 0|1|2|3|4) ;; *) fail 'Unknown package enabled state' ;; esac
         fi
-        acquire_lock
-        # If preparation fails before a journal exists, do not strand our lock.
-        trap '[ -d "$journal" ] || release_lock' EXIT
         mkdir "$journal"
         chmod 700 "$journal"
         printf '%s\n' "$package_state" > "$journal/package-state"
@@ -219,22 +194,17 @@ VOYAHTUNE_CLEAN_STARTUP
         if [ -d "$source_directory" ]; then : > "$journal/directory-present"; fi
         if [ -f "$injector" ]; then digest "$injector" > "$journal/injector-before"; fi
         state prepared
-        trap - EXIT
         ;;
     apply)
-        require_lock
         [ "$(cat "$journal/state")" = prepared ] || fail 'Recovery not prepared'
         with_writable_system apply_changes
         ;;
     commit)
-        require_lock
         [ "$(cat "$journal/state")" = reboot-pending ] || fail 'Unexpected recovery state'
         [ "$(cat /proc/sys/kernel/random/boot_id)" != "$(cat "$journal/boot-before")" ] || fail 'Full reboot required'
         state verified
-        release_lock
         ;;
     rollback)
-        require_lock
         state restoring
         if [ -f "$journal/injector" ]; then
             if exists "$injector"; then
@@ -272,7 +242,6 @@ VOYAHTUNE_CLEAN_STARTUP
             [ "$restored_state" = "$(cat "$journal/package-state")" ] || fail 'Package state rollback failed'
         fi
         state rolled-back
-        release_lock
         ;;
     *) fail 'Unknown recovery action' ;;
 esac

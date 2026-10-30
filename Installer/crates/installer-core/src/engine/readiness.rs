@@ -110,10 +110,6 @@ impl Engine {
             "[ \"$(getprop sys.boot_completed)\" = 1 ] && service check package | grep -q ': found'",
             deadline,
         )?;
-        self.readiness_command("[ ! -e /data/local/voyahtune-install.lock ]", deadline)
-            .map_err(|error| {
-                Error::new("HEALTH_PENDING", "Идёт другая операция установки или OTA").detail(error)
-            })?;
         self.readiness_progress("Проверяем запуск Native", deadline)?;
         let native = self
             .readiness_command(NATIVE_HEALTH, deadline)
@@ -222,7 +218,6 @@ impl Engine {
                 )?;
             }
         }
-        self.readiness_command("[ ! -e /data/local/voyahtune-install.lock ]", deadline)?;
         let after = self.readiness_identity(deadline)?;
         if before != after {
             return Err(Error::new(
@@ -291,7 +286,12 @@ done
         self.prepare_od_native_data(deadline)?;
         self.readiness_progress("Проверяем активный APK Native", deadline)?;
         self.verify_active_apk(NATIVE, "native.apk", Some(NATIVE_PATH))?;
-        self.verify_readiness()
+        self.application_data("restore", NATIVE)?;
+        self.verify_readiness()?;
+        for package in [NATIVE, RESTORE] {
+            self.application_data("cleanup", package)?;
+        }
+        Ok(())
     }
 
     fn confirmed_readiness_failure(&self) -> Option<Error> {
@@ -535,7 +535,7 @@ case "$script" in
                 *) exit 1 ;;
             esac
         fi ;;
-    *'cmd package install-existing --user 0 --wait ru.big.town.anative'*) exit 0 ;;
+    *'cmd package install-existing --user 0 ru.big.town.anative'*) exit 0 ;;
     'getprop sys.boot_completed'*) echo 1 ;;
     *'VOYAHTWEAKS_FOUND'*)
         if [ -e "$root/voyahtweaks" ]; then
@@ -571,7 +571,7 @@ case "$script" in
     *'voyahtune-loader --check-hooks'*)
         if [ -e "$root/hooks-failed" ]; then echo 'hook acc: failed' >&2; exit 1; fi ;;
     *'getprop ro.build.fingerprint'*) echo H97C ;;
-    *'getprop'*|*'voyahtune-install.lock'*|*'sha256sum'*|*'resolve-activity'*) exit 0 ;;
+    *'getprop'*|*'sha256sum'*|*'resolve-activity'*) exit 0 ;;
     *) echo 'Unexpected command' >&2; exit 1 ;;
 esac
 "#).unwrap();

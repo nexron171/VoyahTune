@@ -152,8 +152,8 @@ fn operation_steps(action: Action, options: InstallOptions) -> Vec<Step> {
         ("preflight", "Подготовка файлов релиза"),
         ("root", "Получение системного доступа"),
         (
-            "updater-lock",
-            "Блокировка установки и сохранение OTA-логов",
+            "updater-prepare",
+            "Остановка OTA-службы и сохранение логов",
         ),
         ("navigation-fonts-check", "Проверка тем приборки"),
     ];
@@ -295,7 +295,7 @@ mod tests {
             &[
                 "preflight",
                 "root",
-                "updater-lock",
+                "updater-prepare",
                 "navigation-fonts-check",
                 "system",
                 "third-party-loaders",

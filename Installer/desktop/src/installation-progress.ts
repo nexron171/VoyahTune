@@ -12,7 +12,7 @@ const preparation: StageDefinition = {
   stepIds: [
     "preflight",
     "root",
-    "updater-lock",
+    "updater-prepare",
     "permission",
     "system",
     "third-party-loaders",

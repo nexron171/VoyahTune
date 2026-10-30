@@ -53,6 +53,7 @@ impl State {
                 | "verifying"
                 | "preparing"
                 | "applying"
+                | "signature-reboot-pending"
                 | "reboot-pending"
                 | "validating"
         )
@@ -82,7 +83,11 @@ impl State {
     pub fn installation_started(&self) -> bool {
         matches!(
             self.phase.as_str(),
-            "applying" | "reboot-pending" | "validating" | "repair-required"
+            "applying"
+                | "signature-reboot-pending"
+                | "reboot-pending"
+                | "validating"
+                | "repair-required"
         )
     }
     pub fn fail(&mut self, message: String, repair: bool) {
@@ -106,7 +111,12 @@ impl State {
         self.notice_opened = false;
     }
     pub fn recover_interrupted(&mut self, boot: &str) {
-        if self.phase == "applying" || (self.phase == "reboot-pending" && self.apply_boot == boot) {
+        if self.phase == "applying"
+            || (matches!(
+                self.phase.as_str(),
+                "reboot-pending" | "signature-reboot-pending"
+            ) && self.apply_boot == boot)
+        {
             self.fail(
                 "Установка была прервана; автоматическое продолжение отключено".into(),
                 true,
@@ -331,6 +341,7 @@ mod tests {
             "verifying",
             "preparing",
             "applying",
+            "signature-reboot-pending",
             "reboot-pending",
             "validating",
             "repair-required",
@@ -345,7 +356,12 @@ mod tests {
     }
     #[test]
     fn errors_after_apply_boundary_and_reboot_failure_require_repair() {
-        for phase in ["applying", "reboot-pending", "validating"] {
+        for phase in [
+            "applying",
+            "signature-reboot-pending",
+            "reboot-pending",
+            "validating",
+        ] {
             let mut s = preparing();
             s.phase = phase.into();
             let repair = s.installation_started();
@@ -362,6 +378,20 @@ mod tests {
         pending.recover_interrupted("before");
         assert!(pending.repair());
     }
+    #[test]
+    fn signature_reboot_resumes_only_after_a_new_boot() {
+        let mut pending = preparing();
+        pending.phase = "signature-reboot-pending".into();
+        pending.apply_boot = "before".into();
+        assert!(pending.busy());
+        assert!(pending.installation_started());
+        let mut resumed = pending.clone();
+        resumed.recover_interrupted("after");
+        assert_eq!(resumed.phase, "signature-reboot-pending");
+        pending.recover_interrupted("before");
+        assert!(pending.repair());
+    }
+
     #[test]
     fn daily_attempt_survives_restart_and_clock_rollback() {
         let mut s = State::fresh("3.14.0".into(), "rom".into());

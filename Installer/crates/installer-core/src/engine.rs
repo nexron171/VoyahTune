@@ -1,6 +1,7 @@
 //! Shared USB installation and removal engine.
 //! Each checked result below corresponds to a checked branch in those scripts.
 //! Installation disables known third-party loaders before replacing runtime files.
+mod application_data;
 mod native_data;
 mod navigation_fonts;
 mod readiness;
@@ -19,7 +20,7 @@ use crate::{
     inventory,
     payload::{self, Payload, NATIVE, NATIVE_PATH, RESTORE},
     plans::{self, Action, Dns, Request},
-    recovery::{self, Operation, DEVICE_STATE},
+    recovery::{self, Operation},
     vehicle_options, Error, Result,
 };
 use release_core::runtime_maintenance::{
@@ -41,29 +42,10 @@ const STOP_LOADER: &str =
     include_str!("../../../../Packaging/installer/common/stop-loader-device.sh");
 const LEGACY_INIT: &str = "/system/etc/init.logcat.sh";
 const LEGACY_MARKER: &str = "# init.logcat.sh Open Voyah:";
-// Postflight commands may repair package registration. Keep each command exclusive,
-// but let the device release its lock even if the desktop disconnects.
-fn postflight_script(script: &str, owner: &str, timeout_seconds: u32) -> String {
-    let owner = quote(owner);
+fn postflight_script(script: &str, timeout_seconds: u32) -> String {
     format!(
-        r#"lock=/data/local/voyahtune-install.lock
-[ ! -L "$lock" ] || exit 1
-mkdir "$lock" 2>/dev/null || {{ echo 'OTA или другой установщик уже использует ГУ'; exit 1; }}
-release_postflight_lock() {{
-    [ "$(cat "$lock/owner" 2>/dev/null)" = {owner} ] || return 1
-    rm -f "$lock/owner" "$lock/boot" && rmdir "$lock" && sync
-}}
-printf '%s' {owner} > "$lock/owner" || {{ rmdir "$lock"; exit 1; }}
-trap 'release_postflight_lock' EXIT
-trap 'exit 1' HUP INT TERM
-cat /proc/sys/kernel/random/boot_id > "$lock/boot" && chmod 700 "$lock" || exit 1
-/system/bin/timeout {timeout_seconds} /system/bin/sh -c {command}
-command_status=$?
-release_postflight_lock || exit 1
-trap - EXIT
-exit "$command_status"
-"#,
-        command = quote(script)
+        "/system/bin/timeout {timeout_seconds} /system/bin/sh -c {}\n",
+        quote(script)
     )
 }
 // PackageManager may retain an older /data/app update with the same versionCode.
@@ -106,7 +88,6 @@ pub struct Engine {
     restart_loader: bool,
     runtime_maintenance: Option<RuntimeMaintenance>,
     legacy_migrated: bool,
-    ota_locked: bool,
 }
 impl Engine {
     pub fn new(
@@ -134,7 +115,6 @@ impl Engine {
             restart_loader: false,
             runtime_maintenance: None,
             legacy_migrated: false,
-            ota_locked: false,
         })
     }
     pub fn run(&mut self, request: Request) -> Result<()> {
@@ -144,14 +124,7 @@ impl Engine {
                 "Подтвердите найденный автомобиль и план операции",
             ));
         }
-        let mut result = self.execute(request);
-        if let Err(error) = self.ota_unlock() {
-            if result.is_ok() {
-                result = Err(error);
-            } else {
-                self.warning(&error);
-            }
-        }
+        let result = self.execute(request);
         if result.is_err() {
             self.ignore("if [ -x /data/local/bin/voyahtune-updater ]; then setprop ctl.start voyahtune_updater; fi\n");
         }
@@ -274,14 +247,8 @@ impl Engine {
         }
     }
     fn postflight_shell(&self, script: &str) -> Result<String> {
-        self.adb.shell(
-            &postflight_script(
-                script,
-                &format!("desktop:{}:postflight", self.operation.id),
-                180,
-            ),
-            Duration::from_secs(210),
-        )
+        self.adb
+            .shell(&postflight_script(script, 180), Duration::from_secs(210))
     }
 
     fn ignore(&self, script: &str) {
@@ -352,8 +319,8 @@ impl Engine {
             },
         )?;
         self.step(
-            "updater-lock",
-            "Блокировка установки и сохранение OTA-логов",
+            "updater-prepare",
+            "Остановка OTA-службы и сохранение логов",
             |e| e.ota_prepare(),
         )?;
         self.optional_step(
@@ -361,13 +328,11 @@ impl Engine {
             "Проверка тем приборки",
             |e| e.navigation_fonts("inspect"),
         )?;
-        self.ignore(&format!("rm -f {DEVICE_STATE}/lock/owner 2>/dev/null; rmdir {DEVICE_STATE}/lock 2>/dev/null; rmdir {DEVICE_STATE} 2>/dev/null; true\n"));
         self.step(
             "system",
             "Подготовка системного раздела",
             |e| {
                 e.writable(r.action == Action::Remove)?;
-                e.ota_lock()?;
                 e.ignore("setprop ctl.stop voyahtune_updater 2>/dev/null || true\n");
                 if r.options.disable_chinese_navigation {
                     vehicle_options::disable_chinese_navigation(&e.adb)?;
@@ -392,7 +357,6 @@ impl Engine {
                             "../../../../Packaging/installer/common/disable-third-party-loaders.sh"
                         ))?;
                         e.permission_owner()?;
-                        e.ota_lock()?;
                         Ok(())
                     },
                 )?;
@@ -439,7 +403,7 @@ impl Engine {
                 {
                     e.shell("am force-stop --user 0 ru.big.town.updater 2>/dev/null || true\npm uninstall --user 0 ru.big.town.updater 2>/dev/null || true\nrm -rf /system/priv-app/VoyahTuneUpdater\nrm -f /data/local/bin/voyahtune-ui-maintenance /data/local/bin/voyahtune-ui-next.apk /data/local/voyahtune-updater/ui-update.json\n")?;
                 }
-                e.shell("rm -f /data/local/voyahtune-updater/state.json /data/local/voyahtune-updater/.state.json.new /data/local/bin/voyahtune-update.block && sync\n")?;
+                e.shell("rm -f /data/local/voyahtune-updater/state.json /data/local/voyahtune-updater/.state.json.new\nif [ ! -d /data/local/voyahtune-application-backups/ru.big.town.anative ]; then\n    rm -f /data/local/bin/voyahtune-update.block\nfi\nsync\n")?;
                 Ok(())
             })?;
             {
@@ -466,7 +430,6 @@ impl Engine {
                 "Перезагрузка автомобиля",
                 |e| {
                     e.shell("am force-stop ru.big.town.anative && am force-stop ru.big.town.restoremode\n")?;
-                    e.ota_unlock()?;
                     e.maintenance_step(RuntimeStep::Reboot, |engine| engine.raw(&["reboot"])?.checked("ADB не принял перезагрузку").map(|_| ()))?;
                     e.restart_loader = false;
                     Ok(())
@@ -529,7 +492,6 @@ impl Engine {
                 "reboot",
                 "Перезагрузка автомобиля",
                 |e| {
-                    e.ota_unlock()?;
                     e.maintenance_step(RuntimeStep::Reboot, |engine| {
                         engine
                             .raw(&["reboot"])?
@@ -554,43 +516,7 @@ impl Engine {
         }
         Ok(())
     }
-    fn ota_lock(&mut self) -> Result<()> {
-        let owner = quote(&format!("desktop:{}", self.operation.id));
-        self.shell(&format!(r#"lock=/data/local/voyahtune-install.lock
-boot=$(cat /proc/sys/kernel/random/boot_id) || exit 1
-[ ! -L "$lock" ] || exit 1
-if mkdir "$lock" 2>/dev/null; then :
-else
-    old=$(cat "$lock/owner" 2>/dev/null)
-    if [ "$old" = {owner} ]; then :
-    elif [ "$old" = ota ] && {{ [ "$(cat "$lock/boot" 2>/dev/null)" != "$boot" ] || [ "$(/data/local/bin/voyahtune-updater --repair-status 2>/dev/null)" = repair-required ]; }}; then
-        rm -f "$lock/owner" "$lock/boot" && rmdir "$lock" && mkdir "$lock" || exit 1
-    else echo 'OTA или другой установщик уже использует ГУ'; exit 1; fi
-fi
-printf '%s' {owner} > "$lock/owner" && printf '%s' "$boot" > "$lock/boot" && chmod 700 "$lock" && sync
-"#))?;
-        self.ota_locked = true;
-        Ok(())
-    }
-    fn ota_unlock(&mut self) -> Result<()> {
-        if !self.ota_locked {
-            return Ok(());
-        }
-        let owner = quote(&format!("desktop:{}", self.operation.id));
-        self.adb.shell(&format!(r#"# release desktop installation lock
-lock=/data/local/voyahtune-install.lock
-[ ! -L "$lock" ] || exit 1
-if [ -d "$lock" ]; then
-    [ "$(cat "$lock/owner" 2>/dev/null)" = {owner} ] || {{ echo 'Владелец блокировки изменился'; exit 1; }}
-    rm -f "$lock/owner" "$lock/boot" && rmdir "$lock" || exit 1
-fi
-[ ! -e "$lock" ] && sync
-"#), Duration::from_secs(30))?;
-        self.ota_locked = false;
-        Ok(())
-    }
     fn ota_prepare(&mut self) -> Result<()> {
-        self.ota_lock()?;
         self.ignore("setprop ctl.stop voyahtune_updater 2>/dev/null || true\n");
         for _ in 0..20 {
             if self.shell("getprop init.svc.voyahtune_updater\n")? != "running" {
@@ -1510,8 +1436,7 @@ fi
         }
     }
     fn signing_reset(&self, action: Action) -> Result<()> {
-        // Explicitly requested extension. Unknown metadata never blocks install;
-        // removal never inspects signatures. Android remains authoritative.
+        // Only positively identified signer conflicts authorize a pre-install reset.
         let inventory = inventory::diagnose(&self.adb, &self.payload, action);
         let resets = plans::signature_resets(&inventory, &self.payload, action).unwrap_or_default();
         if resets.iter().any(|s| s == RESTORE) {
@@ -1521,12 +1446,13 @@ fi
             self.adb.events.emit(
                 "package-reset",
                 self.adb.step.as_deref(),
-                "Другой ключ Native: удаляем приложение с данными",
+                "Другой ключ Native: сохраняем данные и переустанавливаем приложение",
                 json!({"package":NATIVE}),
             )?;
-            self.ignore("pm uninstall ru.big.town.anative\n");
-            self.ignore("pm uninstall --user 0 ru.big.town.anative\n");
-            self.shell("rm -f /system/priv-app/Native/Native.apk && sync\n")?;
+            self.application_data("backup", NATIVE)?;
+            self.shell(include_str!(
+                "../../../../Packaging/installer/common/reset-native-signature.sh"
+            ))?;
             self.raw(&["reboot"])?
                 .checked("Не удалось перезагрузить автомобиль после смены ключа")?;
             self.wait_boot(true)?;
@@ -1538,9 +1464,10 @@ fi
         self.adb.events.emit(
             "package-reset",
             self.adb.step.as_deref(),
-            "Другой ключ RestoreMode: удаляем приложение с данными",
+            "Другой ключ RestoreMode: сохраняем данные и переустанавливаем приложение",
             json!({"package":RESTORE}),
         )?;
+        self.application_data("backup", RESTORE)?;
         // Same pm-path condition as the classic remover; no signature gate.
         self.shell("pm uninstall ru.big.town.restoremode >/dev/null 2>&1 || true\nif pm path ru.big.town.restoremode 2>/dev/null | grep -q '^package:'; then exit 1; fi\n")?;
         Ok(())
@@ -1550,17 +1477,16 @@ fi
             .to_str()
             .ok_or_else(|| self.fail("Не удалось прочитать путь APK", p.display()))?;
         let mut out = self.raw(&["install", "-r", "-g", s])?;
-        if out.code != 0 && signature_update_rejected(&format!("{}\n{}", out.stdout, out.stderr)) {
+        if signature_update_rejected(&format!("{}\n{}", out.stdout, out.stderr)) {
             self.uninstall_restore()?;
             out = self.raw(&["install", "-r", "-g", s])?;
         }
-        out.checked("RestoreMode не установлен")?;
-        Ok(())
+        require_package_success(out, "RestoreMode не установлен")?;
+        self.application_data("restore", RESTORE)
     }
 }
 fn signature_update_rejected(output: &str) -> bool {
     output.contains("INSTALL_FAILED_UPDATE_INCOMPATIBLE")
-        && output.to_ascii_lowercase().contains("signature")
 }
 
 fn require_package_success(output: crate::adb::Output, message: &str) -> Result<()> {
