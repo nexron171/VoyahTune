@@ -17,6 +17,7 @@ import ru.voyahtune.agent.HookRegistry;
 import ru.voyahtune.agent.modules.AccModule;
 import ru.voyahtune.agent.modules.AndroidAccPlatform;
 import ru.voyahtune.agent.modules.AndroidClientGeometryPlatform;
+import ru.voyahtune.agent.modules.AndroidClientInputMethodPlatform;
 import ru.voyahtune.agent.modules.AndroidClusterPlatform;
 import ru.voyahtune.agent.modules.AndroidDrivePersistence;
 import ru.voyahtune.agent.modules.AndroidDriveResetPlatform;
@@ -28,6 +29,8 @@ import ru.voyahtune.agent.modules.AndroidStatusBarPlatform;
 import ru.voyahtune.agent.modules.AndroidWindowsPlatform;
 import ru.voyahtune.agent.modules.ApolloModule;
 import ru.voyahtune.agent.modules.ClientGeometryModule;
+import ru.voyahtune.agent.modules.ClientInputMethodModule;
+import ru.voyahtune.agent.modules.ClientModule;
 import ru.voyahtune.agent.modules.ClusterModule;
 import ru.voyahtune.agent.modules.DriveResetModule;
 import ru.voyahtune.agent.modules.KeyboardModule;
@@ -102,7 +105,9 @@ public final class AgentRuntime {
                 Context context = (Context) applicationContext;
                 if (context == null || !id.equals("client." + context.getPackageName()))
                     throw new IllegalArgumentException("Client module package mismatch");
-                return new ClientGeometryModule(methods, hooks, new AndroidClientGeometryPlatform(context, methods));
+                return new ClientModule(
+                    new ClientGeometryModule(methods, hooks, new AndroidClientGeometryPlatform(context, methods)),
+                    new ClientInputMethodModule(methods, hooks, new AndroidClientInputMethodPlatform(methods)));
             }
             if (id.equals("steering")) {
                 return new SteeringModule(methods, hooks, (Context) applicationContext);
