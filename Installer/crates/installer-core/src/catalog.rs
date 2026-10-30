@@ -162,6 +162,12 @@ impl Cache {
         if catalog.is_none() && stored.is_file() {
             let result: Result<Catalog> = (|| {
                 let mut value: Catalog = serde_json::from_reader(File::open(&stored)?)?;
+                // Public catalog formats are derived locally; validate the archive separately.
+                for release in &mut value.releases {
+                    if release.payload.manifest_schema == 4 {
+                        release.payload.manifest_schema = payload::PAYLOAD_FORMAT;
+                    }
+                }
                 value.validate()?;
                 Ok(value)
             })();
@@ -655,6 +661,37 @@ mod tests {
         assert_eq!(selected.payload.sha256, "a".repeat(64));
         worker.join().unwrap();
         assert!(https_url("http://127.0.0.1/archive.zip").is_err());
+    }
+
+    #[test]
+    fn cached_public_catalog_uses_current_format_when_offline() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = Cache {
+            root: directory.path().into(),
+        };
+        let mut catalog = UpdateCatalog {
+            releases: vec![UpdateRelease {
+                version: "4.5.0".into(),
+                url: "https://example.org/payload.zip".into(),
+                size: 100,
+                sha256: "a".repeat(64),
+                minimum_installer_version: Some("1.9.0".into()),
+                minimum_ota_version: Some("4.5.0".into()),
+            }],
+        }
+        .resolve()
+        .unwrap();
+        catalog.releases[0].payload.manifest_schema = 4;
+        recovery::write_json(&cache.catalog_path().unwrap(), &catalog).unwrap();
+
+        let state = cache.state_with(|| Err(network("offline")), true).unwrap();
+        assert!(state.warning.is_some());
+        let release = &state.catalog.releases[0];
+        payload::validate_schema(release.payload.manifest_schema).unwrap();
+        assert_eq!(release.version, "4.5.0");
+        assert_eq!(release.payload.sha256, "a".repeat(64));
+        assert_eq!(release.minimum_installer_version.as_deref(), Some("1.9.0"));
+        assert_eq!(release.minimum_ota_version.as_deref(), Some("4.5.0"));
     }
     #[test]
     fn remove_cache_preserves_sources_and_other_entries_and_respects_lock() {

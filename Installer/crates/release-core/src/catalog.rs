@@ -175,7 +175,7 @@ impl UpdateRelease {
                 url: self.url,
                 size: self.size,
                 sha256: self.sha256,
-                manifest_schema: 4,
+                manifest_schema: crate::payload::PAYLOAD_FORMAT,
             },
             requirements: Requirements::default(),
             minimum_installer_version: self.minimum_installer_version,
@@ -201,6 +201,23 @@ impl UpdateCatalog {
 #[cfg(test)]
 mod update_tests {
     use super::*;
+    #[test]
+    fn public_catalog_release_passes_current_payload_format_gate() {
+        let catalog: UpdateCatalog = serde_json::from_value(serde_json::json!({
+            "releases": [{
+                "version": "4.5.0",
+                "url": "https://example.org/payload_4.5.0.zip",
+                "size": 146960689,
+                "sha256": "a".repeat(64),
+                "minimumInstallerVersion": "1.9.0",
+                "minimumOtaVersion": "4.5.0"
+            }]
+        }))
+        .unwrap();
+        let resolved = catalog.resolve().unwrap();
+        crate::payload::validate_schema(resolved.releases[0].payload.manifest_schema).unwrap();
+    }
+
     #[test]
     fn catalog_orders_versions_and_preserves_release_channels() {
         let catalog = UpdateCatalog {

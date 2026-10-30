@@ -60,6 +60,18 @@ fn future_format_requires_updated_installer() {
 }
 
 #[test]
+fn legacy_payload_formats_remain_unsupported() {
+    for format in [0, 3, 4] {
+        let root = tempfile::tempdir().unwrap();
+        fixture(root.path(), format);
+        assert_eq!(
+            Payload::load(root.path()).err().unwrap().code,
+            "PAYLOAD_SCHEMA_UNSUPPORTED"
+        );
+    }
+}
+
+#[test]
 fn rebuilt_beta_has_a_different_content_identity() {
     let root = tempfile::tempdir().unwrap();
     fixture(root.path(), 5);
