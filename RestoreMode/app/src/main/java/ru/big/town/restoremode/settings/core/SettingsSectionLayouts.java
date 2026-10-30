@@ -15,6 +15,7 @@ public final class SettingsSectionLayouts {
         layout(R.layout.settings_main_passenger_tile),
         layout(R.layout.settings_main_trip_timer_power_hold),
         layout(R.layout.settings_main_wash_mode_auto_light),
+        layout(R.layout.settings_main_rear_fog_hotspot),
         layout(R.layout.settings_main_pedestrian_sound_battery_heat),
         layout(R.layout.settings_main_voice_scenarios),
         layout(R.layout.settings_main_forced_ev_suspension_maintenance),

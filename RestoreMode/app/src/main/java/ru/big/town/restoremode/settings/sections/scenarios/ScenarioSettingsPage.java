@@ -984,11 +984,13 @@ public final class ScenarioSettingsPage {
         input.setText(String.valueOf(DEFAULT_PAUSE_SECONDS));
         input.setFocusable(false);
         input.setClickable(true);
-        input.setOnClickListener(view -> {
-            Integer seconds = parsePauseSeconds(input.getText().toString());
-            pauseDurationDialog(seconds == null ? DEFAULT_PAUSE_SECONDS : seconds,
-                    selectedSeconds -> input.setText(String.valueOf(selectedSeconds)));
-        });
+        input.setOnClickListener(
+                view -> {
+                    Integer seconds = parsePauseSeconds(input.getText().toString());
+                    pauseDurationDialog(
+                            seconds == null ? DEFAULT_PAUSE_SECONDS : seconds,
+                            selectedSeconds -> input.setText(String.valueOf(selectedSeconds)));
+                });
         input.setTextColor(0xfff3f5fa);
         input.setBackgroundResource(R.drawable.settings_field);
         input.setPadding(dp(16), dp(14), dp(16), dp(14));
@@ -1056,16 +1058,27 @@ public final class ScenarioSettingsPage {
                         .setPositiveButton("Готово", null)
                         .setNegativeButton("Отмена", null)
                         .create();
-        dialog.setOnShowListener(ignored ->
-                dialog.getButton(DialogInterface.BUTTON_POSITIVE).setOnClickListener(view -> {
-                    int totalSeconds = hours.getValue() * 3600 + minutes.getValue() * 60 + seconds.getValue();
-                    if (totalSeconds < ScenarioProtocol.MIN_PAUSE_SECONDS) {
-                        Toast.makeText(activity, "Выберите длительность не менее 1 секунды", Toast.LENGTH_SHORT).show();
-                        return;
-                    }
-                    onPicked.accept(totalSeconds);
-                    dialog.dismiss();
-                }));
+        dialog.setOnShowListener(
+                ignored ->
+                        dialog.getButton(DialogInterface.BUTTON_POSITIVE)
+                                .setOnClickListener(
+                                        view -> {
+                                            int totalSeconds =
+                                                    hours.getValue() * 3600
+                                                            + minutes.getValue() * 60
+                                                            + seconds.getValue();
+                                            if (totalSeconds < ScenarioProtocol.MIN_PAUSE_SECONDS) {
+                                                Toast.makeText(
+                                                                activity,
+                                                                "Выберите длительность не менее 1"
+                                                                    + " секунды",
+                                                                Toast.LENGTH_SHORT)
+                                                        .show();
+                                                return;
+                                            }
+                                            onPicked.accept(totalSeconds);
+                                            dialog.dismiss();
+                                        }));
         dialog.show();
     }
 
@@ -1132,7 +1145,8 @@ public final class ScenarioSettingsPage {
                         || action.startsWith(VoiceFuelCommand.PREFIX)) {
                     return "Энергия и заряд";
                 }
-                if (action.startsWith("headlights:")
+                if (action.startsWith("rear_fog:")
+                        || action.startsWith("headlights:")
                         || action.startsWith("auto_light:")
                         || action.startsWith("toggle_headlights")) {
                     return "Свет";

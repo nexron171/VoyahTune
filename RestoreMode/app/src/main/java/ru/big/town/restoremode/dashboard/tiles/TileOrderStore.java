@@ -39,6 +39,8 @@ public class TileOrderStore {
         "tripCard",
         "cardPowerHold",
         "cardWashMode",
+        "cardRearFog",
+        "cardHotspot",
         "cardAutoLight",
         "cardPedestrian",
         "cardForcedEv",

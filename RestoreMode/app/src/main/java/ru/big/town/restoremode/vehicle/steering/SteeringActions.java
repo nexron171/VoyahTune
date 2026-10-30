@@ -63,6 +63,12 @@ public final class SteeringActions {
                             new Action("toggle_headlights", "Фары: выкл/ближний"),
                             new Action("toggle_headlights_auto", "Фары: ближний/авто"),
                             new Action("headlights:parking", "Фары: габариты"),
+                            new Action("rear_fog:on", "Задняя противотуманка: включить"),
+                            new Action("rear_fog:off", "Задняя противотуманка: выключить"),
+                            new Action("rear_fog:toggle", "Задняя противотуманка: вкл/выкл"),
+                            new Action("hotspot:on", "Точка доступа Android: включить"),
+                            new Action("hotspot:off", "Точка доступа Android: выключить"),
+                            new Action("hotspot:toggle", "Точка доступа Android: вкл/выкл"),
                             new Action("wash", "Режим мойки")));
 
     private SteeringActions() {}

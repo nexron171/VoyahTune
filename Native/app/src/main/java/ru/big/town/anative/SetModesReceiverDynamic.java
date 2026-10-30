@@ -656,7 +656,15 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             completeSteerAction(completion);
             return;
         }
-        if (action.startsWith("energy:")) {
+        if (ru.big.town.common.QuickControlProtocol.handles(action)) {
+            QuickControlController.execute(
+                    ctx,
+                    action,
+                    error -> {
+                        if (!error.isEmpty()) Log.w(TAG, error);
+                        completeSteerAction(completion);
+                    });
+        } else if (action.startsWith("energy:")) {
             cycleMode(ctx, action.substring("energy:".length()), "energy", completion);
         } else if (action.startsWith("drive:")) {
             cycleMode(ctx, action.substring("drive:".length()), "driveMode", completion);

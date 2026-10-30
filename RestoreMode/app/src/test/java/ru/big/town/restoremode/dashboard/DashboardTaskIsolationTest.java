@@ -51,6 +51,31 @@ public class DashboardTaskIsolationTest {
     }
 
     @Test
+    public void quickControlsAreOneCellAndKeepTheirSavedPositions() {
+        DashboardActivity activity = Robolectric.buildActivity(DashboardActivity.class).get();
+        ReflectionHelpers.setField(activity, "sharedPreferences", driver);
+        for (String widget : new String[] {"cardRearFog", "cardHotspot"}) {
+            int[] dimensions =
+                    ReflectionHelpers.callInstanceMethod(
+                            activity,
+                            "getWidgetDimensions",
+                            ReflectionHelpers.ClassParameter.from(String.class, widget));
+            org.junit.Assert.assertArrayEquals(new int[] {1, 1}, dimensions);
+            TileOrderStore.save(
+                    driver,
+                    Collections.singletonList(
+                            new TileOrderStore.Tile(TileOrderStore.Tile.TYPE_WIDGET, widget)));
+            TileOrderStore.sync(driver, context.getPackageManager());
+            assertEquals(widget, TileOrderStore.load(driver).get(0).id);
+            assertEquals(
+                    1,
+                    TileOrderStore.load(driver).stream()
+                            .filter(tile -> tile.id.equals(widget))
+                            .count());
+        }
+    }
+
+    @Test
     public void physicalLaunchesResolveToIndependentReusableTasks() throws Exception {
         Intent driverLaunch = DashboardTarget.intent(0);
         Intent passengerLaunch = DashboardTarget.intent(1);
@@ -80,16 +105,19 @@ public class DashboardTaskIsolationTest {
 
     @Test
     public void voiceAnimationPreviewCannotBeSelectedAsThePackageLauncher() {
-        Intent launcher = new Intent(Intent.ACTION_MAIN)
-                .addCategory(Intent.CATEGORY_LAUNCHER)
-                .setPackage(context.getPackageName());
-        Set<String> activities = context.getPackageManager().queryIntentActivities(launcher, 0).stream()
-                .map(resolved -> resolved.activityInfo.name)
-                .collect(Collectors.toSet());
+        Intent launcher =
+                new Intent(Intent.ACTION_MAIN)
+                        .addCategory(Intent.CATEGORY_LAUNCHER)
+                        .setPackage(context.getPackageName());
+        Set<String> activities =
+                context.getPackageManager().queryIntentActivities(launcher, 0).stream()
+                        .map(resolved -> resolved.activityInfo.name)
+                        .collect(Collectors.toSet());
 
         assertTrue(activities.contains(DashboardTarget.DRIVER));
         assertTrue(activities.contains(DashboardTarget.PASSENGER));
-        assertFalse(activities.contains(context.getPackageName() + ".VoiceAnimationPreviewActivity"));
+        assertFalse(
+                activities.contains(context.getPackageName() + ".VoiceAnimationPreviewActivity"));
     }
 
     @Test

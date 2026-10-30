@@ -356,6 +356,8 @@ public final class SettingsDesign {
             "showTripTimer",
             "showPowerHold",
             "showWashMode",
+            "showRearFog",
+            "showHotspot",
             "showAutoLight",
             "showPedestrian",
             "showBatteryHeat",

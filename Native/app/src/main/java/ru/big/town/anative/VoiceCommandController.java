@@ -72,6 +72,15 @@ final class VoiceCommandController {
                     });
             return;
         }
+        if (ru.big.town.common.QuickControlProtocol.handles(action)) {
+            QuickControlController.execute(
+                    service,
+                    action,
+                    error -> {
+                        if (gate.active(token)) respond(reply, error.isEmpty(), error);
+                    });
+            return;
+        }
         if (SeatCommand.handles(action) || WindowCommand.handles(action)) {
             // Submission commits this one-shot action. Closing/replacing the voice UI must not
             // cancel a queued write, roll it back or cause a retry; only its reply is

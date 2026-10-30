@@ -19,6 +19,21 @@ public class VoiceCommandCatalogTest {
     }
 
     @Test
+    public void rearFogAndHotspotKeepOnOffAndNegationDistinct() {
+        assertAction(
+                "rear_fog:on",
+                "включи заднюю противотуманку",
+                "включи задний противотуманный фонарь");
+        assertAction("rear_fog:off", "выключи заднюю противотуманку");
+        assertAction("hotspot:on", "включи точку доступа", "включи раздачу интернета");
+        assertAction("hotspot:off", "выключи точку доступа");
+        assertAction("rear_fog:toggle", "переключи заднюю противотуманку");
+        assertAction("hotspot:toggle", "переключи точку доступа");
+        assertNull(VoiceCommandCatalog.match(commands, "не включай заднюю противотуманку"));
+        assertNull(VoiceCommandCatalog.match(commands, "не включай точку доступа"));
+    }
+
+    @Test
     public void suspensionMaintenanceHasExplicitOppositeIntents() {
         assertAction(
                 "suspension_maintenance:on",
