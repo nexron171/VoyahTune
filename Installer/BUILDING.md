@@ -5,16 +5,18 @@ GUI выпускается независимо от автомобильног�
 `4.5.0` или `4.5.0-beta`. Источник версий — корневой `versions.json`; Cargo/Tauri
 и APK metadata синхронизируются с ним перед сборкой.
 
-Текущий контракт требует Installer 1.8.2 и capability `unified-runtime-v1`.
+Текущий выпуск требует Installer 1.9.0 и capability `fixed-payload-v1`.
 Native/RestoreMode общие, RunYN входит в архив с условием `except-h97xy`.
 [Подробный состав](../Docs/installer-payload.md).
 
 Для нового payload (номер и минимум в примере условные):
 
 ```sh
-./make_release.sh 4.5.0 --payload --minimum-ota-version 4.5.0
+./make_release.sh 4.5.0 --payload --minimum-installer-version 1.9.0 --minimum-ota-version 4.5.0
 ```
 
+Оба флага `--minimum-installer-version` и `--minimum-ota-version` обязательны.
+Минимум Installer задаёт требование к установщику на компьютере.
 Минимум OTA определяется совместимостью root-службы. Для последующих совместимых
 релизов сохраняйте ранее подтверждённый минимум; новый номер payload его не повышает.
 
@@ -29,15 +31,15 @@ Native/RestoreMode общие, RunYN входит в архив с услови�
 обычная сборка включает только ADB и небольшой remover. Пользователь выбирает/скачивает
 версию в GUI. Пользовательского CLI нет, `installer-build` остаётся инструментом разработчика.
 
-`./make_release.sh VERSION --minimum-ota-version OTA_BASE_VERSION --mac` сохраняется как обёртка: собирает payload ZIP и отдельно
+`./make_release.sh VERSION --minimum-installer-version INSTALLER_MIN_VERSION --minimum-ota-version OTA_BASE_VERSION --mac` сохраняется как обёртка: собирает payload ZIP и отдельно
 macOS GUI ZIP в `Releases/dist/VoyahTune-Installer-1.8.2/`. `--installers` по умолчанию
-выбирает macOS Universal и Windows x64/x86/ARM64; Linux добавляется через `--linux`.
+выбирает macOS Universal, Windows x86/x64/ARM64 и Linux amd64.
 Для одной macOS используйте `--mac`.
 Подробности и публикация: [Docs/releasing.md](../Docs/releasing.md).
 
 ## Полная сборка из macOS
 
-Обёртка `make_release.sh VERSION --minimum-ota-version OTA_BASE_VERSION --installers` собирает Native/RestoreMode и RunYN, единый runtime,
+Обёртка `make_release.sh VERSION --minimum-installer-version INSTALLER_MIN_VERSION --minimum-ota-version OTA_BASE_VERSION --installers` собирает Native/RestoreMode и RunYN, единый runtime,
 проверенный ZIP payload и самостоятельные GUI. Результаты разделены:
 `Releases/dist/payload_VERSION.zip` и `Releases/dist/VoyahTune-Installer-INSTALLER_VERSION/`.
 
@@ -45,15 +47,15 @@ macOS GUI ZIP в `Releases/dist/VoyahTune-Installer-1.8.2/`. `--installers` по
 В `make_release.sh` они включают режим установщиков без отдельного `--installers`:
 
 ```sh
-./make_release.sh 4.5.0 --minimum-ota-version 4.5.0 --mac
-./make_release.sh 4.5.0 --minimum-ota-version 4.5.0 --windows --linux
+./make_release.sh 4.5.0 --minimum-installer-version 1.9.0 --minimum-ota-version 4.5.0 --mac
+./make_release.sh 4.5.0 --minimum-installer-version 1.9.0 --minimum-ota-version 4.5.0 --windows --linux
 ./Installer/scripts/build-all-macos.sh --mac --payload Releases/build/installer-payload-4.5.0
 ```
 
-`--installers` собирает macOS Universal ARM64+x86-64 и Windows x64/x86/ARM64.
-`--windows` также собирает все три Windows-архитектуры; `--windows-arch x64|x86|arm64`
-выбирает одну. Linux включается только явным `--linux`; текущий Linux builder — x64.
-`--installers --linux` добавляет Linux к стандартному набору. Для `--mac` Docker/Colima не нужны:
+`--installers` собирает macOS Universal ARM64+x86-64, Windows x86/x64/ARM64
+и Linux amd64. `--windows` собирает все три Windows-архитектуры;
+`--windows-arch x64|x86|arm64` выбирает одну. Linux можно собрать отдельно через
+`--linux`. Для `--mac` Docker/Colima не нужны:
 они не проверяются и не запускаются. Повторный выпуск той же версии перезаписывает
 локальный payload и каталог выпуска; ZIP остаются только для выбранных платформ.
 
@@ -189,7 +191,7 @@ vti_docker exec vti-linux-amd64 uname -m
 ./Installer/scripts/build-all-macos.sh --check --windows --linux
 # После подготовки также Android SDK и локального Rust для macOS:
 ./Installer/scripts/build-all-macos.sh --check
-./make_release.sh 4.5.0 --minimum-ota-version 4.5.0 --installers
+./make_release.sh 4.5.0 --minimum-installer-version 1.9.0 --minimum-ota-version 4.5.0 --installers
 ```
 
 Скрипт сам копирует исходники Installer и опциональный payload в каталоги `hosts/`;

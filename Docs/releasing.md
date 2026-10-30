@@ -10,7 +10,7 @@
 `voyahtune` для stable payload и APK, `installer` для GUI/движка. Beta получает
 согласованный номер с суффиксом `-beta`, например `4.5.0-beta`.
 
-Текущий единый контракт требует Installer **1.8.5**, capability `fixed-payload-v1`
+Текущий единый контракт требует Installer **1.9.0**, capability `fixed-payload-v1`
 и совместимую root-службу. Первый переход на неё выполняется через USB; следующие
 совместимые обновления используют тот же payload через OTA. Общий recipe заменяет
 прежний runtime, удаляет известные устаревшие файлы и перезагружает Android.
@@ -24,18 +24,20 @@ RunYN входит в архив и устанавливается по усло
 
 | Что собрать | Команда |
 | --- | --- |
-| Только единый payload | `./make_release.sh 4.5.0 --payload --minimum-ota-version 4.5.0` |
-| Payload и GUI macOS | `./make_release.sh 4.5.0 --mac --minimum-ota-version 4.5.0` |
-| Payload и стандартный набор GUI | `./make_release.sh 4.5.0 --installers --minimum-ota-version 4.5.0` |
+| Только единый payload | `./make_release.sh 4.5.0 --payload --minimum-installer-version 1.9.0 --minimum-ota-version 4.5.0` |
+| Payload и GUI macOS | `./make_release.sh 4.5.0 --mac --minimum-installer-version 1.9.0 --minimum-ota-version 4.5.0` |
+| Payload и стандартный набор GUI | `./make_release.sh 4.5.0 --installers --minimum-installer-version 1.9.0 --minimum-ota-version 4.5.0` |
 | Только GUI macOS | `./Installer/scripts/build-all-macos.sh --mac` |
 
 `--pi`, `--od`, `--legacy` и выбор инфраструктуры в Rust-сборщике удалены.
-`--minimum-ota-version` обязателен. В примерах минимум совпадает с номером первого
+`--minimum-installer-version` и `--minimum-ota-version` обязательны.
+Оба значения имеют формат `major.minor.patch`. Минимум Installer передаётся в APK
+и переносится из него в JSON релиза; при `--no-build` он должен совпадать с минимумом готового APK. В примерах минимум совпадает с номером первого
 релиза с новой службой. Для последующих совместимых релизов сохраняйте прежний
 подтверждённый минимум; не подставляйте новый номер автоматически.
 
-`--installers` выбирает macOS Universal и Windows x64/x86/ARM64. Linux добавляется
-явным `--linux`. Без `--installers` флаги `--mac`, `--windows`, `--linux` выбирают
+`--installers` выбирает macOS Universal, Windows x86/x64/ARM64 и Linux amd64.
+Без `--installers` флаги `--mac`, `--windows`, `--linux` выбирают
 платформы; `--windows-arch x64|x86|arm64` ограничивает Windows одной архитектурой.
 `--payload` нельзя совмещать с платформенными флагами. Запуск Windows GUI проверяется
 отдельно от кросс-сборки. Linux требует X11/XWayland и glibc Ubuntu 22.04.
@@ -132,7 +134,7 @@ npm --version
 Desktop-зависимости устанавливаются автоматически через `npm ci` во время сборки.
 Глобально устанавливать Tauri CLI не требуется.
 
-Теперь можно выполнять `./make_release.sh 4.5.0 --mac --minimum-ota-version 4.5.0`. При выборе только macOS
+Теперь можно выполнять `./make_release.sh 4.5.0 --mac --minimum-installer-version 1.9.0 --minimum-ota-version 4.5.0`. При выборе только macOS
 Docker/Colima не проверяются и не запускаются.
 
 ### 2.4. Дополнительно для Windows/Linux из macOS
@@ -227,7 +229,7 @@ APK на автомобиле не резервируются; для сохра
 ## 4. Собрать и проверить payload
 
 ```sh
-./make_release.sh 4.5.0 --payload --minimum-ota-version 4.5.0
+./make_release.sh 4.5.0 --payload --minimum-installer-version 1.9.0 --minimum-ota-version 4.5.0
 Installer/target/release/installer-build verify-payload Releases/build/installer-payload-4.5.0
 python3 -m json.tool Releases/dist/payload_4.5.0.json
 ```
@@ -272,7 +274,8 @@ npm --prefix Installer/desktop run build
 
 `minimumInstallerVersion` в метаданных APK и `minimumInstallerVersion`
 в записи каталога должны отражать один минимальный поддерживаемый GUI.
-Для native/Java runtime это 1.8.5 из-за фиксированного формата без внешних манифестов; последующее повышение версии Installer само по себе не меняет минимум.
+Для текущего выпуска выбран минимум Installer 1.9.0. Задавайте его через
+`--minimum-installer-version`; последующее повышение версии Installer само по себе не меняет минимум.
 
 `minimumOtaVersion` — базовая версия установленного VoyahTune с совместимой root-службой.
 Если служба обновляется через USB, используйте номер впервые содержащего её релиза.
@@ -317,7 +320,7 @@ SHA-256 и минимумами совместимости. Шаблонный U
 Сборка GUI не собирает Android. Если нужны оба результата за один запуск:
 
 ```sh
-./make_release.sh 4.5.0 --mac --minimum-ota-version 4.5.0
+./make_release.sh 4.5.0 --mac --minimum-installer-version 1.9.0 --minimum-ota-version 4.5.0
 ```
 
 Developer ID/notarization и Authenticode проверяются отдельно от успешной сборки.
