@@ -85,7 +85,7 @@ Native, whitelist, RestoreMode, RunYN, boot и DNS остаются типизи
 | Фаза | Политика |
 | --- | --- |
 | Проверка локального payload | Все хеши, metadata APK, recipe и совместимость до записи на ГУ |
-| Root и диагностика | Root/wait/root, общий OTA lock, остановка updater и выгрузка прежних логов |
+| Root и диагностика | Root/wait/root, остановка updater и выгрузка прежних логов |
 | CAN permission | Проверка и обработка известного конфликта VoyahHlCTRL по плану установки |
 | Remount | Прежняя процедура, включая перезагрузку при необходимости |
 | Backup / подписи | Копии только системных/runtime-файлов; Native/RestoreMode APK не копируются; CE/DE reset только при смене подписи |
