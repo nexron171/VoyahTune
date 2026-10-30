@@ -320,7 +320,7 @@ class InstallerTests(unittest.TestCase):
             "system/etc/init/voyahtune.updater.rc",
         ]:
             self.assertTrue((self.device / path).is_file(), path)
-        self.assertFalse(lock.exists())
+        self.assertEqual((lock / "owner").read_text(), "ota")
         self.assertFalse(
             (self.device / "data/local/bin/voyahtune-update.block").exists()
         )
@@ -331,17 +331,18 @@ class InstallerTests(unittest.TestCase):
         self.assertFalse(diagnostics.exists())
         self.assertFalse((self.device / "system/priv-app/VoyahTuneUpdater").exists())
 
-    def test_live_ota_lock_blocks_desktop_before_file_changes(self):
+    def test_existing_install_lock_does_not_block_reinstallation(self):
+        self.seed_apps()
         lock = self.device / "data/local/voyahtune-install.lock"
         lock.mkdir()
         (lock / "owner").write_text("ota")
         (lock / "boot").write_text("0")
-        result = self.apply(self.plan(), okay=False)
-        self.assertNotEqual(result.returncode, 0)
+        self.apply(self.plan())
+        self.assert_app_data(True)
         self.assertEqual((lock / "owner").read_text(), "ota")
-        self.assertFalse((self.device / "system/priv-app/Native/Native.apk").exists())
+        self.assertTrue((self.device / "system/priv-app/Native/Native.apk").exists())
 
-    def test_final_reboot_happens_after_unlock_for_install_and_remove(self):
+    def test_install_and_remove_do_not_create_install_lock(self):
         self.seed_apps()
         self.apply(self.plan())
         self.assertFalse(self.read_state()["locksAtReboot"][-1])
@@ -400,18 +401,7 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(len(reports), 1)
         self.assertFalse(json.loads(reports[0].read_text())["success"])
 
-    def test_failed_unlock_blocks_final_reboot_and_success(self):
-        self.seed_apps()
-        self.state["failShell"] = "# release desktop installation lock"
-        self.write_state()
-        result = self.apply(self.plan(), okay=False)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(self.read_state().get("reboots", 0), 0)
-        self.assertTrue(
-            (self.device / "data/local/voyahtune-install.lock/owner").exists()
-        )
-
-    def test_postflight_timeout_releases_its_lock_and_reports_failure(self):
+    def test_postflight_timeout_reports_failure_without_install_lock(self):
         self.seed_apps()
         self.state["postflightTimeout"] = True
         self.write_state()

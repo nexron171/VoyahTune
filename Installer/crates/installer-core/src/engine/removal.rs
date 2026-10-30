@@ -92,7 +92,6 @@ impl Engine {
     }
 
     fn finish_data_removal(&self) -> Result<()> {
-        // The reboot releases the install lock; reacquire it for the complete cleanup.
         let script = format!(
             "{REMOVE_NATIVE_DATA}\n{}\n{REMOVE_GLOBAL_SETTINGS}",
             c::REMOVE_SETTINGS

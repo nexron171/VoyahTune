@@ -5,7 +5,7 @@ import { getOperationProgress } from "../desktop/src/installation-progress.ts";
 const installStepIds = [
   "preflight",
   "root",
-  "updater-lock",
+  "updater-prepare",
   "system",
   "third-party-loaders",
   "backup",
@@ -122,7 +122,7 @@ test("removal includes optional Cunba restoration in the total", () => {
   const removalStepIds = [
     "preflight",
     "root",
-    "updater-lock",
+    "updater-prepare",
     "system",
     "deactivate",
     "dns",

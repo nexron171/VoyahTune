@@ -181,13 +181,22 @@ class InstallationTests(unittest.TestCase):
             "Open Voyah:", (fixture.device / "system/etc/init.logcat.sh").read_text()
         )
 
-    def test_changed_signatures_reset_both_apps(self):
+    def test_changed_signatures_preserve_both_apps(self):
         f = self.fixture()
         f.seed_apps(old_key=True)
         result = f.apply(f.plan("install"))
-        f.assert_app_data(False)
+        f.assert_app_data(True)
+        self.assertFalse((f.device / "data/local/voyahtune-application-backups").exists())
         self.assertEqual(f.read_state()["reboots"], 2)
         self.assertIn("package-reset", result.stdout)
+
+    def test_backup_failure_prevents_signature_uninstall(self):
+        f = self.fixture({"failShell": "application_data_action='backup'"})
+        f.seed_apps(old_key=True)
+        f.apply(f.plan("install"), okay=False)
+        f.assert_app_data(True)
+        self.assertIn("ru.big.town.restoremode", f.read_state()["packages"])
+        self.assertIn("ru.big.town.anative", f.read_state()["packages"])
 
     def test_matching_signatures_keep_data(self):
         f = self.fixture()
@@ -208,7 +217,7 @@ class InstallationTests(unittest.TestCase):
             ),
             2,
         )
-        self.assertFalse(
+        self.assertTrue(
             (f.device / "data/user/0/ru.big.town.restoremode/settings-marker").exists()
         )
 

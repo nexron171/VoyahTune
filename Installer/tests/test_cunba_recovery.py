@@ -302,7 +302,7 @@ esac""",
             .strip(),
             "restoring",
         )
-        self.assertTrue((self.root / "data/local/voyahtune-install.lock").exists())
+        self.assertFalse((self.root / "data/local/voyahtune-install.lock").exists())
         (self.root / "bin/mount").write_text(mount)
         self.run_action("rollback")
         self.assert_original()
@@ -393,20 +393,16 @@ exec /bin/cp "$@"''',
                 )
                 path.write_text(original)
 
-    def test_retry_keeps_foreign_lock_and_quarantined_data(self):
+    def test_retry_ignores_old_install_lock_and_archives_rollback(self):
         self.run_action("prepare")
         self.run_action("rollback")
         self.write("data/local/voyahtune-install.lock/owner", "ota:other")
-        self.run_action("archive-rollback", success=False)
+        self.run_action("archive-rollback")
         self.assertEqual(
             (self.root / "data/local/voyahtune-install.lock/owner").read_text(),
             "ota:other",
         )
-        (self.root / "data/local/voyahtune-install.lock/owner").unlink()
-        (self.root / "data/local/voyahtune-install.lock").rmdir()
-        saved = self.write("data/local/voyahtune-cunba-recovery/injector", "saved data")
-        self.run_action("archive-rollback", success=False)
-        self.assertEqual(saved.read_text(), "saved data")
+        self.assertFalse((self.root / "data/local/voyahtune-cunba-recovery").exists())
 
     def test_changed_backup_blocks_rollback(self):
         self.run_action("prepare")
@@ -417,9 +413,11 @@ exec /bin/cp "$@"''',
             "start_logcat", (self.root / "system/etc/init.logcat.sh").read_text()
         )
 
-    def test_foreign_lock_is_not_removed(self):
+    def test_old_install_lock_does_not_block_recovery(self):
         self.write("data/local/voyahtune-install.lock/owner", "ota:other")
-        self.run_action("prepare", success=False)
+        self.run_action("prepare")
+        self.run_action("apply")
+        self.run_action("rollback")
         self.assertEqual(
             (self.root / "data/local/voyahtune-install.lock/owner").read_text(),
             "ota:other",

@@ -184,7 +184,11 @@ pub fn queue(shared: &Shared, sender: &mpsc::Sender<Job>, job: Job) -> io::Resul
 
 fn run(shared: Shared, receiver: mpsc::Receiver<Job>) {
     let state = snapshot(&shared);
-    if state.phase == "reboot-pending" || state.phase == "validating" {
+    if state.phase == "signature-reboot-pending" {
+        if let Err(error) = crate::install::resume_signature_change(&shared) {
+            fail(&shared, &error, true);
+        }
+    } else if state.phase == "reboot-pending" || state.phase == "validating" {
         if let Err(error) = crate::install::validate(&shared) {
             fail(&shared, &error, true);
         }

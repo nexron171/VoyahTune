@@ -32,6 +32,7 @@ public final class UpdatePresentationTest {
                     "verifying",
                     "preparing",
                     "applying",
+                    "signature-reboot-pending",
                     "reboot-pending",
                     "validating"
                 }) assertEquals(phase, UpdatePresentation.menuPhase(phase, true));
@@ -62,7 +63,7 @@ public final class UpdatePresentationTest {
     @Test
     public void onlyPostbootCommitIsSuccess() {
         for (String phase :
-                new String[] {"verifying", "preparing", "reboot-pending", "validating"}) {
+                new String[] {"verifying", "preparing", "signature-reboot-pending", "reboot-pending", "validating"}) {
             UpdatePresentation p = view(phase, 8, 8);
             assertTrue(p.meter);
             assertTrue(p.indeterminate);

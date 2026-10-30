@@ -72,7 +72,7 @@ cmd() {
                     [
                         "am force-stop --user 0 ru.big.town.anative",
                         "pm uninstall -k --user 0 ru.big.town.anative",
-                        "cmd package install-existing --user 0 --wait ru.big.town.anative",
+                        "cmd package install-existing --user 0 ru.big.town.anative",
                     ]
                 );
             }

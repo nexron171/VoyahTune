@@ -261,8 +261,8 @@ export async function command(
         { id: "preflight", title: "Повторная проверка автомобиля и файлов" },
         { id: "root", title: "Получение системного доступа" },
         {
-          id: "updater-lock",
-          title: "Блокировка установки и сохранение OTA-логов",
+          id: "updater-prepare",
+          title: "Остановка OTA-службы и сохранение логов",
         },
         ...(args.action !== "remove" && scenario === "canbus-conflict"
           ? [{ id: "permission", title: "Проверка владельца CAN-разрешения" }]

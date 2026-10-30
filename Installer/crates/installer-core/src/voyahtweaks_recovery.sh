@@ -1,6 +1,5 @@
 set -eu
 journal=/data/local/voyahtune-voyahtweaks-recovery
-lock=/data/local/voyahtune-install.lock
 startup=/system/etc/init.logcat.sh
 package=ru.kachalin.voyahtweaks
 files='load.bin frida-inject launcher.bin launcher.js keymanager.bin keymanager.js rus.bin rus.js ss11.bin ss11.js ss9.bin ss9.js instrcard.bin instrcard.js virtualdisplay.bin virtualdisplay.js complex.bin complex.js login.bin login.js'
@@ -27,18 +26,6 @@ state() {
 __VOYAHTWEAKS_SYSTEM_ACCESS__
 
 __STARTUP_BACKUP__
-
-require_lock() {
-    [ ! -L "$lock" ] && [ -d "$lock" ] || fail 'Installation lock missing'
-    [ "$(cat "$lock/owner")" = desktop:voyahtweaks-recovery ] || fail 'Another operation owns the lock'
-}
-
-release_lock() {
-    require_lock
-    rm "$lock/owner" "$lock/boot"
-    rmdir "$lock"
-    sync
-}
 
 replace_startup() (
     replacement=$startup.voyahtune-voyahtweaks-new
@@ -134,11 +121,6 @@ case "$action" in
                 *) fail 'Unknown package state' ;;
             esac
         fi
-        mkdir "$lock" 2>/dev/null || fail 'Another installation or OTA owns the device'
-        printf '%s' desktop:voyahtweaks-recovery > "$lock/owner"
-        cat /proc/sys/kernel/random/boot_id > "$lock/boot"
-        chmod 700 "$lock"
-        trap '[ -d "$journal" ] || release_lock' EXIT
         mkdir -m 700 "$journal"
         state preparing
         printf '%s\n' "$package_state" > "$journal/package-state"
@@ -165,10 +147,8 @@ VOYAHTUNE_STARTUP
         /system/bin/sh -n "$journal/startup-disabled"
         digest "$journal/startup-disabled" > "$journal/startup-after"
         state prepared
-        trap - EXIT
         ;;
     apply)
-        require_lock
         [ "$(cat "$journal/state")" = prepared ] || fail 'Recovery not prepared'
         [ "$(digest "$startup")" = "$(cat "$journal/startup-before")" ] || fail 'Startup changed since inspection'
         [ "$(digest "$journal/startup")" = "$(cat "$journal/startup-before")" ] || fail 'Startup backup changed'
@@ -180,14 +160,11 @@ VOYAHTUNE_STARTUP
         fi
         ;;
     commit)
-        require_lock
         [ "$(cat "$journal/state")" = reboot-pending ] || fail 'Unexpected recovery state'
         [ "$(cat /proc/sys/kernel/random/boot_id)" != "$(cat "$journal/boot-before")" ] || fail 'Full reboot required'
         state verified
-        release_lock
         ;;
     rollback)
-        require_lock
         state restoring
         if [ -d "$journal/files" ]; then
             for name in $files; do
@@ -220,7 +197,6 @@ VOYAHTUNE_STARTUP
             [ "$restored_state" = "$(cat "$journal/package-state")" ] || fail 'Package state rollback failed'
         fi
         state rolled-back
-        release_lock
         ;;
     *) fail 'Unknown recovery action' ;;
 esac

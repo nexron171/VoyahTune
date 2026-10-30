@@ -325,7 +325,10 @@ def main():
     elif name == "pm":
         if args[:2] == ["list", "packages"]:
             for package in s["packages"]:
-                print("package:" + package)
+                if "-U" in args:
+                    print("package:" + package + " uid:0")
+                else:
+                    print("package:" + package)
         elif args[0] == "path":
             path = s["packages"].get(args[-1])
             if path:
@@ -372,7 +375,7 @@ def main():
         if args[:2] != ["package", "install-existing"]:
             raise RuntimeError(args)
         package = args[-1]
-        s["packages"][package] = "/system/priv-app/Native/Native.apk"
+        s["packages"].setdefault(package, "/system/priv-app/Native/Native.apk")
         save(s)
         package_data(package)
         print("Package installed for user: 0")
@@ -434,6 +437,8 @@ def main():
         owner = s.get("owners", {}).get(str(p.relative_to(root)), "0:0")
         print(f"{p.stat().st_mode & 0o7777:o}:{owner}")
     elif name == "am":
+        if args[:1] == ["get-started-user-state"]:
+            print("RUNNING_UNLOCKED")
         if args[:1] == ["broadcast"]:
             s["afterBroadcast"] = True
             save(s)
@@ -458,6 +463,12 @@ def main():
                 s.get("systemServerPid", "101") if args[0] == "system_server" else "101"
             )
     elif name == "sha256sum":
+        if args[:1] == ["-c"]:
+            for line in Path(args[1]).read_text().splitlines():
+                expected, filename = line.split("  ", 1)
+                if hashlib.sha256(Path(filename).read_bytes()).hexdigest() != expected:
+                    return 1
+            return 0
         for path in args:
             actual = (
                 remote(path) if path.startswith(("/system/", "/data/")) else Path(path)

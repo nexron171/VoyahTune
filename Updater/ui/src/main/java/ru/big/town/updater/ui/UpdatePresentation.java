@@ -104,6 +104,7 @@ final class UpdatePresentation {
                     p.progressNote = "Завершено " + completed + " из " + steps + " шагов";
                 }
                 break;
+            case "signature-reboot-pending":
             case "reboot-pending":
                 p.heading(
                         "ПЕРЕЗАГРУЗКА",
@@ -188,6 +189,7 @@ final class UpdatePresentation {
             case "verifying":
             case "preparing":
             case "applying":
+            case "signature-reboot-pending":
             case "reboot-pending":
             case "validating":
                 return true;

@@ -1,6 +1,5 @@
 set -eu
 journal=/data/local/voyahtune-cunba-recovery
-lock=/data/local/voyahtune-install.lock
 source_directory=/data/media/0/Download/cunba
 injector=/data/local/bin/frida-inject2
 startup=/system/etc/init.logcat.sh
@@ -115,11 +114,6 @@ case "$action" in
         if exists "$injector"; then
             [ -f "$journal/injector-before" ] && [ "$(digest "$injector")" = "$(cat "$journal/injector-before")" ] || fail 'Another injector occupies target'
         fi
-        mkdir "$lock" 2>/dev/null || fail 'Another installation or OTA owns the device'
-        printf '%s' 'desktop:cunba-restore' > "$lock/owner"
-        cat /proc/sys/kernel/random/boot_id > "$lock/boot"
-        chmod 700 "$lock"
-        trap 'rm -f "$lock/owner" "$lock/boot"; rmdir "$lock"' EXIT
         state reactivating
         if [ -f "$journal/startup-write-started" ]; then
             [ -f "$startup" ] || fail 'Current startup script missing'
