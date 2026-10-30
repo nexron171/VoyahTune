@@ -71,6 +71,8 @@ def check_candidate(stage, configured_gson=None):
                  "ru.voyahtune.contracts.WindowLayoutTest",
                  "ru.voyahtune.contracts.WindowGeometryModuleTest",
                  "ru.voyahtune.contracts.ClientGeometryModuleTest",
+                 "ru.voyahtune.contracts.ClientInputMethodModuleTest",
+                 "ru.voyahtune.contracts.ClientInputMethodPlatformTest",
                  "ru.voyahtune.contracts.LauncherCatalogTest",
                  "ru.voyahtune.contracts.SystemServerClassesTest",
                  "ru.voyahtune.contracts.LauncherPresentationTest",
