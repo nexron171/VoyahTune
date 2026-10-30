@@ -137,7 +137,8 @@ public class ClimateCommandTest {
         OemClimateState unknown = state(1, 0, 3, -1);
         assertEquals(-1, ClimateCommand.nextCirculationMode(unknown));
         assertNull(ClimateCommand.from(unknown, CarPlayClimateProtocol.CYCLE_RECIRCULATION, 1));
-        assertFalse(ClimateCommand.valid(CarPlayClimateProtocol.RECIRCULATION_AUTO, 1));
+        assertTrue(ClimateCommand.valid(CarPlayClimateProtocol.RECIRCULATION_AUTO, 1));
+        assertFalse(ClimateCommand.valid(CarPlayClimateProtocol.RECIRCULATION_AUTO, 0));
     }
 
     @Test

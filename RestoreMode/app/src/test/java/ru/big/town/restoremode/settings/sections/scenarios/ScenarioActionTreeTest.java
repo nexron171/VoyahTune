@@ -12,6 +12,22 @@ import ru.big.town.restoremode.voice.commands.VoiceFuelCommand;
 public class ScenarioActionTreeTest {
 
     @Test
+    public void climateAndFragranceHaveCarSubsections() {
+        assertEquals(
+                "Климат",
+                ScenarioSettingsPage.subGroupFor(VoiceCommandGroups.Group.CAR, "climate:power:1"));
+        assertEquals(
+                "Ароматизатор",
+                ScenarioSettingsPage.subGroupFor(VoiceCommandGroups.Group.CAR, "fragrance:2"));
+        assertEquals(
+                java.util.EnumSet.of(VoiceCommandGroups.Group.CAR),
+                VoiceCommandGroups.forAction("climate:power:1"));
+        assertEquals(
+                java.util.EnumSet.of(VoiceCommandGroups.Group.CAR),
+                VoiceCommandGroups.forAction("fragrance:2"));
+    }
+
+    @Test
     public void seatActionsSplitBySide() {
         assertEquals(
                 "Водитель",

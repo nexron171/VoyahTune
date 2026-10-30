@@ -190,11 +190,12 @@ final class CarPlayClimateController implements AutoCloseable {
                                                 expectedGeneration,
                                                 observedComfort,
                                                 observedAt)
-                                        : apply(
+                                        : ClimateControlOperation.apply(
+                                                context,
                                                 field,
                                                 value,
                                                 deadline,
-                                                expectedGeneration,
+                                                () -> generation == expectedGeneration,
                                                 observed,
                                                 observedAt);
                         handler.post(
@@ -272,77 +273,6 @@ final class CarPlayClimateController implements AutoCloseable {
             sampled[0] = SystemClock.elapsedRealtime();
             if (observed.reached(field, target)) {
                 return CarPlayClimateProtocol.SUCCESS;
-            }
-        }
-        return CarPlayClimateProtocol.TIMEOUT;
-    }
-
-    private int apply(
-            String field,
-            double target,
-            long deadline,
-            long expectedGeneration,
-            OemClimateState[] latest,
-            long[] sampled) {
-        if (!current(expectedGeneration, deadline)) {
-            return CarPlayClimateProtocol.TIMEOUT;
-        }
-        OemVehicleStateTransport.ClimateSession session =
-                OemVehicleStateTransport.openClimateSession(context);
-        if (session == null) {
-            return CarPlayClimateProtocol.UNAVAILABLE;
-        }
-        OemClimateState before = session.read();
-        if (before == null) {
-            return CarPlayClimateProtocol.UNAVAILABLE;
-        }
-        latest[0] = before;
-        sampled[0] = SystemClock.elapsedRealtime();
-        if (ClimateCommand.reached(before, field, target)) {
-            return CarPlayClimateProtocol.SUCCESS;
-        }
-        ClimateCommand command = ClimateCommand.from(before, field, target);
-        if (command == null) {
-            return CarPlayClimateProtocol.UNAVAILABLE;
-        }
-        boolean circulationCycle = CarPlayClimateProtocol.CYCLE_RECIRCULATION.equals(field);
-        int circulationTarget = circulationCycle ? ClimateCommand.nextCirculationMode(before) : -1;
-        if (!current(expectedGeneration, deadline)) {
-            return CarPlayClimateProtocol.TIMEOUT;
-        }
-        if (!session.send(command)) {
-            return CarPlayClimateProtocol.UNAVAILABLE;
-        }
-        boolean circulationAdvanceAvailable =
-                circulationCycle || CarPlayClimateProtocol.RECIRCULATION.equals(field);
-        while (current(expectedGeneration, deadline)) {
-            try {
-                Thread.sleep(100);
-            } catch (InterruptedException interrupted) {
-                Thread.currentThread().interrupt();
-                return CarPlayClimateProtocol.UNAVAILABLE;
-            }
-            OemClimateState observed = session.read();
-            if (observed == null) {
-                return CarPlayClimateProtocol.UNAVAILABLE;
-            }
-            latest[0] = observed;
-            sampled[0] = SystemClock.elapsedRealtime();
-            if (circulationCycle
-                    ? observed.circulation == circulationTarget
-                    : ClimateCommand.reached(observed, field, target)) {
-                return CarPlayClimateProtocol.SUCCESS;
-            }
-            // A second pulse toward the target requires a confirmed first transition.
-            if (circulationAdvanceAvailable
-                    && ClimateCommand.circulationAdvanced(before, observed)) {
-                circulationAdvanceAvailable = false;
-                if (!current(expectedGeneration, deadline)) {
-                    break;
-                }
-                if (!session.send(command)) {
-                    return CarPlayClimateProtocol.UNAVAILABLE;
-                }
             }
         }
         return CarPlayClimateProtocol.TIMEOUT;

@@ -248,6 +248,7 @@ public final class VoiceCommandCatalog {
         List<Command> all = new ArrayList<>();
         VoiceSeatCommands.addTo(all);
         VoiceWindowCommands.addTo(all);
+        VoiceClimateCommands.addTo(all);
         binary(all, "wheel_heat", "Подогрев руля", "подогрев руля", "обогрев руля");
         mode(all, "drive:SPORT", "Режим движения: Спорт", "спорт", "спортивный");
         mode(all, "drive:ECO", "Режим движения: Эко", "эко", "экономичный");

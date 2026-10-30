@@ -27,6 +27,7 @@ final class ClimateCommand {
                         && value <= OemClimateState.MAX_FAN_LEVEL
                         && value == Math.rint(value);
             case CarPlayClimateProtocol.CYCLE_RECIRCULATION:
+            case CarPlayClimateProtocol.RECIRCULATION_AUTO:
                 return value == 1;
             case CarPlayClimateProtocol.VENT_MODE:
                 return value == Math.rint(value) && value >= 0 && value <= 4;
@@ -68,7 +69,8 @@ final class ClimateCommand {
         }
         boolean circulationCommand =
                 CarPlayClimateProtocol.RECIRCULATION.equals(field)
-                        || CarPlayClimateProtocol.CYCLE_RECIRCULATION.equals(field);
+                        || CarPlayClimateProtocol.CYCLE_RECIRCULATION.equals(field)
+                        || CarPlayClimateProtocol.RECIRCULATION_AUTO.equals(field);
         if (circulationCommand ? !state.hasCirculation() : state.values().get(field) == null) {
             return null;
         }
@@ -104,6 +106,7 @@ final class ClimateCommand {
                 }
                 return manualFan((int) target);
             case CarPlayClimateProtocol.RECIRCULATION:
+            case CarPlayClimateProtocol.RECIRCULATION_AUTO:
             case CarPlayClimateProtocol.CYCLE_RECIRCULATION:
                 return new ClimateCommand("AC_RECIRC_AIR", 11, 1);
             default:

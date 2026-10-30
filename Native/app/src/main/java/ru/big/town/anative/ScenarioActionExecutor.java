@@ -43,6 +43,14 @@ final class ScenarioActionExecutor {
             executeIndependentWrite(action, completion);
             return;
         }
+        if (VehicleClimateAction.handles(action)) {
+            VehicleClimateActionController.execute(
+                    service,
+                    action,
+                    () -> true,
+                    error -> completion.onFinished(error == null, error));
+            return;
+        }
         if (ru.big.town.common.QuickControlProtocol.handles(action)) {
             QuickControlController.execute(
                     service, action, error -> completion.onFinished(error.isEmpty(), error));

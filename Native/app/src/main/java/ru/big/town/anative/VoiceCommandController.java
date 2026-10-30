@@ -72,6 +72,16 @@ final class VoiceCommandController {
                     });
             return;
         }
+        if (VehicleClimateAction.handles(action)) {
+            VehicleClimateActionController.execute(
+                    service,
+                    action,
+                    () -> gate.active(token),
+                    error -> {
+                        if (gate.active(token)) respond(reply, error == null, error);
+                    });
+            return;
+        }
         if (ru.big.town.common.QuickControlProtocol.handles(action)) {
             QuickControlController.execute(
                     service,
