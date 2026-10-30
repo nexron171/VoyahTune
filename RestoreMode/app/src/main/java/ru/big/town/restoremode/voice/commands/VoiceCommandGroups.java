@@ -40,6 +40,7 @@ public final class VoiceCommandGroups {
                 || action.startsWith("suspension_maintenance:")
                 || action.startsWith("forced_ev:")
                 || action.startsWith("pedestrian:")
+                || action.startsWith("rear_fog:")
                 || action.startsWith("headlights:")
                 || action.startsWith("auto_light:")
                 || action.startsWith("port_cap:")

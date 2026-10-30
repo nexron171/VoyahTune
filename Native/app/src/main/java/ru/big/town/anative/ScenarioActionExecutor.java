@@ -43,6 +43,11 @@ final class ScenarioActionExecutor {
             executeIndependentWrite(action, completion);
             return;
         }
+        if (ru.big.town.common.QuickControlProtocol.handles(action)) {
+            QuickControlController.execute(
+                    service, action, error -> completion.onFinished(error.isEmpty(), error));
+            return;
+        }
         if (action.startsWith("app:")) {
             launchApp(action.substring(4), completion);
             return;

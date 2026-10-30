@@ -43,6 +43,7 @@ final class OemVehicleStateTransport {
     private static final String CANBUS_ACTION = "com.qinggan.canbus.CanBusService";
     private static final String CANBUS_PACKAGE = "com.qinggan.canbus.service";
     private static final String WRITE_CANBUS_PERMISSION = "com.qinggan.permission.WRITE_CANBUS";
+    private static final int TX_LIGHT_STATUS = 5;
     private static final int TX_GEAR_STATUS = 6;
     private static final int TX_FUEL_LEVEL = 9;
     private static final int TX_GET_VEHICLE_STATE = 57;
@@ -125,6 +126,10 @@ final class OemVehicleStateTransport {
 
     interface Session {
         GearStatus readGearStatus();
+
+        default Integer readRearFog() {
+            return null;
+        }
 
         default FuelLevel readFuelLevel() {
             return null;
@@ -617,6 +622,30 @@ final class OemVehicleStateTransport {
         @Override
         public GearStatus readGearStatus() {
             return transactGearStatus(binder);
+        }
+
+        @Override
+        public Integer readRearFog() {
+            if (!isCurrentBinder(binder)) return null;
+            Parcel data = Parcel.obtain();
+            Parcel reply = Parcel.obtain();
+            try {
+                data.writeInterfaceToken(CANBUS_DESCRIPTOR);
+                if (!binder.transact(TX_LIGHT_STATUS, data, reply, 0)) return null;
+                reply.readException();
+                if (reply.readInt() == 0 || reply.dataAvail() < 16) return null;
+                // LightStatus begins with directionL, directionR, fogFront, fogRear.
+                reply.readInt();
+                reply.readInt();
+                reply.readInt();
+                return reply.readInt();
+            } catch (RemoteException | RuntimeException exception) {
+                Log.w(TAG, "getLightStatus failed", exception);
+                return null;
+            } finally {
+                reply.recycle();
+                data.recycle();
+            }
         }
 
         @Override

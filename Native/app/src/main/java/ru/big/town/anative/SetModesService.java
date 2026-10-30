@@ -127,6 +127,26 @@ public class SetModesService extends Service {
         @Override
         public void handleMessage(Message msg) {
             switch (msg.what) {
+                case ru.big.town.common.QuickControlProtocol.EXECUTE:
+                    android.os.Messenger client = msg.replyTo;
+                    String action = msg.getData().getString("action", "");
+                    QuickControlController.execute(
+                            SetModesService.this,
+                            action,
+                            error -> {
+                                if (client == null) return;
+                                Message result =
+                                        Message.obtain(
+                                                null,
+                                                ru.big.town.common.QuickControlProtocol.RESULT);
+                                result.getData().putString("error", error);
+                                try {
+                                    client.send(result);
+                                } catch (android.os.RemoteException exception) {
+                                    Log.w(TAG, "Quick control client disconnected", exception);
+                                }
+                            });
+                    break;
                 case ru.big.town.common.HeadlightWidgetProtocol.WATCH:
                 case ru.big.town.common.HeadlightWidgetProtocol.UNWATCH:
                 case ru.big.town.common.HeadlightWidgetProtocol.SELECT:

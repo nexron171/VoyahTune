@@ -83,6 +83,8 @@ public class MainSettingsFragment extends SettingsSectionFragment {
         bindShowSwitch(R.id.switchShowTripTimer, "showTripTimer", true);
         bindShowSwitch(R.id.switchShowPowerHold, "showPowerHold", true);
         bindShowSwitch(R.id.switchShowWashMode, "showWashMode", true);
+        bindShowSwitch(R.id.switchShowRearFog, "showRearFog", false);
+        bindShowSwitch(R.id.switchShowHotspot, "showHotspot", false);
         bindShowSwitch(R.id.switchShowAutoLight, "showAutoLight", true);
         bindShowSwitch(R.id.switchShowPedestrian, "showPedestrian", true);
         bindShowSwitch(R.id.switchShowBatteryHeat, "showBatteryHeat", true);

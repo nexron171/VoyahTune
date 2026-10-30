@@ -887,6 +887,10 @@ public class DashboardActivity extends AppCompatActivity {
         @Override
         public void handleMessage(Message msg) {
             switch (msg.what) {
+                case ru.big.town.common.QuickControlProtocol.RESULT:
+                    String error = msg.getData().getString("error", "");
+                    if (!error.isEmpty()) showSnack(error);
+                    break;
                 case CarPlayWidgetProtocol.MESSAGE:
                     restoreCarPlayWidgets(msg.getData());
                     break;
@@ -1296,7 +1300,21 @@ public class DashboardActivity extends AppCompatActivity {
                 .show();
     }
 
-    /** Режим мойки — машина засыпает и не реагирует на открытие дверей. */
+    private void sendQuickControl(String action) {
+        if (!GlobalVars.isBound || GlobalVars.serviceMessenger == null) {
+            showSnack(getString(R.string.service_not_ready));
+            return;
+        }
+        Message request = Message.obtain(null, ru.big.town.common.QuickControlProtocol.EXECUTE);
+        request.getData().putString("action", action);
+        request.replyTo = clientMessenger;
+        try {
+            GlobalVars.serviceMessenger.send(request);
+        } catch (android.os.RemoteException exception) {
+            showSnack(getString(R.string.service_not_ready));
+        }
+    }
+
     public void onCardWashMode(View v) {
         new MaterialAlertDialogBuilder(this, R.style.DarkDialog)
                 .setTitle(R.string.wash_mode_title)
@@ -1772,6 +1790,10 @@ public class DashboardActivity extends AppCompatActivity {
             case "cardWashMode":
                 return sharedPreferences.getBoolean(
                         "showWashMode", dashboardProfile.defaultVisible(true));
+            case "cardRearFog":
+                return sharedPreferences.getBoolean("showRearFog", false);
+            case "cardHotspot":
+                return sharedPreferences.getBoolean("showHotspot", false);
             case "cardAutoLight":
                 return sharedPreferences.getBoolean(
                         "showAutoLight", dashboardProfile.defaultVisible(true));
@@ -1907,7 +1929,9 @@ public class DashboardActivity extends AppCompatActivity {
         if ("cardSettings".equals(widgetId)
                 || "cardAndroidSettings".equals(widgetId)
                 || "cardVoiceCommand".equals(widgetId)
-                || "cardScenarios".equals(widgetId)) {
+                || "cardScenarios".equals(widgetId)
+                || "cardRearFog".equals(widgetId)
+                || "cardHotspot".equals(widgetId)) {
             return new int[] {1, 1};
         }
         // Плитка «Диспетчер задач»: 1x1, в центре число запущенных приложений.
@@ -2219,6 +2243,14 @@ public class DashboardActivity extends AppCompatActivity {
                     case "cardAndroidSettings":
                         widgetView =
                                 inf.inflate(R.layout.tile_android_settings, splitTilesGrid, false);
+                        break;
+                    case "cardRearFog":
+                        widgetView = inf.inflate(R.layout.tile_rear_fog, splitTilesGrid, false);
+                        widgetView.setOnClickListener(view -> sendQuickControl("rear_fog:toggle"));
+                        break;
+                    case "cardHotspot":
+                        widgetView = inf.inflate(R.layout.tile_hotspot, splitTilesGrid, false);
+                        widgetView.setOnClickListener(view -> sendQuickControl("hotspot:toggle"));
                         break;
                     case "cardAutoLight":
                         widgetView = inf.inflate(R.layout.tile_auto_light, splitTilesGrid, false);

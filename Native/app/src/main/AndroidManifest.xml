@@ -50,6 +50,7 @@
         android:name="android.permission.ADD_TRUSTED_DISPLAY"
         tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.TETHER_PRIVILEGED" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.car.permission.CAR_PROPERTY" />
 
     <permission
