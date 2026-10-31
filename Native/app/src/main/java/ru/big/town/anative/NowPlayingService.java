@@ -9,6 +9,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.graphics.Bitmap;
+import android.media.AudioAttributes;
 import android.media.MediaMetadata;
 import android.media.session.MediaController;
 import android.media.session.MediaSession;
@@ -32,6 +33,8 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+
+import ru.big.town.common.VehiclePlatform;
 
 /**
  * Ридер «сейчас играет»: читает активную медиа-сессию ЛЮБОГО плеера (Яндекс.Музыка и т.п.) через
@@ -181,6 +184,7 @@ public class NowPlayingService extends Service {
     private volatile MediaController current; // пишет worker, читает лёгкий callback ingress
     private MediaController.Callback controllerCallback;
     private Bitmap lastWrittenArt; // тот же Bitmap не кодируем в PNG на каждый playback callback
+    private final CarPlayMediaHandoff carPlayHandoff = new CarPlayMediaHandoff();
 
     private final MediaSessionManager.OnActiveSessionsChangedListener sessionsListener =
             controllers -> offerMediaRefresh(MediaRefreshDelivery.Work.REBUILD, "sessions");
@@ -640,6 +644,8 @@ public class NowPlayingService extends Service {
                 }
             }
 
+            yieldCarPlayToSelectedPlayer(pkg, state);
+
             synchronized (SNAPSHOT_COMMIT_LOCK) {
                 if (!isActiveInstance()) return;
                 sTitle = title;
@@ -675,6 +681,29 @@ public class NowPlayingService extends Service {
                             + hasArt);
         } catch (Exception e) {
             Log.w(TAG, "publish: " + e.getMessage());
+        }
+    }
+
+    private void yieldCarPlayToSelectedPlayer(String packageName, int state) {
+        if (!VehiclePlatform.current().isH97XY() || !isActiveInstance()) return;
+        MediaController source = current;
+        try {
+            MediaController carPlay = MediaControlRouter.controllerForPackage(
+                    safeSessions(), CarPlayMediaHandoff.CARPLAY_PACKAGE);
+            PlaybackState carPlayState = safePlaybackState(carPlay);
+            MediaController.PlaybackInfo playback = source == null ? null : source.getPlaybackInfo();
+            int usage = playback == null || playback.getAudioAttributes() == null
+                    ? AudioAttributes.USAGE_UNKNOWN : playback.getAudioAttributes().getUsage();
+            if (carPlayHandoff.shouldPause(source == null ? null : source.getSessionToken(),
+                    packageName, state, usage, carPlay == null ? null : carPlay.getSessionToken(),
+                    carPlayState == null ? PlaybackState.STATE_NONE : carPlayState.getState())
+                    && isActiveInstance()) {
+                // Do not pin the router back to CarPlay: the selected player owns this handoff.
+                carPlay.getTransportControls().pause();
+                Log.i(TAG, "CarPlay pause requested for selected player " + packageName);
+            }
+        } catch (Exception failure) {
+            Log.w(TAG, "Cannot yield CarPlay to " + packageName, failure);
         }
     }
 
