@@ -83,6 +83,7 @@ import ru.big.town.restoremode.trips.location.TripLocationPermission;
 import ru.big.town.restoremode.voice.commands.VoiceCommands;
 import ru.big.town.restoremode.widgets.apps.AppWidgetSessionStore;
 import ru.big.town.restoremode.widgets.apps.AppWidgetStore;
+import ru.big.town.restoremode.widgets.clock.ClockWidgetView;
 import ru.big.town.restoremode.widgets.dials.DialWidgetStore;
 import ru.big.town.restoremode.widgets.energy.CarAppearance;
 import ru.big.town.restoremode.widgets.energy.EnergyWidgetPreferences;
@@ -1768,7 +1769,8 @@ public class DashboardActivity extends AppCompatActivity {
     }
 
     private boolean isWidgetVisible(String widgetId) {
-        if (VehicleWidgets.isWidget(widgetId)
+        if (ClockWidgetView.ID.equals(widgetId)
+                || VehicleWidgets.isWidget(widgetId)
                 || SystemWidgetLayout.isWidget(widgetId)
                 || MediaWidgetLayout.isWidget(widgetId)) {
             return sharedPreferences.getBoolean("show_" + widgetId, false);
@@ -1898,7 +1900,7 @@ public class DashboardActivity extends AppCompatActivity {
             return TileSizeStore.dimensions(
                     sharedPreferences, widgetId, HeadlightWidgetLayout.DEFAULT_WIDTH, 1);
         }
-        if (SystemWidgetLayout.isWidget(widgetId)) {
+        if (SystemWidgetLayout.isWidget(widgetId) || ClockWidgetView.ID.equals(widgetId)) {
             return TileSizeStore.dimensions(sharedPreferences, widgetId, 1, 1);
         }
         if (MediaWidgetLayout.isWidget(widgetId)) {
@@ -2148,6 +2150,9 @@ public class DashboardActivity extends AppCompatActivity {
                     continue;
                 }
                 switch (tile.id) {
+                    case ClockWidgetView.ID:
+                        widgetView = new ClockWidgetView(this);
+                        break;
                     case SystemWidgetLayout.CPU:
                     case SystemWidgetLayout.RAM:
                     case SystemWidgetLayout.CLEAR:

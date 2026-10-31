@@ -22,6 +22,7 @@ public final class SettingsSectionLayouts {
         layout(R.layout.settings_main_launch_apps_suspension),
         layout(R.layout.settings_main_suspension_description),
         layout(R.layout.settings_main_headlights_radio),
+        layout(R.layout.settings_main_clock),
         layout(R.layout.settings_main_carplay_heading),
         dynamic(DynamicContent.CARPLAY_WIDGETS),
         layout(R.layout.settings_main_energy_heading),

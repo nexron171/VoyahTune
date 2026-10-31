@@ -3,6 +3,7 @@ package ru.big.town.restoremode.dashboard.tiles;
 import android.content.SharedPreferences;
 
 import ru.big.town.restoremode.widgets.apps.AppWidgetStore;
+import ru.big.town.restoremode.widgets.clock.ClockWidgetView;
 import ru.big.town.restoremode.widgets.energy.EnergyWidgetLayout;
 import ru.big.town.restoremode.widgets.headlights.HeadlightWidgetLayout;
 import ru.big.town.restoremode.widgets.media.MediaWidgetLayout;
@@ -43,6 +44,9 @@ public class TileSizeStore {
             return defaultValue;
         }
         int value = prefs.getInt(WIDTH_KEY_PREFIX + widgetId, defaultValue);
+        if (ClockWidgetView.ID.equals(widgetId)) {
+            return Math.max(1, Math.min(5, value));
+        }
         if (RadioWidgetLayout.ID.equals(widgetId)) {
             return RadioWidgetLayout.width(value);
         }
@@ -89,6 +93,9 @@ public class TileSizeStore {
     }
 
     public static void setWidth(SharedPreferences prefs, String widgetId, int value) {
+        if (ClockWidgetView.ID.equals(widgetId)) {
+            value = Math.max(1, Math.min(5, value));
+        }
         if (prefs == null || widgetId == null) {
             return;
         }

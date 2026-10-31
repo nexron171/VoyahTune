@@ -39,6 +39,7 @@ import ru.big.town.restoremode.settings.ui.preview.SettingsPreviewView;
 import ru.big.town.restoremode.settings.ui.style.SettingsDesign;
 import ru.big.town.restoremode.widgets.apps.AppShortcutStore;
 import ru.big.town.restoremode.widgets.apps.AppWidgetStore;
+import ru.big.town.restoremode.widgets.clock.ClockWidgetView;
 import ru.big.town.restoremode.widgets.dials.DialWidgetStore;
 import ru.big.town.restoremode.widgets.energy.EnergyWidgetLayout;
 import ru.big.town.restoremode.widgets.energy.EnergyWidgetPreferences;
@@ -123,6 +124,9 @@ public class MainSettingsFragment extends SettingsSectionFragment {
         bindShowSwitch(R.id.switchShowRadio, RadioWidgetLayout.VISIBLE, false, R.id.radioSizeRow);
         bindTileSizeSpinners(
                 R.id.radioSettingWidth, R.id.radioSettingHeight, RadioWidgetLayout.ID, 2, 2);
+        bindShowSwitch(R.id.switchShowClock, "show_" + ClockWidgetView.ID, false, R.id.ClockSizeRow);
+        bindTileSizeSpinners(
+                R.id.ClockSettingWidth, R.id.ClockSettingHeight, ClockWidgetView.ID, 1, 1);
         bindShowSwitch(R.id.switchShowCpu, "show_cpuWidget", false, R.id.CpuSizeRow);
         bindTileSizeSpinners(
                 R.id.CpuSettingWidth, R.id.CpuSettingHeight, SystemWidgetLayout.CPU, 1, 1);
@@ -354,6 +358,11 @@ public class MainSettingsFragment extends SettingsSectionFragment {
         android.widget.Spinner widthSpinner = settingView(widthSpinnerId);
         android.widget.Spinner heightSpinner = settingView(heightSpinnerId);
         if (widthSpinner == null || heightSpinner == null) {
+            return;
+        }
+        if (ClockWidgetView.ID.equals(widgetId)) {
+            bindEnergySize(widthSpinner, widgetId, true, 1, 1, 5, null);
+            bindEnergySize(heightSpinner, widgetId, false, 1, 1, 5, null);
             return;
         }
         if (RadioWidgetLayout.ID.equals(widgetId)) {

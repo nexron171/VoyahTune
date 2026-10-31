@@ -372,6 +372,7 @@ public final class SettingsDesign {
             "showSuspensionWidget",
             "showPassengerDashboardTile",
             "showHeadlightWidget",
+            "show_clockWidget",
             "show_cpuWidget",
             "show_ramWidget",
             "show_clearMemoryWidget",
