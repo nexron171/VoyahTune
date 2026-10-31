@@ -113,14 +113,21 @@ final class SplitHostTaskLane {
         final int dpi;
         final int displayId;
         final BooleanSupplier valid;
+        final Runnable completion;
 
         SingleHostRequest(
-                long sequence, String packageName, int dpi, int displayId, BooleanSupplier valid) {
+                long sequence,
+                String packageName,
+                int dpi,
+                int displayId,
+                BooleanSupplier valid,
+                Runnable completion) {
             this.sequence = sequence;
             this.packageName = packageName;
             this.dpi = dpi;
             this.displayId = displayId;
             this.valid = valid;
+            this.completion = completion;
         }
     }
 
@@ -319,15 +326,27 @@ final class SplitHostTaskLane {
     }
 
     void requestSingleHost(String packageName, int dpi, int displayId, BooleanSupplier valid) {
+        requestSingleHost(packageName, dpi, displayId, valid, () -> {});
+    }
+
+    void requestSingleHost(
+            String packageName,
+            int dpi,
+            int displayId,
+            BooleanSupplier valid,
+            Runnable completion) {
         synchronized (lock) {
             long sequence = ++nextSequence;
             latestSingleHostSequence = sequence;
             boolean postDrain =
                     singleHostWork.offer(
-                            0, new SingleHostRequest(sequence, packageName, dpi, displayId, valid));
+                            0,
+                            new SingleHostRequest(
+                                    sequence, packageName, dpi, displayId, valid, completion));
             if (postDrain && !worker.post(singleHostDrain)) {
                 singleHostWork.rejectDrainPost();
                 Log.e(TAG, "worker rejected single-host drain");
+                main.post(completion);
             }
         }
     }
@@ -596,10 +615,12 @@ final class SplitHostTaskLane {
         if (!isLatestSingleHost(request) || !request.valid.getAsBoolean()) return;
         if (!result.launchable) {
             Log.w(TAG, "launchSingle: нет launch intent для " + request.packageName);
+            request.completion.run();
             return;
         }
         SplitHostActivity.startSingleHost(
                 appContext, request.packageName, request.dpi, request.displayId);
+        request.completion.run();
     }
 
     private void deliverPaneLaunchResult(PaneLaunchResult result) {

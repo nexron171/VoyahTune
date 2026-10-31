@@ -1833,6 +1833,7 @@ public class SetModesService extends Service {
     private CarPropertyManager mCarPropertyManager;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private boolean startupInitialized = false;
+    private ApplicationStartupController applicationStartup;
     private boolean wakeSessionActive = false;
     private volatile boolean serviceDestroyed = false;
     private boolean screenOffObserved = false;
@@ -2480,6 +2481,12 @@ public class SetModesService extends Service {
             startTripStatsService();
             startBatteryHeatService();
             scheduleAncillaryWakeTasks();
+            applicationStartup = new ApplicationStartupController(this);
+            applicationStartup.start(
+                    () -> {
+                        mainHandler.removeCallbacks(autoLaunchRunnable);
+                        mainHandler.removeCallbacks(mediaAutoLaunchRunnable);
+                    });
             Log.i(TAG, "onStartCommand(): startup initialized");
         } else {
             Log.i(TAG, "onStartCommand(): already initialized");
@@ -2517,6 +2524,7 @@ public class SetModesService extends Service {
     @Override
     public void onDestroy() {
         Log.i(TAG, "onDestroy()");
+        if (applicationStartup != null) applicationStartup.close();
         if (suspensionWidget != null) suspensionWidget.close();
         if (headlightWidget != null) {
             headlightWidget.close();

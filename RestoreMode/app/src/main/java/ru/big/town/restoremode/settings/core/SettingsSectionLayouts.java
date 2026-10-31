@@ -70,6 +70,7 @@ public final class SettingsSectionLayouts {
     };
     private static final Item[] APPS = {
         layout(R.layout.settings_apps_intro),
+        dynamic(DynamicContent.APPLICATION_STARTUP),
         layout(R.layout.settings_apps_cluster_navigation),
         layout(R.layout.settings_apps_split_heading),
         dynamic(DynamicContent.SPLITS),
@@ -135,6 +136,7 @@ public final class SettingsSectionLayouts {
         FULLSCREEN_APPS,
         SPLITS,
         APP_SCALE,
+        APPLICATION_STARTUP,
         SCREEN_BRIGHTNESS
     }
 

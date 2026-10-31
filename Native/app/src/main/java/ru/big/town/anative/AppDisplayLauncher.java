@@ -60,6 +60,17 @@ final class AppDisplayLauncher {
             boolean fullscreen,
             BooleanSupplier valid,
             Runnable onFailure) {
+        launch(context, pkg, displayId, fullscreen, valid, onFailure, () -> {});
+    }
+
+    static void launch(
+            Context context,
+            String pkg,
+            int displayId,
+            boolean fullscreen,
+            BooleanSupplier valid,
+            Runnable onFailure,
+            Runnable onStarted) {
         if (CarPlayTarget.isCarPlay(pkg) && !CarPlayTarget.isEnabled(context)) {
             onFailure.run();
             return;
@@ -71,11 +82,22 @@ final class AppDisplayLauncher {
                     pkg,
                     0,
                     displayId,
-                    () -> current(pkg, generation) && valid.getAsBoolean());
+                    () -> current(pkg, generation) && valid.getAsBoolean(),
+                    onStarted);
             return;
         }
         Context app = context.getApplicationContext();
-        WORKER.post(() -> prepare(app, pkg, displayId, fullscreen, generation, valid, onFailure));
+        WORKER.post(
+                () ->
+                        prepare(
+                                app,
+                                pkg,
+                                displayId,
+                                fullscreen,
+                                generation,
+                                valid,
+                                onFailure,
+                                onStarted));
     }
 
     private static void prepare(
@@ -85,7 +107,8 @@ final class AppDisplayLauncher {
             boolean fullscreen,
             long generation,
             BooleanSupplier valid,
-            Runnable onFailure) {
+            Runnable onFailure,
+            Runnable onStarted) {
         if (!current(pkg, generation)) return;
         try {
             Intent intent = CarPlayTarget.launchIntent(app, pkg, displayId);
@@ -144,7 +167,8 @@ final class AppDisplayLauncher {
                     clearWidgetHost,
                     0,
                     valid,
-                    onFailure);
+                    onFailure,
+                    onStarted);
         } catch (Exception e) {
             failed(pkg, generation, valid, onFailure, e);
         }
@@ -162,7 +186,8 @@ final class AppDisplayLauncher {
             boolean clearWidgetHost,
             int attempt,
             BooleanSupplier valid,
-            Runnable onFailure) {
+            Runnable onFailure,
+            Runnable onStarted) {
         if (!current(pkg, generation)) return;
         try {
             if (!retiring.isEmpty()) {
@@ -191,7 +216,8 @@ final class AppDisplayLauncher {
                                             clearWidgetHost,
                                             attempt + 1,
                                             valid,
-                                            onFailure),
+                                            onFailure,
+                                            onStarted),
                             100);
                     return;
                 }
@@ -222,6 +248,7 @@ final class AppDisplayLauncher {
                             if (!CarPlayTarget.isCarPlay(pkg))
                                 DockLaunchGuard.arm(app, displayId, pkg);
                             app.startActivity(intent, bundle);
+                            onStarted.run();
                             Log.i(TAG, "launched pkg=" + pkg + " display=" + displayId);
                         } catch (Exception e) {
                             failed(pkg, generation, valid, onFailure, e);

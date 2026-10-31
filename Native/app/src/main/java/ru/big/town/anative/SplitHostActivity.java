@@ -1719,16 +1719,30 @@ public class SplitHostActivity extends Activity {
 
     static void launchSingle(
             Context ctx, String pkg, int dpi, int displayId, BooleanSupplier valid) {
+        launchSingle(ctx, pkg, dpi, displayId, valid, () -> {});
+    }
+
+    static void launchSingle(
+            Context ctx,
+            String pkg,
+            int dpi,
+            int displayId,
+            BooleanSupplier valid,
+            Runnable completion) {
         if (ctx == null || pkg == null || pkg.isEmpty()) {
             Log.w(TAG, "launchSingle: пустой пакет — пропуск");
+            completion.run();
             return;
         }
         if (displayId != 0 && displayId != 1) displayId = 0;
         long generation = carPlayLaunchGeneration;
         BooleanSupplier current =
-                () -> valid.getAsBoolean()
-                        && (!CarPlayTarget.isCarPlay(pkg) || generation == carPlayLaunchGeneration);
-        SplitHostTaskLane.get(ctx).requestSingleHost(pkg, Math.max(0, dpi), displayId, current);
+                () ->
+                        valid.getAsBoolean()
+                                && (!CarPlayTarget.isCarPlay(pkg)
+                                        || generation == carPlayLaunchGeneration);
+        SplitHostTaskLane.get(ctx)
+                .requestSingleHost(pkg, Math.max(0, dpi), displayId, current, completion);
     }
 
     /** Called on main only after the process lane has resolved the target package. */

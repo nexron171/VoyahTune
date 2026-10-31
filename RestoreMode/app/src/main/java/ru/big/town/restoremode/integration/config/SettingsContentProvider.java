@@ -15,8 +15,8 @@ import android.util.Log;
 import ru.big.town.common.DriveSelectionPolicy;
 import ru.big.town.common.SmartSaveSettings;
 import ru.big.town.restoremode.BuildConfig;
-import ru.big.town.restoremode.integration.hooks.HookStatusContract;
 import ru.big.town.restoremode.diagnostics.runtime.RuntimeStatusContract;
+import ru.big.town.restoremode.integration.hooks.HookStatusContract;
 import ru.big.town.restoremode.trips.location.TripLocationPermission;
 import ru.big.town.restoremode.vehicle.ApolloSettings;
 import ru.big.town.restoremode.vehicle.DriveSelectionPreferences;
@@ -254,14 +254,21 @@ public class SettingsContentProvider extends ContentProvider {
             }
             Bundle result = new Bundle();
             boolean valid = getContext() != null && RuntimeStatusContract.isValidPayload(arg);
-            boolean stored = valid && getContext()
-                    .getSharedPreferences(RuntimeStatusContract.PREFERENCES_NAME, Context.MODE_PRIVATE)
-                    .edit()
-                    .putString(RuntimeStatusContract.PAYLOAD_KEY, arg)
-                    .putInt(RuntimeStatusContract.BOOT_COUNT_KEY,
-                            android.provider.Settings.Global.getInt(getContext().getContentResolver(),
-                                    android.provider.Settings.Global.BOOT_COUNT, -1))
-                    .commit();
+            boolean stored =
+                    valid
+                            && getContext()
+                                    .getSharedPreferences(
+                                            RuntimeStatusContract.PREFERENCES_NAME,
+                                            Context.MODE_PRIVATE)
+                                    .edit()
+                                    .putString(RuntimeStatusContract.PAYLOAD_KEY, arg)
+                                    .putInt(
+                                            RuntimeStatusContract.BOOT_COUNT_KEY,
+                                            android.provider.Settings.Global.getInt(
+                                                    getContext().getContentResolver(),
+                                                    android.provider.Settings.Global.BOOT_COUNT,
+                                                    -1))
+                                    .commit();
             result.putBoolean("stored", stored);
             return result;
         }
@@ -294,6 +301,9 @@ public class SettingsContentProvider extends ContentProvider {
             String selection,
             String[] selectionArgs,
             String sortOrder) {
+        if (ru.big.town.common.ApplicationStartupSettings.PATH.equals(uri.getLastPathSegment())) {
+            return ru.big.town.restoremode.apps.ApplicationStartupStore.query(sharedPreferences);
+        }
         Log.i("$$$", "QUERY1");
         DriveSelectionPolicy driveSelection = DriveSelectionPreferences.read(sharedPreferences);
         energy = DriveSelectionPreferences.energy(sharedPreferences);

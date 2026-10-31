@@ -599,6 +599,11 @@ public final class AppsSettingsFragment extends SettingsSectionFragment {
     protected void addDynamicRows(
             List<SettingsList.Row> rows, SettingsSectionLayouts.DynamicContent kind) {
         switch (kind) {
+            case APPLICATION_STARTUP:
+                new ApplicationStartupEditor(
+                                requireContext(), preferences, this::refreshSettingsRows)
+                        .addRows(rows);
+                break;
             case FULLSCREEN_APPS:
                 SettingsPanels.addAppChipRows(
                         rows,
