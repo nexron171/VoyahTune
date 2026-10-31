@@ -14,6 +14,9 @@ import android.util.Log;
 
 import ru.big.town.common.DriveSelectionPolicy;
 import ru.big.town.common.SmartSaveSettings;
+import ru.big.town.common.WallpaperProtocol;
+import ru.big.town.restoremode.appearance.AppearanceSettings;
+import ru.big.town.restoremode.appearance.WallpaperStore;
 import ru.big.town.restoremode.BuildConfig;
 import ru.big.town.restoremode.diagnostics.runtime.RuntimeStatusContract;
 import ru.big.town.restoremode.integration.hooks.HookStatusContract;
@@ -131,6 +134,14 @@ public class SettingsContentProvider extends ContentProvider {
      */
     @Override
     public Bundle call(String method, String arg, Bundle extras) {
+        if (WallpaperProtocol.METHOD_SET.equals(method)) {
+            getContext().enforceCallingOrSelfPermission(WallpaperProtocol.PERMISSION, "Wallpaper change");
+            Bundle result = new Bundle();
+            boolean applied = WallpaperStore.find(sharedPreferences, arg) != null
+                    && sharedPreferences.edit().putString(AppearanceSettings.WALLPAPER, arg).commit();
+            result.putBoolean(WallpaperProtocol.RESULT_APPLIED, applied);
+            return result;
+        }
         if (ru.big.town.common.TripProtocol.LOCATION_PERMISSION_STATE.equals(method)) {
             getContext()
                     .enforceCallingOrSelfPermission(

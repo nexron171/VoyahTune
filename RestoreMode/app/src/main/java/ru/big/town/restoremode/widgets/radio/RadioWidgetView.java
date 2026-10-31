@@ -36,6 +36,7 @@ public final class RadioWidgetView extends FrameLayout {
     private final LinearLayout next;
     private final ControlIcon playbackIcon;
     private final TextView playbackLabel;
+    private final ImageView background;
     private boolean playing;
 
     public RadioWidgetView(
@@ -52,7 +53,7 @@ public final class RadioWidgetView extends FrameLayout {
         setFocusable(true);
         setOnClickListener(view -> open.run());
 
-        ImageView background = new ImageView(context);
+        background = new ImageView(context);
         background.setImageResource(R.drawable.radio_widget_background);
         background.setScaleType(ImageView.ScaleType.CENTER_CROP);
         background.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
@@ -131,6 +132,11 @@ public final class RadioWidgetView extends FrameLayout {
         border.setStroke(dp(1), 0xff373f4a);
         setForeground(border);
         update(new Bundle());
+    }
+
+    public void setCustomBackground(boolean custom) {
+        background.setVisibility(custom ? GONE : VISIBLE);
+        setForeground(null);
     }
 
     public void update(Bundle state) {

@@ -272,12 +272,13 @@ public class MainSettingsFragment extends SettingsSectionFragment {
                 });
 
         NumberPicker tileSpacing = settingView(R.id.pickerTileSpacing);
+        ((View) tileSpacing.getParent()).setVisibility(profile().isPassenger() ? View.VISIBLE : View.GONE);
         tileSpacing.setMinValue(0);
         tileSpacing.setMaxValue(24);
-        tileSpacing.setValue(Math.max(0, Math.min(24, preferences.getInt("tileSpacingDp", 4))));
+        tileSpacing.setValue(Math.max(0, Math.min(24, globalPreferences.getInt("tileSpacingDp", 4))));
         tileSpacing.setOnValueChangedListener(
                 (picker, oldValue, newValue) ->
-                        preferences.edit().putInt("tileSpacingDp", newValue).apply());
+                        globalPreferences.edit().putInt("tileSpacingDp", newValue).apply());
 
         Spinner gridSnapMode = settingView(R.id.gridSnapMode);
         if (gridSnapMode != null) {

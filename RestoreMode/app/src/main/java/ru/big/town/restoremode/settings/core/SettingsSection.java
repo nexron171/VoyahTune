@@ -2,6 +2,7 @@ package ru.big.town.restoremode.settings.core;
 
 import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.settings.sections.apollo.ApolloSettingsFragment;
+import ru.big.town.restoremode.settings.sections.appearance.AppearanceSettingsFragment;
 import ru.big.town.restoremode.settings.sections.apps.AppsSettingsFragment;
 import ru.big.town.restoremode.settings.sections.can.CanSettingsFragment;
 import ru.big.town.restoremode.settings.sections.carplay.CarPlaySettingsFragment;
@@ -25,7 +26,8 @@ public enum SettingsSection {
     VOICE(7, R.id.navVoiceControl, "Голосовое управление", "ГОЛОСОВОЙ ПОМОЩНИК"),
     SCENARIOS(8, R.id.navScenarios, "Сценарии", "ПЕРСОНАЛИЗАЦИЯ"),
     CARPLAY(9, R.id.navCarPlay, "CarPlay", "ПОДКЛЮЧЕНИЕ IPHONE"),
-    PASSENGER(10, R.id.navPassenger, "Пассажирский экран", "ПЕРСОНАЛИЗАЦИЯ");
+    PASSENGER(10, R.id.navPassenger, "Пассажирский экран", "ПЕРСОНАЛИЗАЦИЯ"),
+    APPEARANCE(11, R.id.navAppearance, "Оформление", "ПЕРСОНАЛИЗАЦИЯ");
 
     public final int identifier;
     public final int navigationId;
@@ -49,13 +51,16 @@ public enum SettingsSection {
     }
 
     public boolean savesImmediately() {
-        return this == VOICE || this == SCENARIOS || this == CARPLAY || this == PASSENGER;
+        return this == VOICE || this == SCENARIOS || this == CARPLAY || this == PASSENGER
+                || this == APPEARANCE;
     }
 
     public SettingsSectionFragment createFragment() {
         switch (this) {
             case MAIN:
                 return new MainSettingsFragment();
+            case APPEARANCE:
+                return new AppearanceSettingsFragment();
             case VEHICLE:
                 return new VehicleSettingsFragment();
             case APPS:

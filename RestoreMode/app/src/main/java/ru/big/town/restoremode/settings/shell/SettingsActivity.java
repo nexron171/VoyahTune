@@ -121,19 +121,26 @@ public class SettingsActivity extends AppCompatActivity implements SettingsHost 
 
     private void applySettings() {
         if (currentSection.savesImmediately()) {
-            Toast.makeText(
-                            this,
-                            currentSection == SettingsSection.SCENARIOS
-                                    ? "Сценарии сохранены"
-                                    : currentSection == SettingsSection.PASSENGER
-                                            ? "Настройки пассажирского экрана сохранены"
-                                            : "Настройки голосового управления сохранены",
-                            Toast.LENGTH_SHORT)
-                    .show();
+            Toast.makeText(this, savedSettingsMessage(), Toast.LENGTH_SHORT).show();
             return;
         }
         if (commands.save(preferences)) {
             applyModel.apply();
+        }
+    }
+
+    private String savedSettingsMessage() {
+        switch (currentSection) {
+            case SCENARIOS:
+                return "Сценарии сохранены";
+            case PASSENGER:
+                return "Настройки пассажирского экрана сохранены";
+            case VOICE:
+                return "Настройки голосового управления сохранены";
+            case APPEARANCE:
+                return "Настройки оформления сохранены";
+            default:
+                return "Настройки сохранены";
         }
     }
 
