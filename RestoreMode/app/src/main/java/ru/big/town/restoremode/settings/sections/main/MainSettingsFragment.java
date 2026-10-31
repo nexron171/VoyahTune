@@ -44,6 +44,8 @@ import ru.big.town.restoremode.widgets.dials.DialWidgetStore;
 import ru.big.town.restoremode.widgets.energy.EnergyWidgetLayout;
 import ru.big.town.restoremode.widgets.energy.EnergyWidgetPreferences;
 import ru.big.town.restoremode.widgets.headlights.HeadlightWidgetLayout;
+import ru.big.town.restoremode.widgets.links.LinkBrowserPicker;
+import ru.big.town.restoremode.widgets.links.LinkShortcutStore;
 import ru.big.town.restoremode.widgets.media.MediaWidgetLayout;
 import ru.big.town.restoremode.widgets.radio.RadioWidgetLayout;
 import ru.big.town.restoremode.widgets.system.SystemWidgetLayout;
@@ -124,7 +126,8 @@ public class MainSettingsFragment extends SettingsSectionFragment {
         bindShowSwitch(R.id.switchShowRadio, RadioWidgetLayout.VISIBLE, false, R.id.radioSizeRow);
         bindTileSizeSpinners(
                 R.id.radioSettingWidth, R.id.radioSettingHeight, RadioWidgetLayout.ID, 2, 2);
-        bindShowSwitch(R.id.switchShowClock, "show_" + ClockWidgetView.ID, false, R.id.ClockSizeRow);
+        bindShowSwitch(
+                R.id.switchShowClock, "show_" + ClockWidgetView.ID, false, R.id.ClockSizeRow);
         bindTileSizeSpinners(
                 R.id.ClockSettingWidth, R.id.ClockSettingHeight, ClockWidgetView.ID, 1, 1);
         bindShowSwitch(R.id.switchShowCpu, "show_cpuWidget", false, R.id.CpuSizeRow);
@@ -729,6 +732,95 @@ public class MainSettingsFragment extends SettingsSectionFragment {
         return profileView;
     }
 
+    private View linkShortcutRow(LinearLayout parent, LinkShortcutStore.Entry entry) {
+        View row =
+                LayoutInflater.from(requireContext())
+                        .inflate(R.layout.item_link_shortcut_setting, parent, false);
+        ((TextView) row.findViewById(R.id.linkShortcutLabel)).setText(entry.name);
+        ((TextView) row.findViewById(R.id.linkShortcutAddress))
+                .setText(
+                        (entry.deepLink
+                                        ? "Диплинк"
+                                        : LinkBrowserPicker.label(
+                                                requireContext(), entry.browserPackage))
+                                + " · "
+                                + entry.address);
+        row.findViewById(R.id.linkShortcutEdit).setOnClickListener(view -> editLinkShortcut(entry));
+        row.findViewById(R.id.linkShortcutDelete)
+                .setOnClickListener(
+                        view -> {
+                            LinkShortcutStore.remove(preferences, entry.id);
+                            syncTiles();
+                            refreshSettingsRows();
+                        });
+        SettingsDesign.styleTree(row);
+        return row;
+    }
+
+    private void editLinkShortcut(LinkShortcutStore.Entry entry) {
+        View form =
+                LayoutInflater.from(requireContext()).inflate(R.layout.dialog_link_shortcut, null);
+        EditText name = form.findViewById(R.id.linkShortcutName);
+        EditText address = form.findViewById(R.id.linkShortcutUrl);
+        android.widget.RadioGroup type = form.findViewById(R.id.linkShortcutType);
+        name.setText(entry == null ? "" : entry.name);
+        address.setText(entry == null ? "" : entry.address);
+        type.check(
+                entry != null && entry.deepLink ? R.id.linkShortcutDeepLink : R.id.linkShortcutWeb);
+        View browserContainer = form.findViewById(R.id.linkBrowserContainer);
+        LinkBrowserPicker browserPicker =
+                new LinkBrowserPicker(
+                        requireContext(),
+                        form.findViewById(R.id.linkBrowserPicker),
+                        entry == null ? "" : entry.browserPackage);
+        browserContainer.setVisibility(entry != null && entry.deepLink ? View.GONE : View.VISIBLE);
+        type.setOnCheckedChangeListener(
+                (group, checkedId) ->
+                        browserContainer.setVisibility(
+                                checkedId == R.id.linkShortcutWeb ? View.VISIBLE : View.GONE));
+        SettingsDesign.styleTree(form);
+        android.app.AlertDialog dialog =
+                new android.app.AlertDialog.Builder(requireContext())
+                        .setTitle(entry == null ? "Добавить ярлык-ссылку" : "Изменить ярлык-ссылку")
+                        .setView(form)
+                        .setNegativeButton("Отмена", null)
+                        .setPositiveButton("Сохранить", null)
+                        .create();
+        dialog.setOnShowListener(
+                ignored ->
+                        dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE)
+                                .setOnClickListener(
+                                        view -> {
+                                            if (name.getText().toString().trim().isEmpty()) {
+                                                name.setError("Введите название ярлыка");
+                                                return;
+                                            }
+                                            try {
+                                                LinkShortcutStore.Entry saved =
+                                                        new LinkShortcutStore.Entry(
+                                                                entry == null
+                                                                        ? java.util
+                                                                                .UUID
+                                                                                .randomUUID()
+                                                                                .toString()
+                                                                        : entry.id,
+                                                                name.getText().toString(),
+                                                                address.getText().toString(),
+                                                                type.getCheckedRadioButtonId()
+                                                                        == R.id
+                                                                                .linkShortcutDeepLink,
+                                                                browserPicker.selectedPackage());
+                                                LinkShortcutStore.put(preferences, saved);
+                                                syncTiles();
+                                                refreshSettingsRows();
+                                                dialog.dismiss();
+                                            } catch (IllegalArgumentException exception) {
+                                                address.setError(exception.getMessage());
+                                            }
+                                        }));
+        dialog.show();
+    }
+
     private View dialRow(LinearLayout parent, DialWidgetStore.Entry entry) {
         LayoutInflater inflater = LayoutInflater.from(requireContext());
         View row = inflater.inflate(R.layout.item_dial_widget_setting, parent, false);
@@ -1086,6 +1178,7 @@ public class MainSettingsFragment extends SettingsSectionFragment {
         bindTripHistory();
         bindMainGrid();
         bindShowSwitch(R.id.switchShowTaskManagerTile, "showTaskManagerTile", true);
+        bindClick(R.id.buttonAddLinkShortcut, view -> editLinkShortcut(null));
         bindClick(R.id.buttonAddDialWidget, view -> addDialWidget());
         bindClick(R.id.buttonAddAppShortcut, this::onAddAppShortcut);
         bindClick(R.id.buttonAddAppWidget, this::onAddAppWidget);
@@ -1140,6 +1233,13 @@ public class MainSettingsFragment extends SettingsSectionFragment {
                 break;
             case APP_WIDGETS:
                 addAppWidgetRows(rows);
+                break;
+            case LINK_SHORTCUTS:
+                for (LinkShortcutStore.Entry entry : LinkShortcutStore.load(preferences)) {
+                    rows.add(
+                            new SettingsList.Row(
+                                    "link:" + entry.id, parent -> linkShortcutRow(parent, entry)));
+                }
                 break;
             case DIAL_CARDS:
                 for (DialWidgetStore.Entry entry : DialWidgetStore.load(preferences)) {

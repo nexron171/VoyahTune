@@ -1,0 +1,23 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="wrap_content"
+    android:orientation="horizontal" android:gravity="center_vertical"
+    android:layout_marginBottom="12dp">
+    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+        android:layout_weight="1" android:orientation="vertical">
+        <TextView android:id="@+id/linkShortcutLabel"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:textSize="20sp" android:textColor="@color/settings_text" />
+        <TextView android:id="@+id/linkShortcutAddress"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:textSize="16sp" android:textColor="#8292a9"
+            android:maxLines="2" android:ellipsize="end" />
+    </LinearLayout>
+    <Button android:id="@+id/linkShortcutEdit"
+        android:layout_width="wrap_content" android:layout_height="56dp"
+        android:layout_marginStart="16dp" android:text="Изменить" android:tag="settings.action" />
+    <ImageButton android:id="@+id/linkShortcutDelete"
+        android:layout_width="56dp" android:layout_height="56dp"
+        android:layout_marginStart="12dp" android:padding="14dp"
+        android:background="@android:color/transparent" android:src="@drawable/settings_icon_trash"
+        android:contentDescription="Удалить ярлык-ссылку" />
+</LinearLayout>

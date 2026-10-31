@@ -92,6 +92,8 @@ import ru.big.town.restoremode.widgets.energy.VehicleWidgetView;
 import ru.big.town.restoremode.widgets.energy.VehicleWidgets;
 import ru.big.town.restoremode.widgets.headlights.HeadlightWidgetDashboard;
 import ru.big.town.restoremode.widgets.headlights.HeadlightWidgetLayout;
+import ru.big.town.restoremode.widgets.links.LinkShortcutLauncher;
+import ru.big.town.restoremode.widgets.links.LinkShortcutStore;
 import ru.big.town.restoremode.widgets.media.MediaWidgetDashboard;
 import ru.big.town.restoremode.widgets.media.MediaWidgetLayout;
 import ru.big.town.restoremode.widgets.radio.RadioWidgetDashboard;
@@ -2057,6 +2059,41 @@ public class DashboardActivity extends AppCompatActivity {
         for (int pos = 0; pos < tiles.size(); pos++) {
             TileOrderStore.Tile tile = tiles.get(pos);
             final int tilePos = pos;
+
+            if (TileOrderStore.Tile.TYPE_LINK.equals(tile.type)) {
+                LinkShortcutStore.Entry entry = LinkShortcutStore.find(sharedPreferences, tile.id);
+                if (entry == null) {
+                    continue;
+                }
+                View linkView = inf.inflate(R.layout.tile_app_shortcut, splitTilesGrid, false);
+                ((ImageView) linkView.findViewById(R.id.tileIco))
+                        .setImageResource(R.drawable.ic_link_shortcut);
+                ((TextView) linkView.findViewById(R.id.tileTitle)).setText(entry.name);
+                linkView.setOnClickListener(view -> LinkShortcutLauncher.open(this, entry));
+                linkView.setOnLongClickListener(
+                        view -> {
+                            startTileDrag(view, TileOrderStore.Tile.TYPE_LINK, entry.id);
+                            return true;
+                        });
+                int[] gridPosition = TileGridPacking.place(occupied, rows, 1, 1);
+                GridLayout.LayoutParams linkLayout = new GridLayout.LayoutParams();
+                linkLayout.width = tileW;
+                linkLayout.columnSpec = GridLayout.spec(gridPosition[0], 1);
+                linkLayout.rowSpec = GridLayout.spec(gridPosition[1]);
+                applyTileVerticalMetrics(
+                        linkLayout,
+                        m,
+                        tileH,
+                        gridPosition,
+                        1,
+                        rowRemainder,
+                        topInset,
+                        stretchedColumns);
+                linkView.setLayoutParams(linkLayout);
+                splitTilesGrid.addView(linkView);
+                tileDragController.add(linkView, tilePos, 1, 1);
+                continue;
+            }
 
             if (TileOrderStore.Tile.TYPE_DIAL.equals(tile.type)) {
                 DialWidgetStore.Entry dialEntry = null;

@@ -15,6 +15,7 @@ import ru.big.town.restoremode.widgets.clock.ClockWidgetView;
 import ru.big.town.restoremode.widgets.dials.DialWidgetStore;
 import ru.big.town.restoremode.widgets.energy.VehicleWidgets;
 import ru.big.town.restoremode.widgets.headlights.HeadlightWidgetLayout;
+import ru.big.town.restoremode.widgets.links.LinkShortcutStore;
 import ru.big.town.restoremode.widgets.media.MediaWidgetLayout;
 import ru.big.town.restoremode.widgets.radio.RadioWidgetLayout;
 import ru.big.town.restoremode.widgets.system.SystemWidgetLayout;
@@ -63,6 +64,7 @@ public class TileOrderStore {
         public static final String TYPE_APP = "app";
         public static final String TYPE_WIDGET = "widget";
         public static final String TYPE_APP_WIDGET = "appWidget";
+        public static final String TYPE_LINK = "link";
         public static final String TYPE_DIAL = "dial";
         public static final String TYPE_SCENARIO = "scenario";
 
@@ -214,6 +216,8 @@ public class TileOrderStore {
             } catch (Exception ignored) {
                 return false;
             }
+        } else if (Tile.TYPE_LINK.equals(tile.type)) {
+            return LinkShortcutStore.find(layout, tile.id) != null;
         } else if (Tile.TYPE_DIAL.equals(tile.type)) {
             for (DialWidgetStore.Entry entry : DialWidgetStore.load(layout)) {
                 if (entry.id.equals(tile.id)) {
@@ -336,6 +340,19 @@ public class TileOrderStore {
             }
             if (!found) {
                 tiles.add(new Tile(Tile.TYPE_APP_WIDGET, entry.id));
+            }
+        }
+
+        for (LinkShortcutStore.Entry entry : LinkShortcutStore.load(layout)) {
+            boolean found = false;
+            for (Tile tile : tiles) {
+                if (Tile.TYPE_LINK.equals(tile.type) && tile.id.equals(entry.id)) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                tiles.add(new Tile(Tile.TYPE_LINK, entry.id));
             }
         }
 

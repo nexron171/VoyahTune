@@ -1,0 +1,30 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="wrap_content"
+    android:orientation="vertical" android:padding="24dp">
+    <EditText android:id="@+id/linkShortcutName"
+        android:layout_width="match_parent" android:layout_height="56dp"
+        android:hint="Название ярлыка" android:inputType="textCapSentences"
+        android:singleLine="true" android:maxLength="100" />
+    <RadioGroup android:id="@+id/linkShortcutType"
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginVertical="16dp" android:orientation="vertical">
+        <RadioButton android:id="@+id/linkShortcutWeb"
+            android:layout_width="match_parent" android:layout_height="56dp"
+            android:text="Обычная ссылка" />
+        <RadioButton android:id="@+id/linkShortcutDeepLink"
+            android:layout_width="match_parent" android:layout_height="56dp"
+            android:text="Диплинк — открыть в приложении" />
+    </RadioGroup>
+    <LinearLayout android:id="@+id/linkBrowserContainer"
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:layout_marginBottom="12dp">
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="Открывать в приложении" android:textSize="18sp" />
+        <Spinner android:id="@+id/linkBrowserPicker"
+            android:layout_width="match_parent" android:layout_height="56dp" />
+    </LinearLayout>
+    <EditText android:id="@+id/linkShortcutUrl"
+        android:layout_width="match_parent" android:layout_height="64dp"
+        android:hint="https://example.com или схема://адрес"
+        android:inputType="textUri" android:singleLine="true" />
+</LinearLayout>

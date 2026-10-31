@@ -47,7 +47,10 @@ public final class SettingsSectionLayouts {
         layout(R.layout.settings_main_trip_history_heading),
         layout(R.layout.settings_main_trip_history),
         layout(R.layout.settings_main_grid_heading),
-        layout(R.layout.settings_main_grid)
+        layout(R.layout.settings_main_grid),
+        layout(R.layout.settings_main_links_heading),
+        dynamic(DynamicContent.LINK_SHORTCUTS),
+        layout(R.layout.settings_main_add_link)
     };
     private static final Item[] CAN = {
         layout(R.layout.settings_can_intro),
@@ -134,6 +137,7 @@ public final class SettingsSectionLayouts {
         CARPLAY_WIDGETS,
         APP_WIDGETS,
         DIAL_CARDS,
+        LINK_SHORTCUTS,
         SHORTCUTS,
         FULLSCREEN_APPS,
         SPLITS,
