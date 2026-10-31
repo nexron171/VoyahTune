@@ -39,7 +39,7 @@ func TestCompiledRuntimeStartsWithoutExternalManifests(t *testing.T) {
 	for _, agent := range config.Agents {
 		targets[agent.ID] = agent
 	}
-	if config.Code.RuntimeID != "java-test" || len(targets) != 19 ||
+	if config.Code.RuntimeID != "java-test" || len(targets) != 21 ||
 		targets["launcher"].Target != "com.qinggan.app.launcher" ||
 		targets["acc"].MaxAttempts != 4 || targets["cluster"].TimeoutSeconds != 45 ||
 		targets["keyboard-ru"].Condition != "keyboard-ru" || len(targets["rds"].Modules) != 2 ||

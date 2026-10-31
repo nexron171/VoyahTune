@@ -103,12 +103,12 @@ func TestApolloFlagAndDynamicClientIsolation(t *testing.T) {
 			t.Fatal("invalid flag accepted", invalid)
 		}
 	}
-	agents := nativeDynamicAgents("com.qinggan.cluster,com.qinggan.canbus.service,../bad,system_server,com.example.app", "com.yango.maps.android")
-	if len(agents) != 2 {
+	agents := nativeDynamicAgents("com.qinggan.cluster,com.qinggan.canbus.service,../bad,system_server,com.example.app,ru.yandex.yandexmaps,com.yango.maps.android")
+	if len(agents) != 1 {
 		t.Fatal(agents)
 	}
 	for _, agent := range agents {
-		if agent.Target != "com.example.app" && agent.Target != "com.yango.maps.android" {
+		if agent.Target != "com.example.app" {
 			t.Fatal(agent)
 		}
 	}

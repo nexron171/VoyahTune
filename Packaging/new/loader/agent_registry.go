@@ -146,6 +146,22 @@ func compiledAgents() []nativeAgentConfig {
 			Modules:        []string{"yandex-navigation", "client.ru.yandex.yandexnavi"},
 		},
 		{
+			ID:             "yandex-maps-navigation",
+			Target:         "ru.yandex.yandexmaps",
+			MaxAttempts:    1,
+			TimeoutSeconds: 35,
+			CrashLimit:     2,
+			Modules:        []string{"yandex-navigation", "client.ru.yandex.yandexmaps"},
+		},
+		{
+			ID:             "yango-maps-navigation",
+			Target:         "com.yango.maps.android",
+			MaxAttempts:    1,
+			TimeoutSeconds: 35,
+			CrashLimit:     2,
+			Modules:        []string{"yandex-navigation", "client.com.yango.maps.android"},
+		},
+		{
 			ID:             "dgis-navigation",
 			Target:         "ru.dublgis.dgismobile",
 			MaxAttempts:    1,

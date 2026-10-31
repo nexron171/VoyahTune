@@ -30,7 +30,6 @@ func (workers *agentWorkers) refreshDynamic() {
 	manager := workers.manager
 	dynamic := nativeDynamicAgents(
 		manager.readSetting(workers.context, "voyahtune_fullscreen_apps"),
-		manager.readSetting(workers.context, "voyahtune_dpi_packages"),
 	)
 	wanted := make(map[string]bool, len(dynamic))
 	for _, agent := range dynamic {

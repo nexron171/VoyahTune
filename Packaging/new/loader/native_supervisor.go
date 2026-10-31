@@ -344,21 +344,15 @@ func requireAndroidARM(procRoot string, pid int) error {
 	return err
 }
 
-func nativeDynamicAgents(fullscreen, density string) []nativeAgentConfig {
-	excluded := map[string]bool{}
-	for _, name := range []string{"com.qinggan.keymanager.service", "com.qinggan.systemservice", "com.qinggan.app.launcher", "com.qinggan.canbus.service", "com.qinggan.app.vehiclesetting", "com.qinggan.app.vehicle", "com.qinggan.app.qgime", "com.qinggan.app.hiboard", "com.qinggan.cluster", "com.qinggan.bluetoothphone", "com.qinggan.systemui", "com.pateo.rdsapp", "ru.yandex.yandexnavi", "ru.dublgis.dgismobile"} {
-		excluded[name] = true
+func nativeDynamicAgents(fullscreen string) []nativeAgentConfig {
+	excluded := map[string]bool{"com.qinggan.app.hiboard": true}
+	for _, agent := range compiledAgents() {
+		excluded[agent.Target] = true
 	}
 	packages := map[string]bool{}
 	for _, name := range strings.Split(fullscreen, ",") {
 		name = strings.TrimSpace(name)
 		if safeName(name) && strings.Contains(name, ".") && !strings.HasSuffix(name, ".") && !excluded[name] {
-			packages[name] = true
-		}
-	}
-	for _, name := range strings.Split(density, ",") {
-		name = strings.TrimSpace(name)
-		if name == "ru.yandex.yandexmaps" || name == "com.yango.maps.android" {
 			packages[name] = true
 		}
 	}
