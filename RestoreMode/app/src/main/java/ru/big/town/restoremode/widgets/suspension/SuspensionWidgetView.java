@@ -35,19 +35,29 @@ public final class SuspensionWidgetView extends View {
             };
     private static final String[] LEVELS = {"Самый низкий", "Низкий", "Средний", "Высокий"};
     private static final String[] MODES = {"Посадка", "Sport", "Прежний режим", "Outing"};
-    private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint contentPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint carPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private final RectF rect = new RectF();
     private final Selection selection;
     private final RectF[] buttons = {new RectF(), new RectF(), new RectF(), new RectF()};
-    private int height = -1, direction = -1, pending = -1, frame = 60, lastHeight = -1;
-    private boolean available, compact, longPressed, decoding;
-    private String message = "Ожидание Native", mode = "Режим + подвеска";
+    private int suspensionHeight = -1;
+    private int movementDirection = -1;
+    private int pendingLevel = -1;
+    private int animationFrame = 60;
+    private int previousHeight = -1;
+    private boolean controlsAvailable;
+    private boolean compactLayout;
+    private boolean longPressConsumed;
+    private boolean decodingFrame;
+    private String message = "Ожидание Native";
+    private final String modeLabel = "Режим + подвеска";
     private String lowestBlockedReason = "Нет данных режима движения";
     private AlertDialog levelDialog;
     private android.widget.ArrayAdapter<String> levelAdapter;
-    private Bitmap bitmap;
+    private Bitmap carBitmap;
     private ValueAnimator animator;
-    private float touchX, touchY;
+    private float touchX;
+    private float touchY;
 
     public SuspensionWidgetView(Context context, Selection selection) {
         super(context);
@@ -59,10 +69,10 @@ public final class SuspensionWidgetView extends View {
     }
 
     public void update(Bundle state) {
-        height = state.getInt(SuspensionWidgetProtocol.HEIGHT, -1);
-        direction = state.getInt(SuspensionWidgetProtocol.DIRECTION, -1);
-        pending = state.getInt(SuspensionWidgetProtocol.PENDING, -1);
-        available = state.getBoolean(SuspensionWidgetProtocol.AVAILABLE, false);
+        suspensionHeight = state.getInt(SuspensionWidgetProtocol.HEIGHT, -1);
+        movementDirection = state.getInt(SuspensionWidgetProtocol.DIRECTION, -1);
+        pendingLevel = state.getInt(SuspensionWidgetProtocol.PENDING, -1);
+        controlsAvailable = state.getBoolean(SuspensionWidgetProtocol.AVAILABLE, false);
         message = state.getString(SuspensionWidgetProtocol.MESSAGE, "");
         int drive = state.getInt(SuspensionWidgetProtocol.DRIVE, -1);
         lowestBlockedReason =
@@ -74,25 +84,25 @@ public final class SuspensionWidgetView extends View {
         if (lowestBlockedReason == null) {
             lowestBlockedReason = "";
         }
-        if (height >= 1 && height <= 9 && height != lastHeight) {
-            int target = frameForHeight(height);
+        if (suspensionHeight >= 1 && suspensionHeight <= 9 && suspensionHeight != previousHeight) {
+            int target = frameForHeight(suspensionHeight);
             if (animator != null) {
                 animator.cancel();
             }
-            if (lastHeight < 0) {
-                frame = target;
-                loadFrame(frame);
+            if (previousHeight < 0) {
+                animationFrame = target;
+                loadFrame(animationFrame);
             } else {
-                animator = ValueAnimator.ofInt(frame, target);
-                animator.setDuration(Math.max(300, Math.abs(frame - target) * 16L));
+                animator = ValueAnimator.ofInt(animationFrame, target);
+                animator.setDuration(Math.max(300, Math.abs(animationFrame - target) * 16L));
                 animator.addUpdateListener(
-                        a -> {
-                            frame = (int) a.getAnimatedValue();
-                            loadFrame(frame);
+                        animation -> {
+                            animationFrame = (int) animation.getAnimatedValue();
+                            loadFrame(animationFrame);
                         });
                 animator.start();
             }
-            lastHeight = height;
+            previousHeight = suspensionHeight;
         }
         setContentDescription(
                 "Подвеска: " + levelText() + ". " + message + ". " + lowestBlockedReason);
@@ -103,7 +113,7 @@ public final class SuspensionWidgetView extends View {
     }
 
     private boolean canSelect(int level) {
-        return available && pending < 0 && (level != 0 || lowestBlockedReason.isEmpty());
+        return controlsAvailable && pendingLevel < 0 && (level != 0 || lowestBlockedReason.isEmpty());
     }
 
     private static int frameForHeight(int value) {
@@ -129,57 +139,57 @@ public final class SuspensionWidgetView extends View {
         }
     }
 
-    private void loadFrame(int requested) {
-        int index = Math.max(20, Math.min(80, (requested / 2) * 2));
-        Bitmap cached = FRAMES.get(index);
-        if (cached != null) {
-            bitmap = cached;
+    private void loadFrame(int requestedFrame) {
+        int frameIndex = Math.max(20, Math.min(80, (requestedFrame / 2) * 2));
+        Bitmap cachedFrame = FRAMES.get(frameIndex);
+        if (cachedFrame != null) {
+            carBitmap = cachedFrame;
             invalidate();
             return;
         }
-        if (decoding) {
+        if (decodingFrame) {
             return;
         }
-        decoding = true;
-        Context app = getContext().getApplicationContext();
+        decodingFrame = true;
+        Context applicationContext = getContext().getApplicationContext();
         DECODER.execute(
                 () -> {
-                    Bitmap decoded = null;
-                    try (InputStream in =
-                            app.getAssets().open("suspension/body_" + index + ".png")) {
-                        decoded = BitmapFactory.decodeStream(in);
-                        if (decoded != null) {
-                            FRAMES.put(index, decoded);
+                    Bitmap decodedFrame = null;
+                    try (InputStream input =
+                            applicationContext.getAssets().open("suspension/body_" + frameIndex + ".png")) {
+                        decodedFrame = BitmapFactory.decodeStream(input);
+                        if (decodedFrame != null) {
+                            FRAMES.put(frameIndex, decodedFrame);
                         }
                     } catch (Exception ignored) {
                     }
-                    Bitmap result = decoded;
+                    Bitmap loadedFrame = decodedFrame;
                     post(
                             () -> {
-                                decoding = false;
-                                if (result != null) {
-                                    bitmap = result;
+                                decodingFrame = false;
+                                if (loadedFrame != null) {
+                                    carBitmap = loadedFrame;
                                 }
                                 invalidate();
-                                if (result != null
-                                        && index != (frame / 2) * 2
+                                if (loadedFrame != null
+                                        && frameIndex != (animationFrame / 2) * 2
                                         && isAttachedToWindow()) {
-                                    loadFrame(frame);
+                                    loadFrame(animationFrame);
                                 }
                             });
                 });
     }
 
     private String levelText() {
-        if (height < 1 || height > 9) {
+        if (suspensionHeight < 1 || suspensionHeight > 9) {
             return "Нет данных высоты";
         }
-        if (height % 2 == 0) {
-            return direction == 1
+        if (suspensionHeight % 2 == 0) {
+            return movementDirection == 1
                     ? "Поднимается…"
-                    : direction == 2 ? "Опускается…" : "Регулировка…";
+                    : movementDirection == 2 ? "Опускается…" : "Регулировка…";
         }
-        switch (height) {
+        switch (suspensionHeight) {
             case 1:
                 return "Максимальный";
             case 3:
@@ -193,91 +203,94 @@ public final class SuspensionWidgetView extends View {
         }
     }
 
-    private void text(
-            Canvas c, String value, float x, float y, float size, int color, Paint.Align align) {
-        paint.setColor(color);
-        paint.setTextSize(size);
-        paint.setTextAlign(align);
-        c.drawText(value, x, y, paint);
+    private void drawText(
+            Canvas canvas, String value, float x, float y, float size, int color, Paint.Align align) {
+        contentPaint.setColor(color);
+        contentPaint.setTextSize(size);
+        contentPaint.setTextAlign(align);
+        canvas.drawText(value, x, y, contentPaint);
     }
 
     @Override
-    protected void onDraw(Canvas c) {
-        super.onDraw(c);
-        float w = getWidth(), h = getHeight(), d = getResources().getDisplayMetrics().density;
-        compact = w < 350 * d || h < 230 * d;
-        float pad = 12 * d, font = compact ? Math.min(18 * d, Math.max(11 * d, w / 17)) : 26 * d;
-        paint.setTextSize(font);
+    protected void onDraw(Canvas canvas) {
+        super.onDraw(canvas);
+        float width = getWidth();
+        float viewHeight = getHeight();
+        float density = getResources().getDisplayMetrics().density;
+        compactLayout = width < 350 * density || viewHeight < 230 * density;
+        float padding = 12 * density;
+        float headingTextSize = compactLayout ? Math.min(18 * density, Math.max(11 * density, width / 17)) : 26 * density;
+        contentPaint.setTextSize(headingTextSize);
         String heading =
                 android.text.TextUtils.ellipsize(
                                 "Подвеска · " + levelText(),
-                                new android.text.TextPaint(paint),
-                                w - 2 * pad,
+                                new android.text.TextPaint(contentPaint),
+                                width - 2 * padding,
                                 android.text.TextUtils.TruncateAt.END)
                         .toString();
-        text(c, heading, pad, pad + font, font, 0xffeeeeee, Paint.Align.LEFT);
-        float bottom = h - pad;
-        float buttonHeight = compact ? 28 * d : 50 * d;
-        float contentBottom = bottom - buttonHeight - 10 * d;
-        if (!compact) {
+        drawText(canvas, heading, padding, padding + headingTextSize, headingTextSize, 0xffeeeeee, Paint.Align.LEFT);
+        float bottom = viewHeight - padding;
+        float buttonHeight = compactLayout ? 28 * density : 50 * density;
+        float contentBottom = bottom - buttonHeight - 10 * density;
+        if (!compactLayout) {
             String info =
-                    pending >= 0
-                            ? "Ожидаем: " + LEVELS[pending]
-                            : !lowestBlockedReason.isEmpty() && available
+                    pendingLevel >= 0
+                            ? "Ожидаем: " + LEVELS[pendingLevel]
+                            : !lowestBlockedReason.isEmpty() && controlsAvailable
                                     ? lowestBlockedReason
-                                    : message.isEmpty() ? mode : message;
-            paint.setTextSize(16 * d);
+                                    : message.isEmpty() ? modeLabel : message;
+            contentPaint.setTextSize(16 * density);
             CharSequence fit =
                     android.text.TextUtils.ellipsize(
                             info,
-                            new android.text.TextPaint(paint),
-                            w - 2 * pad,
+                            new android.text.TextPaint(contentPaint),
+                            width - 2 * padding,
                             android.text.TextUtils.TruncateAt.END);
-            text(c, fit.toString(), pad, pad + font + 24 * d, 16 * d, 0xffaeb7c6, Paint.Align.LEFT);
-            float top = pad + font + 30 * d, imageBottom = contentBottom;
-            if (bitmap != null && imageBottom > top) {
+            drawText(canvas, fit.toString(), padding, padding + headingTextSize + 24 * density, 16 * density, 0xffaeb7c6, Paint.Align.LEFT);
+            float top = padding + headingTextSize + 30 * density;
+            float imageBottom = contentBottom;
+            if (carBitmap != null && imageBottom > top) {
                 float scale =
                         Math.min(
-                                (w - 2 * pad) / bitmap.getWidth(),
-                                (imageBottom - top) / bitmap.getHeight());
-                float bw = bitmap.getWidth() * scale, bh = bitmap.getHeight() * scale;
-                rect.set((w - bw) / 2, top, (w + bw) / 2, top + bh);
-                paint.setAlpha(height < 1 ? 100 : 255);
-                c.drawBitmap(bitmap, null, rect, paint);
-                paint.setAlpha(255);
+                                (width - 2 * padding) / carBitmap.getWidth(),
+                                (imageBottom - top) / carBitmap.getHeight());
+                float imageWidth = carBitmap.getWidth() * scale;
+                float imageHeight = carBitmap.getHeight() * scale;
+                rect.set((width - imageWidth) / 2, top, (width + imageWidth) / 2, top + imageHeight);
+                canvas.drawBitmap(carBitmap, null, rect, carPaint);
             }
         }
-        for (int i = 0; i < 4; i++) {
-            buttons[i].setEmpty();
+        for (int buttonIndex = 0; buttonIndex < 4; buttonIndex++) {
+            buttons[buttonIndex].setEmpty();
         }
-        int count = compact ? 1 : 4;
-        float bw = (w - 2 * pad - (count - 1) * 5 * d) / count;
-        for (int i = 0; i < count; i++) {
-            RectF b = buttons[i];
-            b.set(
-                    pad + i * (bw + 5 * d),
+        int count = compactLayout ? 1 : 4;
+        float buttonWidth = (width - 2 * padding - (count - 1) * 5 * density) / count;
+        for (int buttonIndex = 0; buttonIndex < count; buttonIndex++) {
+            RectF buttonBounds = buttons[buttonIndex];
+            buttonBounds.set(
+                    padding + buttonIndex * (buttonWidth + 5 * density),
                     bottom - buttonHeight,
-                    pad + i * (bw + 5 * d) + bw,
+                    padding + buttonIndex * (buttonWidth + 5 * density) + buttonWidth,
                     bottom);
-            boolean selected = !compact && height == new int[] {9, 7, 5, 1}[i];
-            boolean enabled = compact ? available && pending < 0 : canSelect(i);
-            paint.setColor(!enabled ? 0xff383e49 : selected ? 0xff2e80c9 : 0xff445267);
-            c.drawRoundRect(b, 8 * d, 8 * d, paint);
-            text(
-                    c,
-                    compact ? "Выбрать уровень" : LEVELS[i],
-                    b.centerX(),
-                    b.top + (compact ? 19 : 21) * d,
-                    compact ? 12 * d : Math.min(17 * d, bw / 8.5f),
+            boolean selected = !compactLayout && suspensionHeight == new int[] {9, 7, 5, 1}[buttonIndex];
+            boolean enabled = compactLayout ? controlsAvailable && pendingLevel < 0 : canSelect(buttonIndex);
+            contentPaint.setColor(!enabled ? 0xff383e49 : selected ? 0xff2e80c9 : 0xff445267);
+            canvas.drawRoundRect(buttonBounds, 8 * density, 8 * density, contentPaint);
+            drawText(
+                    canvas,
+                    compactLayout ? "Выбрать уровень" : LEVELS[buttonIndex],
+                    buttonBounds.centerX(),
+                    buttonBounds.top + (compactLayout ? 19 : 21) * density,
+                    compactLayout ? 12 * density : Math.min(17 * density, buttonWidth / 8.5f),
                     enabled ? 0xffeeeeee : 0xff858c98,
                     Paint.Align.CENTER);
-            if (!compact) {
-                text(
-                        c,
-                        i == 0 && !lowestBlockedReason.isEmpty() ? "Недоступно" : MODES[i],
-                        b.centerX(),
-                        b.bottom - 9 * d,
-                        Math.min(13 * d, bw / 9),
+            if (!compactLayout) {
+                drawText(
+                        canvas,
+                        buttonIndex == 0 && !lowestBlockedReason.isEmpty() ? "Недоступно" : MODES[buttonIndex],
+                        buttonBounds.centerX(),
+                        buttonBounds.bottom - 9 * density,
+                        Math.min(13 * density, buttonWidth / 9),
                         enabled ? 0xffccd6e4 : 0xff858c98,
                         Paint.Align.CENTER);
             }
@@ -287,7 +300,7 @@ public final class SuspensionWidgetView extends View {
     @Override
     public boolean onTouchEvent(MotionEvent event) {
         if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
-            longPressed = false;
+            longPressConsumed = false;
         }
         touchX = event.getX();
         touchY = event.getY();
@@ -296,20 +309,20 @@ public final class SuspensionWidgetView extends View {
 
     @Override
     public boolean performLongClick() {
-        longPressed = true;
+        longPressConsumed = true;
         return super.performLongClick();
     }
 
     @Override
     public boolean performClick() {
         super.performClick();
-        if (longPressed || !available || pending >= 0) {
+        if (longPressConsumed || !controlsAvailable || pendingLevel >= 0) {
             return true;
         }
-        if (compact) {
+        if (compactLayout) {
             String[] choices = new String[4];
-            for (int i = 0; i < 4; i++) {
-                choices[i] = LEVELS[i] + " · " + MODES[i];
+            for (int buttonIndex = 0; buttonIndex < 4; buttonIndex++) {
+                choices[buttonIndex] = LEVELS[buttonIndex] + " · " + MODES[buttonIndex];
             }
             if (levelDialog != null) {
                 return true;
@@ -361,9 +374,9 @@ public final class SuspensionWidgetView extends View {
                     });
             levelDialog.show();
         } else {
-            for (int i = 0; i < 4; i++) {
-                if (buttons[i].contains(touchX, touchY) && canSelect(i)) {
-                    selection.select(i);
+            for (int buttonIndex = 0; buttonIndex < 4; buttonIndex++) {
+                if (buttons[buttonIndex].contains(touchX, touchY) && canSelect(buttonIndex)) {
+                    selection.select(buttonIndex);
                 }
             }
         }
