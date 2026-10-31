@@ -50,10 +50,12 @@ final class ScenarioEngine {
     private final Map<String, Long> lastRunElapsed = new HashMap<>();
     private boolean gearSnapshotSeen;
     private boolean doorSnapshotSeen;
+    private String lastDriveMode;
     private ScenarioPolicy.LightState lastLight = ScenarioPolicy.LightState.HOLD;
 
     private final ScenarioEnvironment.Subscription gearSubscription;
     private final ScenarioEnvironment.Subscription doorSubscription;
+    private final ScenarioEnvironment.Subscription driveModeSubscription;
 
     ScenarioEngine(SetModesService service) {
         this(ScenarioEnvironment.oem(service));
@@ -67,6 +69,7 @@ final class ScenarioEngine {
         handler = new Handler(thread.getLooper());
         gearSubscription = environment.gear(handler, this::onGear);
         doorSubscription = environment.doors(handler, this::onDoors);
+        driveModeSubscription = environment.driveMode(handler, this::onDriveMode);
     }
 
     void close() {
@@ -76,6 +79,7 @@ final class ScenarioEngine {
         handler.removeCallbacksAndMessages(null);
         gearSubscription.close();
         doorSubscription.close();
+        driveModeSubscription.close();
         stopLightListening();
         conditionExecutor.shutdownNow();
         thread.quitSafely();
@@ -153,6 +157,16 @@ final class ScenarioEngine {
         for (ScenarioDefinition scenario : enabledScenarios()) {
             if (ScenarioPolicy.matchesDoor(scenario, doorMask)) {
                 evaluateAndRun(scenario, "двери " + doorMask);
+            }
+        }
+    }
+
+    private void onDriveMode(String mode) {
+        String previous = lastDriveMode;
+        lastDriveMode = mode;
+        for (ScenarioDefinition scenario : enabledScenarios()) {
+            if (ScenarioPolicy.matchesDriveMode(scenario, previous, mode)) {
+                evaluateAndRun(scenario, "режим движения " + mode);
             }
         }
     }

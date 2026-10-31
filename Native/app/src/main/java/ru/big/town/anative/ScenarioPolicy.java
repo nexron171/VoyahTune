@@ -61,6 +61,21 @@ final class ScenarioPolicy {
         return false;
     }
 
+    static boolean matchesDriveMode(ScenarioDefinition scenario, String previous, String current) {
+        if (!ScenarioProtocol.validDriveMode(previous)
+                || !ScenarioProtocol.validDriveMode(current)
+                || current.equals(previous)) {
+            return false;
+        }
+        for (ScenarioDefinition.Trigger trigger : scenario.triggers) {
+            if (ScenarioProtocol.TRIGGER_DRIVE_MODE.equals(trigger.type)
+                    && current.equals(trigger.value)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** Триггер по двери; недостоверная маска (есть недоступное поле) не срабатывает. */
     static boolean matchesDoor(ScenarioDefinition scenario, int doorMask) {
         if ((doorMask & CanBusEvent.DOOR_UNKNOWN) != 0) return false;

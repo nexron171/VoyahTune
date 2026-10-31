@@ -67,6 +67,8 @@ import ru.big.town.restoremode.TaskManagerActivity;
 import ru.big.town.restoremode.TripHistoryActivity;
 import ru.big.town.restoremode.VoiceActivity;
 import ru.big.town.restoremode.apps.AppDpiStore;
+import ru.big.town.restoremode.appearance.AppearanceSettings;
+import ru.big.town.restoremode.appearance.DashboardAppearance;
 import ru.big.town.restoremode.apps.split.SplitStore;
 import ru.big.town.restoremode.carplay.CarPlayWidgetPlaceholder;
 import ru.big.town.restoremode.dashboard.tiles.TileDragController;
@@ -123,6 +125,13 @@ public class DashboardActivity extends AppCompatActivity {
 
     private SharedPreferences sharedPreferences;
     private SharedPreferences settingsPreferences;
+    private DashboardAppearance appearance;
+    private final SharedPreferences.OnSharedPreferenceChangeListener appearancePreferences =
+            (preferences, key) -> {
+                if (AppearanceSettings.TILE_SPACING.equals(key)) {
+                    updateAppearanceSpacing();
+                }
+            };
     private boolean carPlayFeatureReceiverRegistered;
     private final BroadcastReceiver carPlayFeatureReceiver =
             new BroadcastReceiver() {
@@ -1125,10 +1134,15 @@ public class DashboardActivity extends AppCompatActivity {
         badge.setBackgroundResource(on ? R.drawable.pill_active : R.drawable.pill_inactive);
     }
 
-    /**
-     * Passenger entry point overrides this so its layout profile does not depend on display
-     * probing. The driver dashboard keeps the historical display-based selection.
-     */
+    private void updateAppearanceSpacing() {
+        runOnUiThread(() -> {
+            if (suspensionScreenResumed && splitTilesGrid != null) {
+                renderSplitTiles();
+            }
+        });
+    }
+
+    /** Passenger entry point can select its layout independently of display probing. */
     protected DashboardProfile resolveDashboardProfile(int displayId) {
         return DashboardProfile.forDisplay(displayId);
     }
@@ -1140,6 +1154,7 @@ public class DashboardActivity extends AppCompatActivity {
         dashboardDisplayId = DashboardProfile.displayId(this);
         dashboardProfile = resolveDashboardProfile(dashboardDisplayId);
         settingsPreferences = dashboardProfile.settingsPreferences(this);
+        settingsPreferences.registerOnSharedPreferenceChangeListener(appearancePreferences);
         sharedPreferences = dashboardProfile.layoutPreferences(this);
         registerLiveDashboard();
 
@@ -1151,6 +1166,7 @@ public class DashboardActivity extends AppCompatActivity {
                         WindowManager.LayoutParams.FLAG_FULLSCREEN,
                         WindowManager.LayoutParams.FLAG_FULLSCREEN);
         setContentView(R.layout.activity_main);
+        appearance = new DashboardAppearance(findViewById(R.id.main), settingsPreferences);
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
 
         // Свой док удалён — используется родной док головы (висит поверх слева ~145dp, в insets не
@@ -2003,8 +2019,7 @@ public class DashboardActivity extends AppCompatActivity {
         // Высота ряда считается от того же места, что реально получает сетка: высота экрана
         // минус верхний инсет и собственные вертикальные отступы сетки.
         int availableH = 720 - contentInsetTop - splitTilesGrid.getPaddingTop() - 0;
-        // Расстояние между плитками — настройка раздела «Главный экран» (dp вокруг каждой плитки).
-        int spacingDp = Math.max(0, Math.min(24, sharedPreferences.getInt("tileSpacingDp", 4)));
+        int spacingDp = AppearanceSettings.spacingDp(settingsPreferences);
         int m = Math.round(spacingDp * metrics.density);
         int tileW = (availableW / 12) - 2 * m;
         int tileH = (availableH / 5) - 2 * m;
@@ -2558,6 +2573,7 @@ public class DashboardActivity extends AppCompatActivity {
                 tileDragController.add(tileView, tilePos, 1, 1);
             }
         }
+        appearance.apply(splitTilesGrid);
         if (firstOpening) {
             AppWidgetSessionStore.markOpeningHandled(sharedPreferences, widgetSessionId);
         }
@@ -2725,6 +2741,7 @@ public class DashboardActivity extends AppCompatActivity {
 
     /** Пользователь прокрутил сетку: перезапускаем отсчёт покоя перед выравниванием. */
     private void onGridScrolled(int scrollX, int oldScrollX) {
+        appearance.onViewportChanged();
         if (contentScroll == null || tilePitchPx <= 0) {
             return;
         }
@@ -2949,6 +2966,7 @@ public class DashboardActivity extends AppCompatActivity {
 
         if (CarPlayWidgetPlaceholder.show(
                 widgetView, entry, () -> showEmbeddedAppWidget(widgetView, entry), dragLauncher)) {
+            appearance.styleTile(widgetView);
             return;
         }
 
@@ -3011,6 +3029,7 @@ public class DashboardActivity extends AppCompatActivity {
         }
 
         refreshAppWidgetBadge(widgetView, entry.id);
+        appearance.styleTile(widgetView);
     }
 
     /** Показать обозначение виджета (A, B, C…) в углу карточки. */
@@ -4202,6 +4221,8 @@ public class DashboardActivity extends AppCompatActivity {
     protected void onDestroy() {
         destroyed = true;
         unregisterLiveDashboard();
+        settingsPreferences.unregisterOnSharedPreferenceChangeListener(appearancePreferences);
+        appearance.close();
         systemWidgets.close();
         mediaWidgets.close();
         headlightWidget.close();

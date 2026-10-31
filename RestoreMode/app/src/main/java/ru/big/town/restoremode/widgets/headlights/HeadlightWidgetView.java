@@ -16,6 +16,7 @@ import android.widget.TextView;
 
 import ru.big.town.common.HeadlightWidgetProtocol;
 import ru.big.town.restoremode.R;
+import ru.big.town.restoremode.appearance.AppearanceSettings;
 
 import java.util.function.IntConsumer;
 
@@ -26,9 +27,12 @@ public final class HeadlightWidgetView extends FrameLayout {
     private final LinearLayout[] buttons = new LinearLayout[4];
     private final View[] symbols = new View[4];
     private final int columns;
+    private int surfaceAlpha;
 
     public HeadlightWidgetView(Context context, int width, IntConsumer selection) {
         super(context);
+        surfaceAlpha = AppearanceSettings.load(context.getSharedPreferences("DrivePreferences", Context.MODE_PRIVATE))
+                .surfaceAlpha();
         int tileWidth = HeadlightWidgetLayout.width(width);
         columns = tileWidth <= 2 ? tileWidth : 4;
         setBackgroundResource(R.drawable.card_dark_ripple);
@@ -104,9 +108,19 @@ public final class HeadlightWidgetView extends FrameLayout {
             if (mode == pending) {
                 background.setStroke(dp(2), 0xff91c8f5);
             }
+            background.setAlpha(surfaceAlpha);
             button.setBackground(
                     new RippleDrawable(ColorStateList.valueOf(0x40ffffff), background, null));
             symbols[mode].setAlpha(selected < 0 ? 0.45f : 1f);
+        }
+    }
+
+    public void setSurfaceAlpha(int alpha) {
+        surfaceAlpha = alpha;
+        for (LinearLayout button : buttons) {
+            if (button.getBackground() instanceof RippleDrawable) {
+                ((RippleDrawable) button.getBackground()).getDrawable(0).setAlpha(alpha);
+            }
         }
     }
 

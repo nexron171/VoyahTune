@@ -44,6 +44,7 @@ public abstract class VehicleWidgetView extends View {
         designHeight = EnergyWidgetLayout.pixelsHigh(widgetId, this.rows);
         contentWidth = designWidth;
         contentHeight = designHeight;
+        setBackgroundResource(R.drawable.layout_category_bg);
         setFocusable(true);
         setClickable(true);
         setOnClickListener(view -> onTap((touchX - offsetX) / scale, (touchY - offsetY) / scale));
@@ -83,13 +84,6 @@ public abstract class VehicleWidgetView extends View {
     @Override
     protected final void onDraw(Canvas canvas) {
         super.onDraw(canvas);
-        paint.setColor(0xff22252f);
-        paint.setStyle(Paint.Style.FILL);
-        canvas.drawRoundRect(0, 0, getWidth(), getHeight(), 20, 20, paint);
-        paint.setColor(BORDER);
-        paint.setStyle(Paint.Style.STROKE);
-        paint.setStrokeWidth(1);
-        canvas.drawRoundRect(.5f, .5f, getWidth() - .5f, getHeight() - .5f, 20, 20, paint);
         paint.setStyle(Paint.Style.FILL);
         float availableHeight = Math.max(0, getHeight() - footerHeight());
         if (usesResponsiveLayout()) {

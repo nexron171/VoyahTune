@@ -24,6 +24,7 @@ import org.robolectric.annotation.Config;
 import org.robolectric.annotation.GraphicsMode;
 
 import ru.big.town.common.HeadlightWidgetProtocol;
+import ru.big.town.restoremode.appearance.AppearanceSettings;
 import ru.big.town.restoremode.dashboard.tiles.TileSizeStore;
 
 import java.io.File;
@@ -35,6 +36,27 @@ import java.util.List;
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = 30, application = Application.class)
 public class HeadlightWidgetTest {
+    @Test
+    @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    public void buttonBackgroundsFollowWidgetTransparencyWithoutBlurringTheirContent() {
+        Context context = RuntimeEnvironment.getApplication();
+        SharedPreferences preferences = context.getSharedPreferences("DrivePreferences", 0);
+        preferences.edit().putBoolean(AppearanceSettings.TRANSPARENCY_ENABLED, true)
+                .putInt(AppearanceSettings.TRANSPARENCY_PERCENT, 50)
+                .putBoolean(AppearanceSettings.BLUR_ENABLED, true).commit();
+        HeadlightWidgetView widget = new HeadlightWidgetView(context, 4, mode -> {});
+        widget.update(state(HeadlightWidgetProtocol.OFF, -1));
+        for (int mode = 0; mode < 4; mode++) {
+            LinearLayout button = (LinearLayout) widget.getChildAt(mode + 1);
+            Bitmap background = Bitmap.createBitmap(100, 100, Bitmap.Config.ARGB_8888);
+            button.getBackground().setBounds(0, 0, 100, 100);
+            button.getBackground().draw(new Canvas(background));
+            assertEquals(128, Color.alpha(background.getPixel(50, 50)));
+            assertEquals(1f, button.getAlpha(), 0f);
+            assertEquals(1f, button.getChildAt(0).getAlpha(), 0f);
+        }
+    }
+
     @Test
     @GraphicsMode(GraphicsMode.Mode.NATIVE)
     public void allLayoutsExposeFourSeparateButtonsAndPreserveTheirOrder() throws Exception {

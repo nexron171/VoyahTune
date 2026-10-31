@@ -210,6 +210,9 @@ final class ScenarioDefinition {
         if (ScenarioProtocol.TRIGGER_LIGHT.equals(trigger.type)) {
             return ScenarioProtocol.validLightTrigger(trigger.value);
         }
+        if (ScenarioProtocol.TRIGGER_DRIVE_MODE.equals(trigger.type)) {
+            return ScenarioProtocol.validDriveMode(trigger.value);
+        }
         return false;
     }
 

@@ -23,7 +23,10 @@ import com.google.android.material.button.MaterialButton;
 
 import ru.big.town.common.CustomVoiceCommandProtocol;
 import ru.big.town.common.ScenarioProtocol;
+import ru.big.town.common.WallpaperProtocol;
 import ru.big.town.restoremode.R;
+import ru.big.town.restoremode.appearance.AppearanceSettings;
+import ru.big.town.restoremode.appearance.WallpaperStore;
 import ru.big.town.restoremode.integration.GlobalVars;
 import ru.big.town.restoremode.scenarios.ScenarioStore;
 import ru.big.town.restoremode.settings.core.SettingsSection;
@@ -471,6 +474,15 @@ public final class ScenarioSettingsPage {
                                     save();
                                 }));
         buttons.addView(light);
+        MaterialButton driveMode = actionButton("Режим движения");
+        driveMode.setOnClickListener(view -> pickOne("Переход в режим движения",
+                ScenarioProtocol.DRIVE_MODES.toArray(new String[0]), index -> {
+                    scenario.triggers.add(new ScenarioStore.Trigger(
+                            ScenarioProtocol.TRIGGER_DRIVE_MODE,
+                            ScenarioProtocol.DRIVE_MODES.get(index), ""));
+                    save();
+                }));
+        buttons.addView(driveMode);
         block.addView(buttons);
         if (scenario.triggers.isEmpty()) {
             block.addView(
@@ -516,6 +528,9 @@ public final class ScenarioSettingsPage {
     }
 
     private static String describe(ScenarioStore.Trigger trigger) {
+        if (ScenarioProtocol.TRIGGER_DRIVE_MODE.equals(trigger.type)) {
+            return "Переход в режим движения: " + trigger.value;
+        }
         if (ScenarioProtocol.TRIGGER_GEAR.equals(trigger.type)) {
             return "Селектор: " + trigger.value;
         }
@@ -929,6 +944,13 @@ public final class ScenarioSettingsPage {
             }
             sections.add(new ActionNode(group.title + " (" + total + ")", null, children));
         }
+        List<ActionNode> wallpapers = new ArrayList<>();
+        for (AppearanceSettings.Wallpaper wallpaper : WallpaperStore.available(preferences)) {
+            wallpapers.add(new ActionNode(wallpaper.title,
+                    WallpaperProtocol.ACTION_PREFIX + wallpaper.key, null));
+        }
+        sections.add(new ActionNode("Оформление", null, java.util.Collections.singletonList(
+                new ActionNode("Сменить обои", null, wallpapers))));
         return sections;
     }
 
@@ -1179,6 +1201,11 @@ public final class ScenarioSettingsPage {
     }
 
     private String actionTitle(String action) {
+        if (WallpaperProtocol.handles(action)) {
+            AppearanceSettings.Wallpaper wallpaper = WallpaperStore.find(
+                    preferences, WallpaperProtocol.wallpaperId(action));
+            return "Сменить обои: " + (wallpaper == null ? "недоступны" : wallpaper.title);
+        }
         for (VoiceCommandCatalog.Command command : VoiceCommands.load(activity)) {
             if (command.action.equals(action)) {
                 return command.title;

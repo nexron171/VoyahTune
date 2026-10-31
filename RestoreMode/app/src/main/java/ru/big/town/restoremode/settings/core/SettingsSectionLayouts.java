@@ -149,7 +149,8 @@ public final class SettingsSectionLayouts {
         APP_SCALE,
         APPLICATION_STARTUP,
         SCREEN_BRIGHTNESS,
-        TURN_SOUND
+        TURN_SOUND,
+        APPEARANCE
     }
 
     static final class Item {
@@ -174,6 +175,8 @@ public final class SettingsSectionLayouts {
         switch (section) {
             case MAIN:
                 return MAIN;
+            case APPEARANCE:
+                return new Item[] {dynamic(DynamicContent.APPEARANCE)};
             case VEHICLE:
                 return VEHICLE;
             case APPS:

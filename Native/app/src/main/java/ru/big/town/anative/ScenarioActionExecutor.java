@@ -6,6 +6,8 @@ import android.os.Looper;
 import android.os.ResultReceiver;
 import android.os.SystemClock;
 
+import ru.big.town.common.WallpaperProtocol;
+
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -36,6 +38,10 @@ final class ScenarioActionExecutor {
     void execute(String action, Completion completion) {
         if (action == null || action.isEmpty()) {
             completion.onFinished(false, "Пустое действие");
+            return;
+        }
+        if (WallpaperProtocol.handles(action)) {
+            setWallpaper(action, completion);
             return;
         }
         // Разовые OEM-записи сидений и окон: после отправки их нельзя откатить или отменить.
@@ -119,6 +125,22 @@ final class ScenarioActionExecutor {
                                 error[0] == null
                                         ? null
                                         : "Не удалось отправить команду автомобилю"));
+    }
+
+    private void setWallpaper(String action, Completion completion) {
+        String[] error = {"Не удалось сменить обои"};
+        ApplyEngine.postIndependentUserCommand("scenario wallpaper", () -> {
+            try {
+                Bundle result = service.getContentResolver().call(
+                        android.net.Uri.parse("content://" + WallpaperProtocol.AUTHORITY),
+                        WallpaperProtocol.METHOD_SET, WallpaperProtocol.wallpaperId(action), null);
+                if (result != null && result.getBoolean(WallpaperProtocol.RESULT_APPLIED)) {
+                    error[0] = null;
+                }
+            } catch (RuntimeException exception) {
+                android.util.Log.w("ScenarioWallpaper", "Wallpaper change failed", exception);
+            }
+        }, () -> completion.onFinished(error[0] == null, error[0]));
     }
 
     /** Открытие приложения через сплит-хост на физическом экране (как в Full-ветке голоса). */
