@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:text="Подсказки и другие звуки выбранных приложений используют громкость навигации. Музыка приглушается на время воспроизведения и возвращается после него. После изменения списка перезапустите выбранные приложения."
+    android:textColor="#97a6bc"
+    android:textSize="17sp"
+    android:includeFontPadding="false" />

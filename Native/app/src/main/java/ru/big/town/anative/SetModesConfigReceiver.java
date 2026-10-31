@@ -9,6 +9,7 @@ import android.util.Log;
 
 import ru.big.town.common.ClusterNavigationSettings;
 import ru.big.town.common.DockIconStyle;
+import ru.big.town.common.NavigationAudioSettings;
 
 import java.lang.reflect.Method;
 
@@ -116,6 +117,16 @@ public class SetModesConfigReceiver extends BroadcastReceiver {
             context.sendBroadcast(reload);
             SetModesReceiverDynamic.sendWinReload(context);
             Log.i(TAG, "FULLSCREEN_APPS_CONFIG зеркалирован + dock/window reload");
+        } else if (NavigationAudioSettings.ACTION_CONFIG.equals(action)) {
+            String packages =
+                    NavigationAudioSettings.normalizeCsv(
+                            intent.getStringExtra(NavigationAudioSettings.EXTRA_PACKAGES));
+            if (!Settings.Global.putString(
+                    context.getContentResolver(),
+                    NavigationAudioSettings.GLOBAL_PACKAGES,
+                    packages)) {
+                Log.e(TAG, "Navigation audio configuration was not saved");
+            }
         } else if ("ru.big.town.anative.APP_DPI_CONFIG".equals(action)) {
             SetModesReceiverDynamic.mirrorAppDpi(context, intent);
             SetModesReceiverDynamic.sendWinReload(context);

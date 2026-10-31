@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="34dp"
+    android:layout_marginBottom="16dp"
+    android:text="Звук через навигационный канал"
+    android:textColor="#f3f5fa"
+    android:textSize="27sp"
+    android:includeFontPadding="false" />

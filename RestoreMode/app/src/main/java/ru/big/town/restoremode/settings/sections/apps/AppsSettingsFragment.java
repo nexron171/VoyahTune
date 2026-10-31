@@ -14,10 +14,12 @@ import androidx.lifecycle.ViewModelProvider;
 
 import ru.big.town.common.ClusterNavigationSettings;
 import ru.big.town.common.DockIconStyle;
+import ru.big.town.common.NavigationAudioSettings;
 import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.apps.AppDpiStore;
 import ru.big.town.restoremode.apps.DockLongPressAction;
 import ru.big.town.restoremode.apps.FullscreenAppStore;
+import ru.big.town.restoremode.apps.NavigationAudioAppStore;
 import ru.big.town.restoremode.apps.split.SplitStore;
 import ru.big.town.restoremode.dashboard.tiles.TileOrderStore;
 import ru.big.town.restoremode.integration.config.SplitConfigSync;
@@ -33,7 +35,10 @@ import ru.big.town.restoremode.settings.ui.list.SettingsList;
 import ru.big.town.restoremode.settings.ui.preview.SettingsPreviewView;
 import ru.big.town.restoremode.settings.ui.style.SettingsDesign;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 public final class AppsSettingsFragment extends SettingsSectionFragment {
     @Override
@@ -289,6 +294,85 @@ public final class AppsSettingsFragment extends SettingsSectionFragment {
         refreshSettingsRows();
     }
 
+    private void selectNavigationAudioApps(View view) {
+        android.content.pm.PackageManager manager = requireContext().getPackageManager();
+        android.content.Intent launcher =
+                new android.content.Intent(android.content.Intent.ACTION_MAIN)
+                        .addCategory(android.content.Intent.CATEGORY_LAUNCHER);
+        Map<String, String> labels = new LinkedHashMap<>();
+        for (android.content.pm.ResolveInfo info : manager.queryIntentActivities(launcher, 0)) {
+            String packageName = info.activityInfo.packageName;
+            int uid = info.activityInfo.applicationInfo.uid;
+            if (uid >= 10000
+                    && uid < 100000
+                    && NavigationAudioSettings.isSelectablePackage(packageName)) {
+                labels.put(packageName, info.loadLabel(manager).toString());
+            }
+        }
+        List<String> selected = NavigationAudioAppStore.load(preferences);
+        for (String packageName : selected) labels.putIfAbsent(packageName, packageName);
+        List<String> packages = new ArrayList<>(labels.keySet());
+        packages.sort((first, second) -> labels.get(first).compareToIgnoreCase(labels.get(second)));
+        CharSequence[] items = new CharSequence[packages.size()];
+        boolean[] checked = new boolean[packages.size()];
+        for (int index = 0; index < packages.size(); index++) {
+            String packageName = packages.get(index);
+            items[index] = labels.get(packageName);
+            checked[index] = selected.contains(packageName);
+        }
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(
+                        requireContext(), R.style.SettingsDialog)
+                .setTitle("Звук через навигационный канал")
+                .setMultiChoiceItems(
+                        items,
+                        checked,
+                        (dialog, index, enabled) -> {
+                            String packageName = packages.get(index);
+                            if (enabled && !selected.contains(packageName))
+                                selected.add(packageName);
+                            if (!enabled) selected.remove(packageName);
+                        })
+                .setPositiveButton(
+                        "Сохранить", (dialog, which) -> saveNavigationAudioApps(selected))
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
+    private void saveNavigationAudioApps(List<String> packages) {
+        NavigationAudioAppStore.save(preferences, packages);
+        SplitConfigSync.pushNavigationAudio(requireContext(), preferences);
+        refreshSettingsRows();
+    }
+
+    private View navigationAudioRow(LinearLayout parent, String packageName) {
+        View row =
+                LayoutInflater.from(requireContext())
+                        .inflate(R.layout.item_app_shortcut, parent, false);
+        TextView label = row.findViewById(R.id.shortcutLabel);
+        android.widget.ImageView icon = row.findViewById(R.id.shortcutIco);
+        icon.setImageResource(R.drawable.settings_icon_sound);
+        String name = packageName;
+        try {
+            android.content.pm.PackageManager manager = requireContext().getPackageManager();
+            name =
+                    manager.getApplicationLabel(manager.getApplicationInfo(packageName, 0))
+                            .toString();
+        } catch (android.content.pm.PackageManager.NameNotFoundException removed) {
+            // Keep removed applications visible until the user clears their selection.
+        }
+        label.setText(name);
+        ImageButton delete = row.findViewById(R.id.shortcutDelete);
+        delete.setContentDescription("Вернуть обычный звуковой канал");
+        delete.setOnClickListener(
+                view -> {
+                    List<String> packages = NavigationAudioAppStore.load(preferences);
+                    packages.remove(packageName);
+                    saveNavigationAudioApps(packages);
+                });
+        SettingsDesign.styleTree(row);
+        return row;
+    }
+
     private void onAddSplitPreset(View v) {
         java.util.List<SplitStore.Preset> list = SplitStore.load(preferences);
         list.add(new SplitStore.Preset());
@@ -539,6 +623,7 @@ public final class AppsSettingsFragment extends SettingsSectionFragment {
             count.setText("Сплитов: " + SplitStore.load(preferences).size());
         }
         bindClick(R.id.buttonAddFullscreenApp, this::onAddFullscreenApp);
+        bindClick(R.id.buttonSelectNavigationAudioApps, this::selectNavigationAudioApps);
         bindClick(R.id.buttonAddSplit, this::onAddSplitPreset);
     }
 
@@ -564,10 +649,12 @@ public final class AppsSettingsFragment extends SettingsSectionFragment {
 
     @Override
     protected View decorateSettingsRow(int layout, View row) {
-        if (layout == R.layout.settings_apps_fullscreen_description) {
+        if (layout == R.layout.settings_apps_fullscreen_description
+                || layout == R.layout.settings_apps_navigation_audio_description) {
             return SettingsPanels.appSelectionPanel(row, true, false);
         }
-        if (layout == R.layout.settings_apps_add_fullscreen_app) {
+        if (layout == R.layout.settings_apps_add_fullscreen_app
+                || layout == R.layout.settings_apps_select_navigation_audio) {
             return SettingsPanels.appSelectionPanel(row, false, true);
         }
         return row;
@@ -611,6 +698,14 @@ public final class AppsSettingsFragment extends SettingsSectionFragment {
                         "fullscreen",
                         false,
                         this::fullscreenRow);
+                break;
+            case NAVIGATION_AUDIO_APPS:
+                SettingsPanels.addAppChipRows(
+                        rows,
+                        NavigationAudioAppStore.load(preferences),
+                        "navigation-audio",
+                        false,
+                        this::navigationAudioRow);
                 break;
             case SPLITS:
                 List<SplitStore.Preset> presets = SplitStore.load(preferences);

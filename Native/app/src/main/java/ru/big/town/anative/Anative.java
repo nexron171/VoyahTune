@@ -1,12 +1,14 @@
 package ru.big.town.anative;
 
 import android.app.Application;
-import android.content.res.Configuration;
+import android.content.Context;
+import android.util.Log;
 
 public class Anative extends Application {
-    // Called when the application is starting, before any other application objects have been created.
-    // Overriding this method is totally optional!
-    @Override protected void attachBaseContext(android.content.Context base) {
+    private NavigationAudioController navigationAudio;
+
+    @Override
+    protected void attachBaseContext(Context base) {
         super.attachBaseContext(base);
         if (new java.io.File("/data/local/bin/voyahtune-update.block").exists()) {
             android.os.Process.killProcess(android.os.Process.myPid());
@@ -19,21 +21,16 @@ public class Anative extends Application {
         super.onCreate();
         GlobalVars.SAVE_CONTEXT = getBaseContext();
 
-        // Required initialization logic here!
+        try {
+            navigationAudio = new NavigationAudioController(this);
+        } catch (RuntimeException failure) {
+            Log.w("NavigationAudio", "Cannot start application audio routing", failure);
+        }
     }
 
-    // Called by the system when the device configuration changes while your component is running.
-    // Overriding this method is totally optional!
     @Override
-    public void onConfigurationChanged(Configuration newConfig) {
-        super.onConfigurationChanged(newConfig);
-    }
-
-    // This is called when the overall system is running low on memory,
-    // and would like actively running processes to tighten their belts.
-    // Overriding this method is totally optional!
-    @Override
-    public void onLowMemory() {
-        super.onLowMemory();
+    public void onTerminate() {
+        if (navigationAudio != null) navigationAudio.close();
+        super.onTerminate();
     }
 }

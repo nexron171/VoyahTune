@@ -1,17 +1,10 @@
 package ru.voyahtune.agent.runtime;
 
 import android.content.Context;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
+
 import ru.voyahtune.agent.HookBridge;
 import ru.voyahtune.agent.HookRegistry;
 import ru.voyahtune.agent.modules.AccModule;
@@ -23,6 +16,7 @@ import ru.voyahtune.agent.modules.AndroidDrivePersistence;
 import ru.voyahtune.agent.modules.AndroidDriveResetPlatform;
 import ru.voyahtune.agent.modules.AndroidLauncherPlatform;
 import ru.voyahtune.agent.modules.AndroidMultidisplayPlatform;
+import ru.voyahtune.agent.modules.AndroidNavigationAudioPlatform;
 import ru.voyahtune.agent.modules.AndroidNavigationSourcePlatform;
 import ru.voyahtune.agent.modules.AndroidRdsPlatform;
 import ru.voyahtune.agent.modules.AndroidStatusBarPlatform;
@@ -32,17 +26,28 @@ import ru.voyahtune.agent.modules.ClientGeometryModule;
 import ru.voyahtune.agent.modules.ClientInputMethodModule;
 import ru.voyahtune.agent.modules.ClientModule;
 import ru.voyahtune.agent.modules.ClusterModule;
-import ru.voyahtune.agent.modules.OemMediaModule;
 import ru.voyahtune.agent.modules.DriveResetModule;
 import ru.voyahtune.agent.modules.KeyboardModule;
 import ru.voyahtune.agent.modules.LauncherModule;
 import ru.voyahtune.agent.modules.MultidisplayModule;
+import ru.voyahtune.agent.modules.NavigationAudioModule;
 import ru.voyahtune.agent.modules.NavigationSourceModule;
+import ru.voyahtune.agent.modules.OemMediaModule;
 import ru.voyahtune.agent.modules.PhoneModule;
 import ru.voyahtune.agent.modules.RdsModule;
 import ru.voyahtune.agent.modules.StatusBarModule;
 import ru.voyahtune.agent.modules.SteeringModule;
 import ru.voyahtune.agent.modules.VehicleAirModule;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 public final class AgentRuntime {
     private static final boolean USE_DIRECT_HOOKS = true;
@@ -62,15 +67,21 @@ public final class AgentRuntime {
     private volatile Throwable quiesceFailure;
     private volatile Throwable reportedFailure;
 
-    private AgentRuntime(JSONObject metadata, ClassLoader targetLoader, Object applicationContext) throws Exception {
+    private AgentRuntime(JSONObject metadata, ClassLoader targetLoader, Object applicationContext)
+            throws Exception {
         bootId = metadata.getString("bootId");
         pid = metadata.getInt("pid");
         uid = metadata.getInt("uid");
         startTicks = metadata.getString("startTicks");
         nativeId = metadata.getString("nativeId");
         runtimeId = metadata.getString("runtimeId");
-        if (bootId.isEmpty() || pid <= 0 || uid < 0 || startTicks.isEmpty() || nativeId.isEmpty() || runtimeId.isEmpty()
-            || targetLoader == null) {
+        if (bootId.isEmpty()
+                || pid <= 0
+                || uid < 0
+                || startTicks.isEmpty()
+                || nativeId.isEmpty()
+                || runtimeId.isEmpty()
+                || targetLoader == null) {
             throw new IllegalArgumentException("Invalid native runtime identity");
         }
         identity = bootId + ":" + pid + ":" + startTicks + ":" + uid;
@@ -82,84 +93,182 @@ public final class AgentRuntime {
             callers = new AndroidCallers(targetLoader);
             hooks = new HookRegistry(HookBridge.backend(callers));
         }
-        executor = Executors.newSingleThreadScheduledExecutor(task -> {
-            Thread thread = new Thread(task, "VoyahTuneAgent");
-            thread.setDaemon(true);
-            return thread;
-        });
-        ModuleScope.Scheduler scheduler = (delay, task) -> {
-            var future = executor.schedule(task, delay, TimeUnit.MILLISECONDS);
-            return () -> future.cancel(false);
-        };
-        session = new AgentSession(identity, code -> new ModuleRuntime(code, scheduler, id -> {
-            if (id.equals("phone")) {
-                return new PhoneModule(methods, hooks);
-            }
-            if (id.equals("windows")) {
-                return AndroidWindowsPlatform.create((Context) applicationContext, methods, hooks);
-            }
-            if (id.equals("launcher")) {
-                return new LauncherModule(
-                    methods, hooks, new AndroidLauncherPlatform((Context) applicationContext, methods));
-            }
-            if (id.startsWith("client.")) {
-                Context context = (Context) applicationContext;
-                if (context == null || !id.equals("client." + context.getPackageName()))
-                    throw new IllegalArgumentException("Client module package mismatch");
-                return new ClientModule(
-                    new ClientGeometryModule(methods, hooks, new AndroidClientGeometryPlatform(context, methods)),
-                    new ClientInputMethodModule(methods, hooks, new AndroidClientInputMethodPlatform(methods)));
-            }
-            if (id.equals("steering")) {
-                return new SteeringModule(methods, hooks, (Context) applicationContext);
-            }
-            if (id.equals("apollo")) {
-                return new ApolloModule(methods, hooks, bootId);
-            }
-            if (id.equals("keyboard-en") || id.equals("keyboard-ru")) {
-                return new KeyboardModule(id, methods, hooks, (Context) applicationContext);
-            }
-            if (id.equals("multidisplay")) {
-                return new MultidisplayModule(
-                    methods, hooks, new AndroidMultidisplayPlatform((Context) applicationContext, methods));
-            }
-            if (id.equals("vehicle-air")) {
-                return new VehicleAirModule(methods, hooks, new AndroidDrivePersistence((Context) applicationContext),
-                    failure
-                    -> android.util.Log.e(
-                        "vt_vehicle_air", "Drive persistence failed after accepted OEM send", failure));
-            }
-            if (id.equals("drive-reset")) {
-                return new DriveResetModule(
-                    methods, hooks, new AndroidDriveResetPlatform((Context) applicationContext, methods));
-            }
-            if (id.equals("acc")) {
-                return new AccModule(methods, hooks, new AndroidAccPlatform((Context) applicationContext, methods));
-            }
-            if (id.equals("yandex-navigation") || id.equals("dgis-navigation")) {
-                return new NavigationSourceModule(
-                    id, methods, hooks, new AndroidNavigationSourcePlatform((Context) applicationContext));
-            }
-            if (id.equals("statusbar")) {
-                return new StatusBarModule(
-                    methods, hooks, new AndroidStatusBarPlatform((Context) applicationContext, methods));
-            }
-            if (id.equals("rds")) {
-                return new RdsModule(methods, hooks, new AndroidRdsPlatform((Context) applicationContext, methods));
-            }
-            if (id.equals("cluster")) {
-                return new ClusterModule(
-                    methods, hooks, new AndroidClusterPlatform((Context) applicationContext, methods, hooks));
-            }
-            if (id.equals("oem-media")) {
-                return new OemMediaModule((Context) applicationContext, methods, hooks);
-            }
-            throw new UnsupportedOperationException("Java module unavailable: " + id);
-        }));
+        executor =
+                Executors.newSingleThreadScheduledExecutor(
+                        task -> {
+                            Thread thread = new Thread(task, "VoyahTuneAgent");
+                            thread.setDaemon(true);
+                            return thread;
+                        });
+        ModuleScope.Scheduler scheduler =
+                (delay, task) -> {
+                    var future = executor.schedule(task, delay, TimeUnit.MILLISECONDS);
+                    return () -> future.cancel(false);
+                };
+        session =
+                new AgentSession(
+                        identity,
+                        code ->
+                                new ModuleRuntime(
+                                        code,
+                                        scheduler,
+                                        id -> {
+                                            if (id.equals("phone")) {
+                                                return new PhoneModule(methods, hooks);
+                                            }
+                                            if (id.equals("windows")) {
+                                                return AndroidWindowsPlatform.create(
+                                                        (Context) applicationContext,
+                                                        methods,
+                                                        hooks);
+                                            }
+                                            if (id.equals("launcher")) {
+                                                return new LauncherModule(
+                                                        methods,
+                                                        hooks,
+                                                        new AndroidLauncherPlatform(
+                                                                (Context) applicationContext,
+                                                                methods));
+                                            }
+                                            if (id.startsWith("navigation-audio.")) {
+                                                Context context = (Context) applicationContext;
+                                                if (context == null
+                                                        || !id.equals(
+                                                                "navigation-audio."
+                                                                        + context
+                                                                                .getPackageName())) {
+                                                    throw new IllegalArgumentException(
+                                                            "Navigation audio module package"
+                                                                + " mismatch");
+                                                }
+                                                return new NavigationAudioModule(
+                                                        methods,
+                                                        hooks,
+                                                        new AndroidNavigationAudioPlatform(
+                                                                context, methods));
+                                            }
+                                            if (id.startsWith("client.")) {
+                                                Context context = (Context) applicationContext;
+                                                if (context == null
+                                                        || !id.equals(
+                                                                "client."
+                                                                        + context.getPackageName()))
+                                                    throw new IllegalArgumentException(
+                                                            "Client module package mismatch");
+                                                return new ClientModule(
+                                                        new ClientGeometryModule(
+                                                                methods,
+                                                                hooks,
+                                                                new AndroidClientGeometryPlatform(
+                                                                        context, methods)),
+                                                        new ClientInputMethodModule(
+                                                                methods,
+                                                                hooks,
+                                                                new AndroidClientInputMethodPlatform(
+                                                                        methods)));
+                                            }
+                                            if (id.equals("steering")) {
+                                                return new SteeringModule(
+                                                        methods,
+                                                        hooks,
+                                                        (Context) applicationContext);
+                                            }
+                                            if (id.equals("apollo")) {
+                                                return new ApolloModule(methods, hooks, bootId);
+                                            }
+                                            if (id.equals("keyboard-en")
+                                                    || id.equals("keyboard-ru")) {
+                                                return new KeyboardModule(
+                                                        id,
+                                                        methods,
+                                                        hooks,
+                                                        (Context) applicationContext);
+                                            }
+                                            if (id.equals("multidisplay")) {
+                                                return new MultidisplayModule(
+                                                        methods,
+                                                        hooks,
+                                                        new AndroidMultidisplayPlatform(
+                                                                (Context) applicationContext,
+                                                                methods));
+                                            }
+                                            if (id.equals("vehicle-air")) {
+                                                return new VehicleAirModule(
+                                                        methods,
+                                                        hooks,
+                                                        new AndroidDrivePersistence(
+                                                                (Context) applicationContext),
+                                                        failure ->
+                                                                android.util.Log.e(
+                                                                        "vt_vehicle_air",
+                                                                        "Drive persistence failed"
+                                                                            + " after accepted OEM"
+                                                                            + " send",
+                                                                        failure));
+                                            }
+                                            if (id.equals("drive-reset")) {
+                                                return new DriveResetModule(
+                                                        methods,
+                                                        hooks,
+                                                        new AndroidDriveResetPlatform(
+                                                                (Context) applicationContext,
+                                                                methods));
+                                            }
+                                            if (id.equals("acc")) {
+                                                return new AccModule(
+                                                        methods,
+                                                        hooks,
+                                                        new AndroidAccPlatform(
+                                                                (Context) applicationContext,
+                                                                methods));
+                                            }
+                                            if (id.equals("yandex-navigation")
+                                                    || id.equals("dgis-navigation")) {
+                                                return new NavigationSourceModule(
+                                                        id,
+                                                        methods,
+                                                        hooks,
+                                                        new AndroidNavigationSourcePlatform(
+                                                                (Context) applicationContext));
+                                            }
+                                            if (id.equals("statusbar")) {
+                                                return new StatusBarModule(
+                                                        methods,
+                                                        hooks,
+                                                        new AndroidStatusBarPlatform(
+                                                                (Context) applicationContext,
+                                                                methods));
+                                            }
+                                            if (id.equals("rds")) {
+                                                return new RdsModule(
+                                                        methods,
+                                                        hooks,
+                                                        new AndroidRdsPlatform(
+                                                                (Context) applicationContext,
+                                                                methods));
+                                            }
+                                            if (id.equals("cluster")) {
+                                                return new ClusterModule(
+                                                        methods,
+                                                        hooks,
+                                                        new AndroidClusterPlatform(
+                                                                (Context) applicationContext,
+                                                                methods,
+                                                                hooks));
+                                            }
+                                            if (id.equals("oem-media")) {
+                                                return new OemMediaModule(
+                                                        (Context) applicationContext,
+                                                        methods,
+                                                        hooks);
+                                            }
+                                            throw new UnsupportedOperationException(
+                                                    "Java module unavailable: " + id);
+                                        }));
     }
 
-    public static synchronized String start(String metadata, ClassLoader targetLoader, Object applicationContext)
-        throws Exception {
+    public static synchronized String start(
+            String metadata, ClassLoader targetLoader, Object applicationContext) throws Exception {
         JSONObject parsed = new JSONObject(metadata);
         if (current == null) {
             current = new AgentRuntime(parsed, targetLoader, applicationContext);
@@ -173,7 +282,8 @@ public final class AgentRuntime {
         AgentRuntime runtime = requireCurrent();
         try {
             JSONObject value = new JSONObject(plan);
-            Set<String> fields = Set.of("schema", "runtimeId", "revision", "modules", "configuration");
+            Set<String> fields =
+                    Set.of("schema", "runtimeId", "revision", "modules", "configuration");
             Iterator<String> keys = value.keys();
             while (keys.hasNext()) {
                 if (!fields.contains(keys.next())) {
@@ -200,7 +310,8 @@ public final class AgentRuntime {
                 modules.add((String) module);
             }
             if (modules.contains("keyboard-en") && modules.contains("keyboard-ru")) {
-                throw new IllegalArgumentException("Only one keyboard language module can own a process");
+                throw new IllegalArgumentException(
+                        "Only one keyboard language module can own a process");
             }
             Map<String, String> configuration = new HashMap<>();
             JSONObject settings = value.getJSONObject("configuration");
@@ -218,7 +329,11 @@ public final class AgentRuntime {
                 throw new IllegalArgumentException("Runtime ID required");
             }
             runtime.session.apply(
-                runtime.identity, (String) code, ((Number) revision).longValue(), modules, configuration);
+                    runtime.identity,
+                    (String) code,
+                    ((Number) revision).longValue(),
+                    modules,
+                    configuration);
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20);
             while (runtime.session.snapshot().phase == ModuleRuntime.Phase.STARTING) {
                 if (System.nanoTime() >= deadline)
@@ -255,7 +370,8 @@ public final class AgentRuntime {
         }
         if (failure != null) {
             runtime.quiesceFailure = failure;
-            return runtime.statusValue("restart-required", runtime.describeFailure(failure)).toString();
+            return runtime.statusValue("restart-required", runtime.describeFailure(failure))
+                    .toString();
         }
         return status();
     }
@@ -294,10 +410,11 @@ public final class AgentRuntime {
         JSONObject modules = new JSONObject();
         if (snapshot != null) {
             for (String id : snapshot.modules) {
-                modules.put(id,
-                    override != null                                  ? override
-                        : snapshot.phase == ModuleRuntime.Phase.READY ? "active"
-                                                                      : state);
+                modules.put(
+                        id,
+                        override != null
+                                ? override
+                                : snapshot.phase == ModuleRuntime.Phase.READY ? "active" : state);
             }
             if (snapshot.failure != null && error == null) {
                 error = describeFailure(snapshot.failure);
@@ -319,15 +436,19 @@ public final class AgentRuntime {
     }
 
     private boolean matches(JSONObject metadata) throws Exception {
-        return bootId.equals(metadata.getString("bootId")) && pid == metadata.getInt("pid")
-            && uid == metadata.getInt("uid") && startTicks.equals(metadata.getString("startTicks"))
-            && nativeId.equals(metadata.getString("nativeId")) && runtimeId.equals(metadata.getString("runtimeId"));
+        return bootId.equals(metadata.getString("bootId"))
+                && pid == metadata.getInt("pid")
+                && uid == metadata.getInt("uid")
+                && startTicks.equals(metadata.getString("startTicks"))
+                && nativeId.equals(metadata.getString("nativeId"))
+                && runtimeId.equals(metadata.getString("runtimeId"));
     }
 
     private static AgentRuntime requireCurrent() {
         AgentRuntime runtime = current;
         if (runtime == null) {
-            throw new IllegalStateException("Native bootstrap has not initialized the Java runtime");
+            throw new IllegalStateException(
+                    "Native bootstrap has not initialized the Java runtime");
         }
         return runtime;
     }

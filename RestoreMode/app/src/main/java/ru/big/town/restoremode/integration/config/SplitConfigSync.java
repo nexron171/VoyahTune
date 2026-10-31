@@ -6,11 +6,13 @@ import android.content.SharedPreferences;
 
 import ru.big.town.common.ClusterNavigationSettings;
 import ru.big.town.common.DockIconStyle;
+import ru.big.town.common.NavigationAudioSettings;
 import ru.big.town.common.ScenarioProtocol;
 import ru.big.town.common.ScreenBrightnessSettings;
 import ru.big.town.restoremode.apps.AppDpiStore;
 import ru.big.town.restoremode.apps.DockLongPressAction;
 import ru.big.town.restoremode.apps.FullscreenAppStore;
+import ru.big.town.restoremode.apps.NavigationAudioAppStore;
 import ru.big.town.restoremode.apps.split.SplitStore;
 import ru.big.town.restoremode.scenarios.ScenarioStore;
 import ru.big.town.restoremode.vehicle.steering.SteeringActionStore;
@@ -28,6 +30,7 @@ public final class SplitConfigSync {
 
     public static void pushAll(Context context, SharedPreferences prefs) {
         pushFullscreenApps(context, prefs);
+        pushNavigationAudio(context, prefs);
         pushAppDpi(context, prefs, null, 0);
         pushDock(context, prefs);
         pushSteering(context, prefs);
@@ -74,6 +77,14 @@ public final class SplitConfigSync {
         Intent i = configIntent("ru.big.town.anative.FULLSCREEN_APPS_CONFIG");
         i.putExtra("packagesCsv", FullscreenAppStore.snapshotCsv(prefs));
         context.sendBroadcast(i);
+    }
+
+    public static void pushNavigationAudio(Context context, SharedPreferences preferences) {
+        Intent intent = configIntent(NavigationAudioSettings.ACTION_CONFIG);
+        intent.putExtra(
+                NavigationAudioSettings.EXTRA_PACKAGES,
+                NavigationAudioAppStore.snapshot(preferences));
+        context.sendBroadcast(intent);
     }
 
     /**

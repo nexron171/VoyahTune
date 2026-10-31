@@ -31,6 +31,8 @@ func (workers *agentWorkers) refreshDynamic() {
 	dynamic := nativeDynamicAgents(
 		manager.readSetting(workers.context, "voyahtune_fullscreen_apps"),
 	)
+	audio := navigationAudioAgents(manager.readSetting(workers.context, "voyahtune_navigation_audio_apps"))
+	dynamic = append(dynamic, navigationAudioProcesses(manager.procRoot, audio)...)
 	wanted := make(map[string]bool, len(dynamic))
 	for _, agent := range dynamic {
 		wanted[agent.ID] = true

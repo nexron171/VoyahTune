@@ -41,6 +41,8 @@ def check_candidate(stage, configured_gson=None):
     runtime_classes.mkdir()
     test_classes.mkdir()
     sources = sorted((ROOT / "java/src/main/java").rglob("*.java"))
+    for name in ("NavigationAudioSettings", "NavigationAudioRouting"):
+        sources.append(ROOT.parents[1] / f"SharedAndroid/src/main/java/ru/big/town/common/{name}.java")
     subprocess.run([
         str(java / "bin/javac"), "--release", "11", "-classpath", str(android),
         "-d", str(runtime_classes), *map(str, sources),
@@ -73,6 +75,7 @@ def check_candidate(stage, configured_gson=None):
                  "ru.voyahtune.contracts.WindowGeometryModuleTest",
                  "ru.voyahtune.contracts.ClientGeometryModuleTest",
                  "ru.voyahtune.contracts.ClientInputMethodModuleTest",
+                 "ru.voyahtune.contracts.NavigationAudioModuleTest",
                  "ru.voyahtune.contracts.ClientInputMethodPlatformTest",
                  "ru.voyahtune.contracts.LauncherCatalogTest",
                  "ru.voyahtune.contracts.SystemServerClassesTest",
