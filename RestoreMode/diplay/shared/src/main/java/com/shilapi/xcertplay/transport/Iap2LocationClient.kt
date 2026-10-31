@@ -31,9 +31,9 @@ data class CarPlayLocationFix(
     }
 }
 
-/** Supplies location data only while the phone has subscribed to iAP2 LocationInformation. */
+/** Supplies location data for an active iAP2 reporting stream. */
 interface Iap2LocationProvider : AutoCloseable {
-    /** The 0xFFFA parameter ids, i.e. the sentence types the iPhone asked for; called before [start]. */
+    /** Sentence selectors from 0xFFFA or the local continuous policy; called before [start]. */
     fun onRequested(components: Set<Int>) = Unit
 
     /** Starts location updates and returns whether at least one source was subscribed. */
@@ -143,9 +143,8 @@ object NmeaLocationEncoder {
 }
 
 /**
- * Accessory side of iAP2 LocationInformation on one link: starts on 0xFFFA, sends the latest fix
- * on every [tick] (about once a second), and stops on 0xFFFC. Subscription state belongs to this
- * iAP2 link: a request received on Bluetooth must never authorize output on the Wi-Fi tunnel.
+ * Reports location on one iAP2 link, either continuously or under the phone's subscription.
+ * The control loop owns startup and provider cleanup for its authenticated link.
  */
 class Iap2LocationReporter(
     private val provider: Iap2LocationProvider?,
@@ -153,29 +152,50 @@ class Iap2LocationReporter(
     private val nanoTime: () -> Long = System::nanoTime,
 ) {
     private var active = false
+    private var continuous = false
     private var sentLogged = false
     private var lastAttemptNanos = 0L
+
+    /** Starts locally selected data without waiting for a phone subscription. */
+    fun startContinuous(vehicleSpeedEnabled: Boolean, send: (Iap2Frame) -> Unit) {
+        if (continuous) return
+        continuous = true
+        val components = buildSet {
+            add(1)
+            add(2)
+            if (vehicleSpeedEnabled) add(Iap2LocationMessages.VEHICLE_SPEED_DATA)
+        }
+        provider?.onRequested(components)
+        onProgress("iap2 continuous location-information components=$components")
+        start(send)
+    }
 
     /** Handles 0xFFFA/0xFFFC; returns false for any other message. */
     fun handle(frame: Iap2Frame, send: (Iap2Frame) -> Unit): Boolean = when (frame.messageId) {
         Iap2LocationMessages.START_LOCATION_INFORMATION -> {
             val components = Iap2LocationMessages.requestedComponents(frame)
             onProgress("iap2 rx=0xfffa start-location-information components=$components")
-            provider?.onRequested(components)
-            start(send)
+            if (!continuous) {
+                provider?.onRequested(components)
+                start(send)
+            }
             true
         }
         Iap2LocationMessages.STOP_LOCATION_INFORMATION -> {
             onProgress("iap2 rx=0xfffc stop-location-information")
-            active = false
-            sentLogged = false
-            provider?.stop()
+            if (continuous) {
+                onProgress("iap2 continuous location-information remains active")
+            } else {
+                active = false
+                sentLogged = false
+                provider?.stop()
+            }
             true
         }
         else -> false
     }
 
-    /** Sends the latest fix once a second while this link has an active request. */
+    /** Sends the latest fix once a second while this link is reporting. */
     fun tick(send: (Iap2Frame) -> Unit) {
         if (active && sinceAttemptMillis() >= POLL_INTERVAL_MILLIS) sendLatest(send)
     }

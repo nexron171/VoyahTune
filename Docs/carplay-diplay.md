@@ -1071,14 +1071,22 @@ OEM transaction проверять на целевой прошивке, не з
 `CarPlayHostActivity`: при available включены identification.locationInformationEnabled,
 vehicleSpeedEnabled и config.locationReportingEnabled. `VehicleSpeedLocationProvider`
 оборачивает GPS provider, а если GPS выключен — пустой provider. Благодаря этому
-`$PASCD` со скоростью/передачей доступен по запросу iPhone без выдачи фиктивных GPS-координат.
+`$PASCD` со скоростью/передачей передаётся без выдачи фиктивных GPS-координат.
 Не связывать включение скорости Voyah с пользовательским GPS-переключателем.
 Цепочка отправки: `CarPlayVehicleBridge` принимает STATE/122 и передаёт значения
 в `VoyahCarPlayIntegration.update` → `VoyahVehicleSpeedSource`; host подключает
 `VehicleSpeedLocationProvider` к `CarPlayController`. Как USB, так и Wi-Fi iAP2
-используют `Iap2LocationReporter`: запрос 0xFFFA с selector 4 включает скорость,
-`tick` передаёт NUL-terminated `$PASCD` в параметре 0 сообщения 0xFFFB, 0xFFFC
-останавливает отправку. Выдача пакета не доказывает его использование навигацией iPhone.
+используют `Iap2LocationReporter.startContinuous` после identification/MFi внутри
+control loop: при объявленном location включаются GGA/RMC и, при vehicleSpeedEnabled,
+PASCD (selector 4), без ожидания 0xFFFA. Первая доступная точка передаётся сразу,
+затем `tick` отправляет данные раз в секунду в параметре 0 сообщения 0xFFFB.
+В постоянном режиме 0xFFFA/0xFFFC не меняют состав данных, частоту и активность потока;
+provider останавливается в finally при завершении канала. Bluetooth bootstrap
+не объявляет location и не запускает поток. GPS-переключатель и отсев устаревших
+координат/скорости сохраняются. Это принудительная отправка со стороны магнитолы,
+а не подтверждённое принудительное использование данных навигацией iPhone.
+`Iap2LocationReporterTest` проверяет старт без запроса, Start/Stop без сброса частоты,
+отсутствие данных/provider, PASCD без GPS и отсев устаревшей скорости.
 [CarPlayVehicleSpeedPipelineTest](../RestoreMode/app/src/test/java/ru/big/town/restoremode/carplay/CarPlayVehicleSpeedPipelineTest.kt)
 проверяет настоящий Messenger-приёмник bridge и сериализацию iAP2 с тестовой службой
 Native: 36 км/ч → 10 м/с, передачу/контрольную сумму, запрос/остановку, stale/unknown
@@ -1961,7 +1969,8 @@ DEFAULT_OEM_LABEL в AirPlayPersistence — **Voyah Free**, в том числе
 | [common/src/main/java/com/shilapi/xcertplay/CarPlayDock.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/CarPlayDock.kt)<br>[common/src/main/res/values/strings.xml](../RestoreMode/diplay/common/src/main/res/values/strings.xml)<br>[common/src/main/res/values-ru/strings.xml](../RestoreMode/diplay/common/src/main/res/values-ru/strings.xml) | Загрузка трёх тем из сохранённого выбора; AUTOMATIC/unknown → DRIVER_SIDE, DUAL_SIDES требует Ultra+fullscreen. UI выбора принадлежит VoyahTune (§5/6). |
 | [shared/src/main/java/com/shilapi/xcertplay/airplay/AirPlayConfig.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/airplay/AirPlayConfig.kt)<br>[shared/src/main/java/com/shilapi/xcertplay/airplay/AirPlayInfoPlist.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/airplay/AirPlayInfoPlist.kt)<br>[shared/src/main/java/com/shilapi/xcertplay/airplay/AirPlaySession.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/airplay/AirPlaySession.kt) | Optional vehicleTheme, единый mainDisplayIdentifier для main/HID/view area; VSP-панели для климата или темы; main определяется type=110, обычные UUID остаются прежними (§6). |
 | [shared/src/main/java/com/shilapi/xcertplay/transport/Iap2IdentificationClient.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/transport/Iap2IdentificationClient.kt)<br>[shared/src/main/java/com/shilapi/xcertplay/iap2/catalog/Iap2Endpoint.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/iap2/catalog/Iap2Endpoint.kt) | Optional carPlayThemeAssetIdentifier, поле 6 в USB group 16 и wireless group 24; encoder и schema должны изменяться вместе (§6). |
-| [shared/src/main/java/com/shilapi/xcertplay/transport/Iap2WiredControlClient.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/transport/Iap2WiredControlClient.kt)<br>[shared/src/main/java/com/shilapi/xcertplay/transport/Iap2WirelessControlClient.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/transport/Iap2WirelessControlClient.kt)<br>[shared/src/main/java/com/shilapi/xcertplay/orchestration/CarPlayController.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/orchestration/CarPlayController.kt) | Controller переносит выбранную тему в identification и оба startSession; endpoints передают SDK/clusterAsset существующему кодеку (§6). |
+| [shared/src/main/java/com/shilapi/xcertplay/transport/Iap2LocationClient.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/transport/Iap2LocationClient.kt)<br>[shared/src/test/java/com/shilapi/xcertplay/transport/Iap2LocationReporterTest.kt](../RestoreMode/diplay/shared/src/test/java/com/shilapi/xcertplay/transport/Iap2LocationReporterTest.kt) | Постоянная отправка GGA/RMC и объявленной PASCD без подписки iPhone; Start/Stop не прерывают поток. Тесты частоты, отсутствующих и устаревших данных (§5). |
+| [shared/src/main/java/com/shilapi/xcertplay/transport/Iap2WiredControlClient.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/transport/Iap2WiredControlClient.kt)<br>[shared/src/main/java/com/shilapi/xcertplay/transport/Iap2WirelessControlClient.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/transport/Iap2WirelessControlClient.kt)<br>[shared/src/main/java/com/shilapi/xcertplay/orchestration/CarPlayController.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/orchestration/CarPlayController.kt) | Controller переносит выбранную тему в identification и оба startSession; endpoints передают SDK/clusterAsset существующему кодеку (§6). Оба control client запускают постоянную передачу location после MFi и останавливают provider при завершении канала (§5). |
 | [common/src/main/java/com/shilapi/xcertplay/AirPlayPersistence.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/AirPlayPersistence.kt) | initializeAutomaticNavigationAudioChannel: 0 только при отсутствии нового ключа; DEFAULT_OEM_LABEL=Voyah Free; location_reporting_enabled по умолчанию true; carplay_night_mode по умолчанию VEHICLE/voyah_light без перезаписи явного выбора; observer изменения carplay_night_mode; wireless_hotspot_mode по умолчанию WIFI_P2P; буфер музыки 1000 мс только без сохранённого значения, сохранение наследования общего буфера для USB (§5). |
 | [common/src/test/java/com/shilapi/xcertplay/HotspotModeMigrationTest.kt](../RestoreMode/diplay/common/src/test/java/com/shilapi/xcertplay/HotspotModeMigrationTest.kt) | Ожидание Wi-Fi Direct для новой установки; сохранить проверки legacy-миграции и ранее выбранного режима. |
 | [common/src/main/java/com/shilapi/xcertplay/CarPlayNightMode.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/CarPlayNightMode.kt)<br>[common/src/main/java/com/shilapi/xcertplay/AppAppearance.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/AppAppearance.kt) | VEHICLE/voyah_light: локальный системный fallback и независимое оформление приложения (§6). |

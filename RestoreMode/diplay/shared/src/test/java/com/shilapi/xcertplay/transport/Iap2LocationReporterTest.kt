@@ -27,6 +27,83 @@ class Iap2LocationReporterTest {
         Iap2LocationReporter(source, { progress += it }, nanoTime = { nowMillis * 1_000_000 })
 
     @Test
+    fun continuousReportingStartsWithoutPhoneRequestAndKeepsItsCadence() {
+        val link = link()
+        link.startContinuous(vehicleSpeedEnabled = true) { sent += it }
+
+        assertTrue(provider.started)
+        assertEquals(setOf(1, 2, 4), provider.requested)
+        assertEquals(1, sent.size)
+        nowMillis += 400
+        link.handle(stop) { sent += it }
+        link.handle(start) { sent += it }
+        link.tick { sent += it }
+
+        assertTrue(provider.started)
+        assertEquals(1, sent.size)
+        assertEquals(600L, link.pollTimeout(60_000L))
+        nowMillis += 600
+        link.tick { sent += it }
+        assertEquals(2, sent.size)
+    }
+
+    @Test
+    fun continuousReportingSendsFreshVehicleSpeedWithoutGpsOrPhoneRequest() {
+        provider.nmea = null
+        val speed = VoyahVehicleSpeedSource { nowMillis }
+        val combined = VehicleSpeedLocationProvider(provider, speed)
+        val link = Iap2LocationReporter(combined, {}, nanoTime = { nowMillis * 1_000_000 })
+        link.startContinuous(vehicleSpeedEnabled = true) { sent += it }
+        assertTrue(sent.isEmpty())
+
+        nowMillis = 1_000
+        speed.update(36, 3, nowMillis)
+        link.tick { sent += it }
+        val nmea = sent.single().body().asList().single().payload.toString(Charsets.UTF_8)
+        assertTrue(nmea.startsWith("\$PASCD,1.000,C,D,0,1,0.00,10.000*"))
+
+        nowMillis = 2_000
+        speed.update(36, 3, nowMillis)
+        nowMillis = 6_000
+        link.tick { sent += it }
+        assertEquals(1, sent.size)
+
+        combined.stop()
+        assertFalse(provider.started)
+        speed.update(36, 3, nowMillis)
+        assertEquals(null, combined.latestNmea())
+    }
+
+    @Test
+    fun continuousReportingDoesNotEnableUndeclaredSpeed() {
+        val link = link()
+        link.startContinuous(vehicleSpeedEnabled = false) { sent += it }
+        link.handle(start) { sent += it }
+
+        assertEquals(setOf(1, 2), provider.requested)
+        assertEquals(1, sent.size)
+    }
+
+    @Test
+    fun continuousReportingWaitsForRealDataAndToleratesMissingProvider() {
+        provider.nmea = null
+        val link = link()
+        link.startContinuous(vehicleSpeedEnabled = true) { sent += it }
+        assertTrue(sent.isEmpty())
+
+        provider.nmea = "\$GPRMC\r\n"
+        nowMillis += 1_000
+        link.tick { sent += it }
+        assertEquals(1, sent.size)
+
+        val unavailable = Iap2LocationReporter(null, {})
+        unavailable.startContinuous(vehicleSpeedEnabled = true) { sent += it }
+        unavailable.tick { sent += it }
+        assertEquals(1, sent.size)
+        assertEquals(60_000L, unavailable.pollTimeout(60_000L))
+    }
+
+    @Test
     fun aLinkSendsOnlyBetweenItsOwnStartAndStop() {
         val link = link()
 

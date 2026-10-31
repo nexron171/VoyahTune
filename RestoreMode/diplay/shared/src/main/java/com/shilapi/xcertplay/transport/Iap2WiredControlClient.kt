@@ -64,6 +64,9 @@ class Iap2WiredControlClient(
         val location = Iap2LocationReporter(locationProvider, onProgress)
         val vehicleStatus = Iap2VehicleStatusReporter(vehicleStatusProvider, onProgress)
         try {
+            if (identified.locationInformationEnabled) {
+                location.startContinuous(identified.vehicleSpeedEnabled) { send(it, deadlineNanos) }
+            }
             while (true) {
                 val remaining = remainingMillis(deadlineNanos)
                 if (remaining == 0L) {
