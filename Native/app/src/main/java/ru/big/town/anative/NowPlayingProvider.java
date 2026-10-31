@@ -45,8 +45,8 @@ public class NowPlayingProvider extends ContentProvider {
     private static final String EXTRA_HANDLED = "handled";
 
     public static final String AUTHORITY = "ru.big.town.anative.nowplaying";
-    public static final Uri CONTENT_URI  = Uri.parse("content://" + AUTHORITY);
-    public static final Uri ART_URI      = Uri.parse("content://" + AUTHORITY + "/art");
+    public static final Uri CONTENT_URI = Uri.parse("content://" + AUTHORITY);
+    public static final Uri ART_URI = Uri.parse("content://" + AUTHORITY + "/art");
 
     public static final String[] COLUMNS = {
             "title",     // 0
@@ -62,11 +62,26 @@ public class NowPlayingProvider extends ContentProvider {
     };
 
     @Override
-    public boolean onCreate() { return true; }
+    public boolean onCreate() {
+        return true;
+    }
 
     @Override
     public Cursor query(Uri uri, String[] projection, String selection,
-                        String[] selectionArgs, String sortOrder) {
+            String[] selectionArgs, String sortOrder) {
+        if (uri != null && "oem".equals(uri.getLastPathSegment())) {
+            OemMediaBrowserService.Snapshot snapshot = OemMediaBrowserService.snapshot();
+            String[] columns = java.util.Arrays.copyOf(COLUMNS, COLUMNS.length + 1);
+            columns[COLUMNS.length] = "rememberedSource";
+            MatrixCursor cursor = new MatrixCursor(columns);
+            cursor.addRow(new Object[] {
+                    snapshot.title, snapshot.artist, snapshot.album, snapshot.packageName,
+                    snapshot.appLabel, snapshot.state, snapshot.position, snapshot.duration,
+                    snapshot.hasArt ? 1 : 0, NowPlayingService.sUpdatedAt,
+                    snapshot.rememberedSource ? 1 : 0,
+            });
+            return cursor;
+        }
         MatrixCursor c = new MatrixCursor(COLUMNS);
         c.addRow(new Object[]{
                 NowPlayingService.sTitle,
@@ -187,7 +202,18 @@ public class NowPlayingProvider extends ContentProvider {
         return null;
     }
 
-    @Override public Uri insert(Uri uri, ContentValues values) { return null; }
-    @Override public int delete(Uri uri, String selection, String[] selectionArgs) { return 0; }
-    @Override public int update(Uri uri, ContentValues values, String selection, String[] selectionArgs) { return 0; }
+    @Override
+    public Uri insert(Uri uri, ContentValues values) {
+        return null;
+    }
+
+    @Override
+    public int delete(Uri uri, String selection, String[] selectionArgs) {
+        return 0;
+    }
+
+    @Override
+    public int update(Uri uri, ContentValues values, String selection, String[] selectionArgs) {
+        return 0;
+    }
 }

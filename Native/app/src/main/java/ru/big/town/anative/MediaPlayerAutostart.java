@@ -6,14 +6,11 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.media.AudioManager;
 import android.media.session.MediaController;
 import android.media.session.MediaSessionManager;
 import android.media.session.PlaybackState;
 import android.os.Handler;
-import android.os.SystemClock;
 import android.util.Log;
-import android.view.KeyEvent;
 
 import java.util.List;
 
@@ -170,6 +167,10 @@ final class MediaPlayerAutostart {
 
     private static boolean requestPlayback(
             Context context, String packageName, Handler handler, int attemptsLeft) {
+        if (!packageName.equals(lastPlayer(context))) {
+            Log.i(TAG, "playback request superseded: " + packageName);
+            return false;
+        }
         try {
             MediaSessionManager manager =
                     (MediaSessionManager)
@@ -208,36 +209,8 @@ final class MediaPlayerAutostart {
                     PLAYBACK_RETRY_MS);
             return false;
         }
-        dispatchPlayKey(context);
+        Log.w(TAG, "player did not publish a session: " + packageName);
         return false;
-    }
-
-    private static void dispatchPlayKey(Context context) {
-        try {
-            AudioManager audioManager =
-                    (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
-            if (audioManager == null) {
-                return;
-            }
-            long now = SystemClock.uptimeMillis();
-            audioManager.dispatchMediaKeyEvent(
-                    new KeyEvent(
-                            now,
-                            now,
-                            KeyEvent.ACTION_DOWN,
-                            KeyEvent.KEYCODE_MEDIA_PLAY,
-                            0));
-            audioManager.dispatchMediaKeyEvent(
-                    new KeyEvent(
-                            now,
-                            now,
-                            KeyEvent.ACTION_UP,
-                            KeyEvent.KEYCODE_MEDIA_PLAY,
-                            0));
-            Log.i(TAG, "media play key dispatched");
-        } catch (RuntimeException error) {
-            Log.w(TAG, "media play key failed: " + error.getMessage());
-        }
     }
 
     private static boolean isPackagePlaying(Context context, String packageName) {

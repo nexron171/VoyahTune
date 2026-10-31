@@ -32,6 +32,7 @@ import ru.voyahtune.agent.modules.ClientGeometryModule;
 import ru.voyahtune.agent.modules.ClientInputMethodModule;
 import ru.voyahtune.agent.modules.ClientModule;
 import ru.voyahtune.agent.modules.ClusterModule;
+import ru.voyahtune.agent.modules.OemMediaModule;
 import ru.voyahtune.agent.modules.DriveResetModule;
 import ru.voyahtune.agent.modules.KeyboardModule;
 import ru.voyahtune.agent.modules.LauncherModule;
@@ -149,6 +150,9 @@ public final class AgentRuntime {
             if (id.equals("cluster")) {
                 return new ClusterModule(
                     methods, hooks, new AndroidClusterPlatform((Context) applicationContext, methods, hooks));
+            }
+            if (id.equals("oem-media")) {
+                return new OemMediaModule((Context) applicationContext, methods, hooks);
             }
             throw new UnsupportedOperationException("Java module unavailable: " + id);
         }));

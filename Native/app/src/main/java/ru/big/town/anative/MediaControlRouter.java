@@ -162,12 +162,29 @@ final class MediaControlRouter {
      * are not returned to a caller which cannot deliver them.
      */
     static boolean control(Context context, MediaControlPolicy.Command command) {
+        return control(context, command, null);
+    }
+
+    static MediaController controllerForPackage(List<MediaController> controllers, String packageName) {
+        MediaController inactive = null;
+        if (controllers == null || packageName == null || packageName.isEmpty()) return null;
+        for (MediaController controller : controllers) {
+            if (!packageName.equals(safePackage(controller))) continue;
+            if (isActiveState(safePlaybackState(controller))) return controller;
+            if (inactive == null) inactive = controller;
+        }
+        return inactive;
+    }
+
+    static boolean control(Context context, MediaControlPolicy.Command command, String packageName) {
         if (context == null || command == null) return false;
         try {
             MediaSessionManager msm =
                     (MediaSessionManager) context.getSystemService(Context.MEDIA_SESSION_SERVICE);
             if (msm == null) return false;
-            MediaController target = selectController(msm.getActiveSessions(null));
+            List<MediaController> controllers = msm.getActiveSessions(null);
+            MediaController target = packageName == null ? selectController(controllers)
+                    : controllerForPackage(controllers, packageName);
             if (target == null) return false;
             PlaybackState state = safePlaybackState(target);
             MediaController.TransportControls controls = target.getTransportControls();
@@ -181,6 +198,9 @@ final class MediaControlRouter {
                     break;
                 case PAUSE_ONLY:
                     handled = !isPlaying(state) || pauseTarget(target, controls, state);
+                    break;
+                case PLAY_ONLY:
+                    handled = isPlaying(state) || playTarget(target, controls, state);
                     break;
                 case NEXT:
                     handled =

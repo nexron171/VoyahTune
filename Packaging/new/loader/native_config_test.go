@@ -39,10 +39,12 @@ func TestCompiledRuntimeStartsWithoutExternalManifests(t *testing.T) {
 	for _, agent := range config.Agents {
 		targets[agent.ID] = agent
 	}
-	if config.Code.RuntimeID != "java-test" || len(targets) != 16 ||
+	if config.Code.RuntimeID != "java-test" || len(targets) != 19 ||
 		targets["launcher"].Target != "com.qinggan.app.launcher" ||
 		targets["acc"].MaxAttempts != 4 || targets["cluster"].TimeoutSeconds != 45 ||
-		targets["keyboard-ru"].Condition != "keyboard-ru" || len(targets["rds"].Modules) != 2 {
+		targets["keyboard-ru"].Condition != "keyboard-ru" || len(targets["rds"].Modules) != 2 ||
+		targets["cluster-media"].Condition != "oem-media-od" ||
+		targets["cluster-media"].Target != "com.qinggan.instrumentcard" {
 		t.Fatal(config)
 	}
 	for _, name := range []string{"agents.json", "runtime-manifest.json"} {

@@ -60,6 +60,7 @@ def check_candidate(stage, configured_gson=None):
                  "ru.voyahtune.contracts.ApolloModuleTest", "ru.voyahtune.contracts.MultidisplayModuleTest",
                  "ru.voyahtune.contracts.VehicleAirModuleTest", "ru.voyahtune.contracts.DriveResetModuleTest",
                  "ru.voyahtune.contracts.AccModuleTest", "ru.voyahtune.contracts.NavigationSourceModuleTest",
+                 "ru.voyahtune.contracts.OemNowPlayingTest",
                  "ru.voyahtune.contracts.StatusBarModuleTest", "ru.voyahtune.contracts.RadioControllersTest",
                  "ru.voyahtune.contracts.RdsTuneOwnershipTest", "ru.voyahtune.contracts.RdsModuleTest",
                  "ru.voyahtune.contracts.ClusterModuleTest", "ru.voyahtune.contracts.ClusterCardControllerTest",

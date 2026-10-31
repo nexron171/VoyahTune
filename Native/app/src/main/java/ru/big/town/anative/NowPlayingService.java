@@ -159,6 +159,7 @@ public class NowPlayingService extends Service {
     static volatile long sPosition = 0L;
     static volatile long sDuration = 0L;
     static volatile boolean sHasArt = false;
+    static volatile long sArtRevision = System.currentTimeMillis();
     static volatile long sUpdatedAt = 0L;
 
     /** Файл обложки (приватный для Native; наружу отдаётся через NowPlayingProvider.openFile). */
@@ -653,6 +654,8 @@ public class NowPlayingService extends Service {
                 sUpdatedAt = System.currentTimeMillis();
 
                 LastMediaSessionStore.remember(this, pkg, state);
+                OemMediaBrowserService.publish(this, pkg, appLabel, title, artist, album, state, position, duration,
+                        hasArt, sArtRevision);
             }
             enqueueSnapshotBroadcast(buildSnapshotIntent());
 
@@ -687,6 +690,8 @@ public class NowPlayingService extends Service {
             sDuration = 0L;
             sHasArt = false;
             sUpdatedAt = System.currentTimeMillis();
+            OemMediaBrowserService.publish(this, "", "", "", "", "", PlaybackState.STATE_NONE,
+                    0, 0, false, sArtRevision);
         }
     }
 
@@ -739,9 +744,10 @@ public class NowPlayingService extends Service {
             }
             return false;
         }
-        // PlaybackState может приходить много раз в секунду с тем же объектом MediaMetadata/Bitmap.
-        // PNG-compress + перезапись файла нужны только при реальной смене обложки.
-        if (bmp == lastWrittenArt && f.exists() && f.length() > 0L) {
+        // Binder may recreate the same bitmap on every playback-position update.
+        boolean unchanged = bmp == lastWrittenArt
+                || (lastWrittenArt != null && !lastWrittenArt.isRecycled() && bmp.sameAs(lastWrittenArt));
+        if (unchanged && f.exists() && f.length() > 0L) {
             return isActiveInstance();
         }
         File pending = new File(getFilesDir(), ART_FILE_NAME + "." + instanceGeneration + ".tmp");
@@ -758,6 +764,7 @@ public class NowPlayingService extends Service {
                 }
                 Os.rename(pending.getAbsolutePath(), f.getAbsolutePath());
                 lastWrittenArt = bmp;
+                sArtRevision++;
                 return true;
             }
         } catch (Exception e) {
@@ -807,6 +814,11 @@ public class NowPlayingService extends Service {
             stopping = true;
             activeWatcherEpoch++;
             MediaControlRouter.deactivateObserverGeneration(instanceGeneration);
+        }
+        synchronized (SNAPSHOT_COMMIT_LOCK) {
+            if (ACTIVE_INSTANCE.get() == instanceGeneration) {
+                resetSnapshotForNewInstance();
+            }
         }
         MediaRefreshDelivery refreshes = mediaRefreshes;
         mediaRefreshes = null;
