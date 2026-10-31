@@ -16,6 +16,21 @@ import java.util.List;
 
 public class ScenarioPolicyTest {
 
+    @Test
+    public void driveModeTriggerRequiresAnActualTransitionToTheSelectedMode() {
+        ScenarioDefinition definition = scenario(
+                Collections.singletonList(new ScenarioDefinition.Trigger(
+                        ScenarioProtocol.TRIGGER_DRIVE_MODE, "SPORT", "")),
+                Collections.emptyList());
+        assertFalse(ScenarioPolicy.matchesDriveMode(definition, null, "SPORT"));
+        assertFalse(ScenarioPolicy.matchesDriveMode(definition, "SPORT", "SPORT"));
+        assertFalse(ScenarioPolicy.matchesDriveMode(definition, "SPORT", "ECO"));
+        assertFalse(ScenarioPolicy.matchesDriveMode(definition, "SPORT", null));
+        assertFalse(ScenarioPolicy.matchesDriveMode(definition, "unknown", "SPORT"));
+        assertTrue(ScenarioPolicy.matchesDriveMode(definition, "ECO", "SPORT"));
+        assertTrue(ScenarioPolicy.conditionsMet(definition, snapshot(1, 0, 50, null, 0, 1)));
+    }
+
     private static ScenarioDefinition scenario(
             List<ScenarioDefinition.Trigger> triggers,
             List<ScenarioDefinition.Condition> conditions) {

@@ -8,6 +8,7 @@ import ru.big.town.common.ScenarioProtocol;
 import java.util.Calendar;
 import java.util.Collections;
 import java.util.Map;
+import java.util.function.Consumer;
 import java.util.function.IntConsumer;
 
 /** Event, snapshot and action boundaries shared by the scenario engine and emulator. */
@@ -20,6 +21,8 @@ interface ScenarioEnvironment {
 
     Subscription doors(Handler handler, IntConsumer listener);
 
+    Subscription driveMode(Handler handler, Consumer<String> listener);
+
     Subscription light(IntConsumer listener);
 
     ScenarioPolicy.Snapshot snapshot(ScenarioDefinition scenario);
@@ -31,6 +34,8 @@ interface ScenarioEnvironment {
     static ScenarioEnvironment oem(SetModesService service) {
         return new ScenarioEnvironment() {
             private final ScenarioActionExecutor actions = new ScenarioActionExecutor(service);
+            // Triggers and conditions consume the same ordered feedback stream.
+            private volatile String driveMode;
 
             @Override
             public Subscription gear(Handler handler, IntConsumer listener) {
@@ -51,6 +56,28 @@ interface ScenarioEnvironment {
             }
 
             @Override
+            public Subscription driveMode(Handler handler, Consumer<String> listener) {
+                CanBusEventHub.Subscription subscription = CanBusEventHub.get(service).subscribe(
+                        CanBusEventRouter.INTEREST_CONNECTION | CanBusEventRouter.INTEREST_VEHICLE_STATE,
+                        new int[] {ModeFeedbackDecoder.DRIVE_MODE_VSTATE_ID},
+                        handler,
+                        event -> {
+                            if (event.kind == CanBusEvent.Kind.CONNECTION
+                                    || event.kind == CanBusEvent.Kind.CONNECTION_LOST) {
+                                driveMode = null;
+                                listener.accept(null);
+                            } else if (event.kind == CanBusEvent.Kind.VEHICLE_STATE
+                                    && event.first == ModeFeedbackDecoder.DRIVE_MODE_VSTATE_ID) {
+                                ModeFeedbackDecoder.Feedback feedback =
+                                        ModeFeedbackDecoder.decode(event.first, event.second);
+                                driveMode = feedback == null ? null : feedback.mode;
+                                listener.accept(driveMode);
+                            }
+                        });
+                return subscription::close;
+            }
+
+            @Override
             public Subscription light(IntConsumer listener) {
                 LightSensorService.LevelListener callback = listener::accept;
                 LightSensorService.addLevelListener(callback);
@@ -60,14 +87,7 @@ interface ScenarioEnvironment {
             @Override
             public ScenarioPolicy.Snapshot snapshot(ScenarioDefinition scenario) {
                 VehicleStateControllers states = VehicleStateControllers.get(service);
-                String drive = null;
-                if (ScenarioPolicy.hasCondition(scenario, ScenarioProtocol.CONDITION_DRIVE_MODE)) {
-                    ModeFeedbackDecoder.Feedback feedback =
-                            ModeFeedbackDecoder.decode(
-                                    ModeFeedbackDecoder.DRIVE_MODE_VSTATE_ID,
-                                    states.latestDriveModeValue());
-                    if (feedback != null) drive = feedback.mode;
-                }
+                String drive = driveMode;
                 Integer soc = null;
                 if (ScenarioPolicy.hasCondition(scenario, ScenarioProtocol.CONDITION_SOC)) {
                     OemVehicleStateTransport.StateKey key =

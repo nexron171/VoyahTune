@@ -15,6 +15,16 @@ import java.util.List;
 
 public class ScenarioStoreTest {
 
+    @Test
+    public void driveModeTriggerAcceptsKnownModesAndRejectsUnknownValues() {
+        for (String mode : ScenarioProtocol.DRIVE_MODES) {
+            assertTrue(ScenarioStore.validTrigger(new ScenarioStore.Trigger(
+                    ScenarioProtocol.TRIGGER_DRIVE_MODE, mode, "")));
+        }
+        assertFalse(ScenarioStore.validTrigger(new ScenarioStore.Trigger(
+                ScenarioProtocol.TRIGGER_DRIVE_MODE, "unknown", "")));
+    }
+
     private static ScenarioStore.Scenario scenario(String id, String name) {
         ScenarioStore.Scenario scenario = new ScenarioStore.Scenario();
         scenario.id = id;

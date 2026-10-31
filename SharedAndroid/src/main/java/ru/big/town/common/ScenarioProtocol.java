@@ -57,6 +57,7 @@ public final class ScenarioProtocol {
     public static final String TRIGGER_GEAR = "gear";
     public static final String TRIGGER_DOOR = "door";
     public static final String TRIGGER_LIGHT = "light";
+    public static final String TRIGGER_DRIVE_MODE = "driveMode";
 
     /** Ребро срабатывания для триггера двери. */
     public static final String KEY_EDGE = "edge";

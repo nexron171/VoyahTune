@@ -20,6 +20,7 @@ final class MockScenarioEnvironment implements ScenarioEnvironment {
     private final GearStateController gears = new GearStateController(main);
     private final DoorsStateController doors = new DoorsStateController(main);
     private final CopyOnWriteArrayList<IntConsumer> lightListeners = new CopyOnWriteArrayList<>();
+    private final CopyOnWriteArrayList<Consumer<String>> driveListeners = new CopyOnWriteArrayList<>();
     private final VehiclePort.Subscription subscription;
     private int light = 7, temperature = 12, minutes = 600, day = 1;
     private String drive = "COMFORT";
@@ -37,9 +38,11 @@ final class MockScenarioEnvironment implements ScenarioEnvironment {
                             if (event.kind == CanBusEvent.Kind.CONNECTION) {
                                 gears.accept(vehicle.gear);
                                 doors.accept(vehicle.doors);
+                                for (Consumer<String> listener : driveListeners) listener.accept(drive);
                             } else if (event.kind == CanBusEvent.Kind.CONNECTION_LOST) {
                                 gears.reset();
                                 doors.reset();
+                                for (Consumer<String> listener : driveListeners) listener.accept(null);
                             } else if (event.kind == CanBusEvent.Kind.GEAR)
                                 gears.accept(event.first);
                             else if (event.kind == CanBusEvent.Kind.DOOR)
@@ -60,6 +63,14 @@ final class MockScenarioEnvironment implements ScenarioEnvironment {
     }
 
     @Override
+    public Subscription driveMode(Handler handler, Consumer<String> listener) {
+        Consumer<String> delivery = value -> handler.post(() -> listener.accept(value));
+        driveListeners.add(delivery);
+        delivery.accept(vehicle.connected ? drive : null);
+        return () -> driveListeners.remove(delivery);
+    }
+
+    @Override
     public Subscription light(IntConsumer listener) {
         lightListeners.add(listener);
         listener.accept(light);
@@ -74,7 +85,13 @@ final class MockScenarioEnvironment implements ScenarioEnvironment {
         temperature = data.getInt("temperature", temperature);
         minutes = data.getInt("minutes", minutes);
         day = data.getInt("day", day);
-        drive = data.getString("driveMode", drive);
+        String selectedDrive = data.getString("driveMode", drive);
+        if (!java.util.Objects.equals(drive, selectedDrive)) {
+            drive = selectedDrive;
+            for (Consumer<String> listener : driveListeners) {
+                listener.accept(vehicle.connected ? drive : null);
+            }
+        }
         if (data.containsKey("light")) {
             light = data.getInt("light");
             for (IntConsumer listener : lightListeners) listener.accept(light);
@@ -111,7 +128,8 @@ final class MockScenarioEnvironment implements ScenarioEnvironment {
                     event("scenarioActionResult", action, accepted ? 1 : 0);
                     completion.onFinished(accepted, error);
                 };
-        if (SeatCommand.handles(action) || WindowCommand.handles(action))
+        if (SeatCommand.handles(action) || WindowCommand.handles(action)
+                || ru.big.town.common.WallpaperProtocol.handles(action))
             actions.execute(action, reply);
         else
             reply.onFinished(vehicle.connected && vehicle.accepted, "Simulated platform operation");
@@ -134,5 +152,6 @@ final class MockScenarioEnvironment implements ScenarioEnvironment {
     void close() {
         subscription.close();
         lightListeners.clear();
+        driveListeners.clear();
     }
 }
