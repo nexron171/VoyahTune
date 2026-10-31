@@ -185,6 +185,11 @@
             android:icon="@mipmap/ic_restoremode"
             android:launchMode="singleTask"
             android:exported="true">
+            <!-- Package-only launches prefer INFO before enumerating launcher entries. -->
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.INFO" />
+            </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 
