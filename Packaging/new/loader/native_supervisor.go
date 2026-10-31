@@ -27,22 +27,23 @@ type residentControl interface {
 }
 
 type nativeSupervisor struct {
-	runtimeDirectory string
-	stateDirectory   string
-	procRoot         string
-	boot             string
-	config           nativeLoaderConfig
-	status           *statusStore
-	engine           residentControl
-	quiesceOnce      sync.Once
-	mutex            sync.Mutex
-	agents           map[string]nativeAgentConfig
-	wanted           map[string]bool
-	apolloPath       string
-	readSetting      func(context.Context, string) string
-	readProduct      func(context.Context, string) string
-	updateBlock      string
-	migrationBoot    string
+	runtimeDirectory       string
+	stateDirectory         string
+	procRoot               string
+	boot                   string
+	config                 nativeLoaderConfig
+	status                 *statusStore
+	engine                 residentControl
+	quiesceOnce            sync.Once
+	mutex                  sync.Mutex
+	agents                 map[string]nativeAgentConfig
+	wanted                 map[string]bool
+	apolloPath             string
+	readSetting            func(context.Context, string) string
+	readProduct            func(context.Context, string) string
+	restartLauncherProcess func(agentwire.Target) error
+	updateBlock            string
+	migrationBoot          string
 }
 
 func (manager *nativeSupervisor) report(agent nativeAgentConfig, identity processIdentity, state, reason string, ack *agentwire.Status, modules []string) {
@@ -202,6 +203,11 @@ func (manager *nativeSupervisor) cycle(ctx context.Context, name string) {
 	ack, err := manager.engine.Ensure(operation, target, agentwire.Plan{Schema: 1, RuntimeID: target.RuntimeID, Modules: group.Modules, Configuration: configuration})
 	cancel()
 	if err != nil {
+		if state, reason, handled := manager.recoverLauncher(ctx, name, target, ack); handled {
+			manager.recordLauncherFailure(name, identity, reason)
+			reportAll(identity, state, reason)
+			return
+		}
 		state := "failed"
 		if errors.Is(err, agentwire.ErrRuntimeChanged) || errors.Is(err, resident.ErrRebootRequired) || errors.Is(err, resident.ErrRestartRequired) {
 			state = "restart-required"
@@ -516,4 +522,16 @@ func nativeControl(ctx context.Context, stateDirectory, procRoot, command string
 
 func writeControlResult(response lifecycle.ControlResponse) error {
 	return json.NewEncoder(os.Stdout).Encode(response)
+}
+
+func (manager *nativeSupervisor) recordLauncherFailure(name string, identity processIdentity, reason string) {
+	var record attemptRecord
+	if err := readJSON(manager.attemptPath(name), &record); err != nil || record.Boot != manager.boot || record.Identity != identity {
+		return
+	}
+	record.State = "restart-required"
+	record.LastError = reason
+	if err := writeAtomic(manager.attemptPath(name), record); err != nil {
+		log.Printf("persist launcher recovery: %v", err)
+	}
 }
