@@ -341,6 +341,8 @@ fn apply_with_signature_reset(shared: &Shared, allow_native_reset: bool) -> io::
         s.completed_steps = 0;
         s.total_steps = 8;
     })?;
+    device::wake(true)?;
+    crate::turn_sound::restore()?;
     prepare_system()?;
     let dns_choice = shared
         .lock()
@@ -350,7 +352,6 @@ fn apply_with_signature_reset(shared: &Shared, allow_native_reset: bool) -> io::
         .map_err(|e| invalid(e))?
         .dns_enabled;
     let dns_action = crate::dns::prepare(dns_choice)?;
-    device::wake(true)?;
 
     workflow::update(shared, |s| s.completed_steps = 1)?;
     // Persist the non-retryable boundary before blocking app launches or changing release files.

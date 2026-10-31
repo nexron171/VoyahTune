@@ -19,6 +19,7 @@ pub fn capabilities() -> Vec<&'static str> {
         "catalog-releases",
         "select-release",
         "application-log-v1",
+        "turn-sound-v1",
     ]
 }
 

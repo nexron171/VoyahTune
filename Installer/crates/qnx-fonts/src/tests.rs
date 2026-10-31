@@ -130,7 +130,7 @@ fn qconn_upload_checks_bytes_and_waits_for_launcher_completion() {
     fs::write(
         &path,
         r#"#!/usr/bin/env python3
-import hashlib, pathlib, re, sys
+import hashlib, json, pathlib, re, sys
 root = pathlib.Path(__file__).parent
 source = sys.stdin.buffer
 target = sys.stdout.buffer
@@ -166,7 +166,8 @@ elif service == 'service launcher':
     name = pathlib.Path(re.search("p='([^']+)'", request)[1]).name
     expected = re.search("hexdigest\(\)=='([^']+)'", request)[1]
     assert hashlib.sha256((root / name).read_bytes()).hexdigest() == expected
-    assert "'inspect','--model','H97X'" in request
+    arguments = json.loads(bytes.fromhex(re.search("sys.argv=json.loads\(bytes.fromhex\('([^']+)'", request)[1]))
+    assert arguments[1:] == ['inspect', '--model', 'H97X']
     send(b'OK 42\r\n<qconn-launcher>')
     assert line() == 'continue'
     send(b'OK\r\nVOYAHTUNE_NAVIGATION_FONT_RESULT {"ok":true}\n')
@@ -185,4 +186,52 @@ else:
     assert!(output.contains("VOYAHTUNE_NAVIGATION_FONT_RESULT {\"ok\":true}"));
     assert!(run_script(&endpoint, &script, "inspect", "H97C").is_err());
     assert!(run_script(&endpoint, &script, "arbitrary", "H97X").is_err());
+}
+
+#[test]
+fn launcher_delivers_complete_progress_lines_before_operation_finishes() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let (observed, received) = std::sync::mpsc::channel();
+    let peer = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut input = BufReader::new(stream.try_clone().unwrap());
+        stream.write_all(b"QCONN\r\n").unwrap();
+        let mut negotiation = [0; 6];
+        input.read_exact(&mut negotiation).unwrap();
+        stream.write_all(b"<qconn-broker>").unwrap();
+        assert_eq!(peer_line(&mut input), "service launcher");
+        stream.write_all(b"OK\r\n<qconn-launcher>").unwrap();
+        assert_eq!(peer_line(&mut input), "start/flags 8000 test");
+        stream.write_all(b"OK 42\r\n<qconn-launcher>").unwrap();
+        assert_eq!(peer_line(&mut input), "continue");
+        stream.write_all(b"VOYAHTUNE_TURN_SOUND_PROG").unwrap();
+        stream
+            .write_all(b"RESS {\"stage\":\"backup_di\"}\n")
+            .unwrap();
+        received.recv_timeout(Duration::from_secs(3)).unwrap();
+        stream.write_all(b"finished\n").unwrap();
+    });
+    let mut lines = Vec::new();
+    let output = Connection::open(&Endpoint::Tcp(address))
+        .unwrap()
+        .launch("test", &mut |line| {
+            lines.push(line.to_owned());
+            if line.contains("backup_di") {
+                observed.send(()).unwrap();
+            }
+        })
+        .unwrap();
+    peer.join().unwrap();
+    assert_eq!(
+        lines,
+        [
+            "VOYAHTUNE_TURN_SOUND_PROGRESS {\"stage\":\"backup_di\"}\n",
+            "finished\n"
+        ]
+    );
+    assert!(output.ends_with("finished\n"));
 }

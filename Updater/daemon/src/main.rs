@@ -12,6 +12,7 @@ mod release;
 mod restore_ui;
 mod state;
 mod telemetry;
+mod turn_sound;
 mod workflow;
 
 use fs2::FileExt;
@@ -160,6 +161,19 @@ fn run() -> io::Result<()> {
                 return Err(config::invalid("Root diagnostics only support status"));
             }
             match request {
+                protocol::Request::TurnSound { action, sound, volume, progress } => {
+                    let runtime = shared.lock().unwrap();
+                    if runtime.state.busy() || runtime.state.repair() {
+                        return Err(config::invalid("Дождитесь завершения установки или восстановления"));
+                    }
+                    turn_sound::call(&action, sound.as_deref().unwrap_or("original"), volume.unwrap_or(60), &mut |stage| {
+                        if progress {
+                            let event = json!({"schema":1,"ok":true,"event":"turn_sound_progress","stage":stage});
+                            // A disconnected UI must not interrupt a cluster transaction.
+                            let _ = writeln!(stream, "{event}");
+                        }
+                    })
+                }
                 protocol::Request::Status {} => {
                     let rt = shared.lock().unwrap();
                     let mut response = json!({"schema":1,"ok":true,"serviceVersion":env!("CARGO_PKG_VERSION"),

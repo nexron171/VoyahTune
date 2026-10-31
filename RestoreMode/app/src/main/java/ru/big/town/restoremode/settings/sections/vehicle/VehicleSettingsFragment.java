@@ -33,6 +33,7 @@ public final class VehicleSettingsFragment extends SettingsSectionFragment {
     }
 
     private ScreenBrightnessSettingsPage brightnessPage;
+    private TurnSoundSettingsPage turnSoundPage;
 
     private final BroadcastReceiver brightnessReceiver =
             new BroadcastReceiver() {
@@ -45,6 +46,16 @@ public final class VehicleSettingsFragment extends SettingsSectionFragment {
     @Override
     protected void addDynamicRows(
             List<SettingsList.Row> rows, SettingsSectionLayouts.DynamicContent kind) {
+        if (kind == SettingsSectionLayouts.DynamicContent.TURN_SOUND) {
+            if (!ru.big.town.common.VehiclePlatform.current().isH97XY()) return;
+            if (turnSoundPage == null) {
+                turnSoundPage =
+                        new TurnSoundSettingsPage(
+                                requireActivity(), preferences, this::refreshSettingsRows);
+            }
+            turnSoundPage.addRows(rows);
+            return;
+        }
         if (kind != SettingsSectionLayouts.DynamicContent.SCREEN_BRIGHTNESS) {
             super.addDynamicRows(rows, kind);
             return;
@@ -61,6 +72,8 @@ public final class VehicleSettingsFragment extends SettingsSectionFragment {
     @Override
     protected void onSectionViewDestroyed() {
         brightnessPage = null;
+        if (turnSoundPage != null) turnSoundPage.close();
+        turnSoundPage = null;
     }
 
     private RadioGroup autoLightGroup;

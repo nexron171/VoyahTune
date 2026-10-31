@@ -151,9 +151,10 @@ fn operation_steps(action: Action, options: InstallOptions) -> Vec<Step> {
     let mut steps = vec![
         ("preflight", "Подготовка файлов релиза"),
         ("root", "Получение системного доступа"),
+        ("updater-prepare", "Остановка OTA-службы и сохранение логов"),
         (
-            "updater-prepare",
-            "Остановка OTA-службы и сохранение логов",
+            "turn-sound-restore",
+            "Восстановление штатного звука поворотников",
         ),
         ("navigation-fonts-check", "Проверка тем приборки"),
     ];
@@ -291,11 +292,12 @@ mod tests {
         let steps = operation_steps(Action::Install, InstallOptions::default());
         let ids: Vec<_> = steps.iter().map(|step| step.id.as_str()).collect();
         assert_eq!(
-            &ids[..7],
+            &ids[..8],
             &[
                 "preflight",
                 "root",
                 "updater-prepare",
+                "turn-sound-restore",
                 "navigation-fonts-check",
                 "system",
                 "third-party-loaders",

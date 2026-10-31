@@ -8,6 +8,13 @@ pub const SOCKET_NAME: &str = "voyahtune_updater";
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Request {
     Status {},
+    TurnSound {
+        #[serde(default)]
+        progress: bool,
+        action: String,
+        sound: Option<String>,
+        volume: Option<u8>,
+    },
     GetSettings {},
     SetSettings {
         url: String,

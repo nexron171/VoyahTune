@@ -1,4 +1,6 @@
-//! Shared QNX navigation font operation for USB installation and on-device OTA.
+pub mod turn_sound;
+
+// Shared QNX transport for USB installation and on-device operations.
 
 use release_core::{Error, Result};
 use sha2::{Digest, Sha256};
@@ -255,7 +257,7 @@ impl Connection {
         Ok(())
     }
 
-    fn launch(&mut self, command: &str) -> Result<String> {
+    fn launch(&mut self, command: &str, output: &mut dyn FnMut(&str)) -> Result<String> {
         if !self
             .command("service launcher", LAUNCHER_PROMPT)?
             .contains("OK")
@@ -271,7 +273,20 @@ impl Connection {
             return Err(failure(response));
         }
         self.send("continue")?;
-        while self.receive()? {}
+        let mut processed = 0;
+        loop {
+            while let Some(offset) = self.buffer[processed..]
+                .iter()
+                .position(|byte| *byte == b'\n')
+            {
+                let end = processed + offset + 1;
+                output(&String::from_utf8_lossy(&self.buffer[processed..end]));
+                processed = end;
+            }
+            if !self.receive()? {
+                break;
+            }
+        }
         Ok(String::from_utf8_lossy(&self.buffer).into_owned())
     }
 }
@@ -292,17 +307,36 @@ fn run_script(endpoint: &Endpoint<'_>, script: &[u8], action: &str, model: &str)
     if !["inspect", "apply", "restore"].contains(&action) || !["H97X", "H97Y"].contains(&model) {
         return Err(failure("Unsupported font operation or vehicle model"));
     }
-    let nonce = tempfile::Builder::new().prefix("qnx-font-").tempdir()?;
+    execute_script(endpoint, script, &[action, "--model", model])
+}
+
+fn execute_script(endpoint: &Endpoint<'_>, script: &[u8], arguments: &[&str]) -> Result<String> {
+    execute_script_with_progress(endpoint, script, arguments, &mut |_| {})
+}
+
+fn execute_script_with_progress(
+    endpoint: &Endpoint<'_>,
+    script: &[u8],
+    arguments: &[&str],
+    output: &mut dyn FnMut(&str),
+) -> Result<String> {
+    let nonce = tempfile::Builder::new()
+        .prefix("qnx-operation-")
+        .tempdir()?;
     let token = nonce.path().file_name().unwrap().to_string_lossy();
     let remote = format!("/var/data/voyahtune-{token}.py");
     Connection::open(endpoint)?.upload(&remote, script)?;
     let hash = hex::encode(Sha256::digest(script));
+    let mut argv = vec![remote.as_str()];
+    argv.extend_from_slice(arguments);
+    let argv = hex::encode(serde_json::to_vec(&argv)?);
     let bootstrap = format!(
-            "import hashlib,os,sys; p='{remote}'; d=open(p,'rb').read(); assert hashlib.sha256(d).hexdigest()=='{hash}'; os.unlink(p); sys.argv=[p,'{action}','--model','{model}']; exec(compile(d,p,'exec'))"
+            "import hashlib,json,os,sys; p='{remote}'; d=open(p,'rb').read(); assert hashlib.sha256(d).hexdigest()=='{hash}'; os.unlink(p); sys.argv=json.loads(bytes.fromhex('{argv}')); exec(compile(d,p,'exec'))"
         );
-    Connection::open(endpoint)?.launch(&format!(
-        "/usr/bin/python3 python3 -u -B -c \"{bootstrap}\""
-    ))
+    Connection::open(endpoint)?.launch(
+        &format!("/usr/bin/python3 python3 -u -B -c \"{bootstrap}\""),
+        output,
+    )
 }
 
 #[cfg(all(test, unix))]

@@ -66,7 +66,8 @@ public final class SettingsSectionLayouts {
         layout(R.layout.settings_vehicle_automation),
         layout(R.layout.settings_vehicle_special_modes_heading),
         layout(R.layout.settings_vehicle_special_modes),
-        dynamic(DynamicContent.SCREEN_BRIGHTNESS)
+        dynamic(DynamicContent.SCREEN_BRIGHTNESS),
+        dynamic(DynamicContent.TURN_SOUND)
     };
     private static final Item[] APPS = {
         layout(R.layout.settings_apps_intro),
@@ -137,7 +138,8 @@ public final class SettingsSectionLayouts {
         SPLITS,
         APP_SCALE,
         APPLICATION_STARTUP,
-        SCREEN_BRIGHTNESS
+        SCREEN_BRIGHTNESS,
+        TURN_SOUND
     }
 
     static final class Item {

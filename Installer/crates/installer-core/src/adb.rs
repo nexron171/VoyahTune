@@ -45,6 +45,34 @@ pub struct Adb {
     pub step: Option<String>,
 }
 impl Adb {
+    pub(crate) fn restore_turn_sound(&self) -> Result<()> {
+        use release_core::vehicle_model::{VehicleModel, PROPERTIES_COMMAND};
+        let properties = self.read(PROPERTIES_COMMAND)?;
+        if properties.trim().is_empty() {
+            return Err(Error::new(
+                "TURN_SOUND_MODEL",
+                "Не удалось определить модель автомобиля",
+            ));
+        }
+        if VehicleModel::detect(&properties) == VehicleModel::Other {
+            return Ok(());
+        }
+        let serial = self
+            .serial
+            .as_deref()
+            .ok_or_else(|| Error::new("QNX_TRANSPORT", "Не выбран автомобиль"))?;
+        qnx_fonts::turn_sound::run(
+            &qnx_fonts::Endpoint::Adb {
+                path: &self.path,
+                serial,
+            },
+            "restore",
+            "original",
+            100,
+        )?;
+        Ok(())
+    }
+
     pub(crate) fn qnx_navigation_fonts(
         &self,
         action: &str,
