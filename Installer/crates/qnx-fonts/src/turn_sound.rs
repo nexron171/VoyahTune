@@ -8,84 +8,56 @@ const PREFIX: &str = "VOYAHTUNE_TURN_SOUND_RESULT ";
 fn sounds(key: &str) -> Result<(&'static [u8], &'static [u8])> {
     let pair: (&[u8], &[u8]) = match key {
         "Alfa_Romeo" => (
-            include_bytes!("../../../../Packaging/new/turn-sounds/Alfa_Romeo.di.wav"),
-            include_bytes!("../../../../Packaging/new/turn-sounds/Alfa_Romeo.da.wav"),
+            include_bytes!("../../../../Packaging/new/turn-sounds/turn_signal_alfa_romeo_tick.wav"),
+            include_bytes!("../../../../Packaging/new/turn-sounds/turn_signal_alfa_romeo_tock.wav"),
         ),
         "Audi" => (
-            include_bytes!("../../../../Packaging/new/turn-sounds/Audi.di.wav"),
-            include_bytes!("../../../../Packaging/new/turn-sounds/Audi.da.wav"),
-        ),
-        "Aurus" => (
-            include_bytes!("../../../../Packaging/new/turn-sounds/Aurus.di.wav"),
-            include_bytes!("../../../../Packaging/new/turn-sounds/Aurus.da.wav"),
+            include_bytes!("../../../../Packaging/new/turn-sounds/turn_signal_audi_tick.wav"),
+            include_bytes!("../../../../Packaging/new/turn-sounds/turn_signal_audi_tock.wav"),
         ),
         "BMW" => (
-            include_bytes!("../../../../Packaging/new/turn-sounds/BMW.di.wav"),
-            include_bytes!("../../../../Packaging/new/turn-sounds/BMW.da.wav"),
-        ),
-        "Bentley" => (
-            include_bytes!("../../../../Packaging/new/turn-sounds/Bentley.di.wav"),
-            include_bytes!("../../../../Packaging/new/turn-sounds/Bentley.da.wav"),
-        ),
-        "Ferrari_ICE" => (
-            include_bytes!("../../../../Packaging/new/turn-sounds/Ferrari_ICE.di.wav"),
-            include_bytes!("../../../../Packaging/new/turn-sounds/Ferrari_ICE.da.wav"),
+            include_bytes!("../../../../Packaging/new/turn-sounds/turn_signal_bmw_tick.wav"),
+            include_bytes!("../../../../Packaging/new/turn-sounds/turn_signal_bmw_tock.wav"),
         ),
         "Ferrari_Luce" => (
-            include_bytes!("../../../../Packaging/new/turn-sounds/Ferrari_Luce.di.wav"),
-            include_bytes!("../../../../Packaging/new/turn-sounds/Ferrari_Luce.da.wav"),
-        ),
-        "Infiniti" => (
-            include_bytes!("../../../../Packaging/new/turn-sounds/Infiniti.di.wav"),
-            include_bytes!("../../../../Packaging/new/turn-sounds/Infiniti.da.wav"),
+            include_bytes!("../../../../Packaging/new/turn-sounds/turn_signal_ferrari_luce_tick.wav"),
+            include_bytes!("../../../../Packaging/new/turn-sounds/turn_signal_ferrari_luce_tock.wav"),
         ),
         "Land_Rover" => (
-            include_bytes!("../../../../Packaging/new/turn-sounds/Land_Rover.di.wav"),
-            include_bytes!("../../../../Packaging/new/turn-sounds/Land_Rover.da.wav"),
+            include_bytes!("../../../../Packaging/new/turn-sounds/turn_signal_land_rover_tick.wav"),
+            include_bytes!("../../../../Packaging/new/turn-sounds/turn_signal_land_rover_tock.wav"),
         ),
         "Lexus_LFA" => (
-            include_bytes!("../../../../Packaging/new/turn-sounds/Lexus_LFA.di.wav"),
-            include_bytes!("../../../../Packaging/new/turn-sounds/Lexus_LFA.da.wav"),
+            include_bytes!("../../../../Packaging/new/turn-sounds/turn_signal_lexus_lfa_tick.wav"),
+            include_bytes!("../../../../Packaging/new/turn-sounds/turn_signal_lexus_lfa_tock.wav"),
         ),
         "Lexus_LS" => (
-            include_bytes!("../../../../Packaging/new/turn-sounds/Lexus_LS.di.wav"),
-            include_bytes!("../../../../Packaging/new/turn-sounds/Lexus_LS.da.wav"),
+            include_bytes!("../../../../Packaging/new/turn-sounds/turn_signal_lexus_ls_tick.wav"),
+            include_bytes!("../../../../Packaging/new/turn-sounds/turn_signal_lexus_ls_tock.wav"),
         ),
         "Mercedes" => (
-            include_bytes!("../../../../Packaging/new/turn-sounds/Mercedes.di.wav"),
-            include_bytes!("../../../../Packaging/new/turn-sounds/Mercedes.da.wav"),
+            include_bytes!("../../../../Packaging/new/turn-sounds/turn_signal_mercedes_tick.wav"),
+            include_bytes!("../../../../Packaging/new/turn-sounds/turn_signal_mercedes_tock.wav"),
         ),
         "Mini_Cooper" => (
-            include_bytes!("../../../../Packaging/new/turn-sounds/Mini_Cooper.di.wav"),
-            include_bytes!("../../../../Packaging/new/turn-sounds/Mini_Cooper.da.wav"),
+            include_bytes!("../../../../Packaging/new/turn-sounds/turn_signal_mini_cooper_tick.wav"),
+            include_bytes!("../../../../Packaging/new/turn-sounds/turn_signal_mini_cooper_tock.wav"),
         ),
         "Porsche" => (
-            include_bytes!("../../../../Packaging/new/turn-sounds/Porsche.di.wav"),
-            include_bytes!("../../../../Packaging/new/turn-sounds/Porsche.da.wav"),
-        ),
-        "Range_Rover" => (
-            include_bytes!("../../../../Packaging/new/turn-sounds/Range_Rover.di.wav"),
-            include_bytes!("../../../../Packaging/new/turn-sounds/Range_Rover.da.wav"),
-        ),
-        "Tesla" => (
-            include_bytes!("../../../../Packaging/new/turn-sounds/Tesla.di.wav"),
-            include_bytes!("../../../../Packaging/new/turn-sounds/Tesla.da.wav"),
-        ),
-        "Toyota_Century" => (
-            include_bytes!("../../../../Packaging/new/turn-sounds/Toyota_Century.di.wav"),
-            include_bytes!("../../../../Packaging/new/turn-sounds/Toyota_Century.da.wav"),
+            include_bytes!("../../../../Packaging/new/turn-sounds/turn_signal_porsche_tick.wav"),
+            include_bytes!("../../../../Packaging/new/turn-sounds/turn_signal_porsche_tock.wav"),
         ),
         "Volvo" => (
-            include_bytes!("../../../../Packaging/new/turn-sounds/Volvo.di.wav"),
-            include_bytes!("../../../../Packaging/new/turn-sounds/Volvo.da.wav"),
+            include_bytes!("../../../../Packaging/new/turn-sounds/turn_signal_volvo_tick.wav"),
+            include_bytes!("../../../../Packaging/new/turn-sounds/turn_signal_volvo_tock.wav"),
         ),
         "Xiaomi_SU7" => (
-            include_bytes!("../../../../Packaging/new/turn-sounds/Xiaomi_SU7.di.wav"),
-            include_bytes!("../../../../Packaging/new/turn-sounds/Xiaomi_SU7.da.wav"),
+            include_bytes!("../../../../Packaging/new/turn-sounds/turn_signal_xiaomi_su7_tick.wav"),
+            include_bytes!("../../../../Packaging/new/turn-sounds/turn_signal_xiaomi_su7_tock.wav"),
         ),
         "original" => (
-            include_bytes!("../../../../Packaging/new/turn-sounds/original.di.wav"),
-            include_bytes!("../../../../Packaging/new/turn-sounds/original.da.wav"),
+            include_bytes!("../../../../Packaging/new/turn-sounds/turn_signal_original_tick.wav"),
+            include_bytes!("../../../../Packaging/new/turn-sounds/turn_signal_original_tock.wav"),
         ),
         _ => {
             return Err(Error::new(

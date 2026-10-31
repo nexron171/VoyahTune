@@ -116,6 +116,7 @@ val prepareVoiceNative = tasks.register<Exec>("prepareVoiceNative") {
         androidComponents.sdkComponents.sdkDirectory.get().asFile.resolve("ndk/${android.ndkVersion}"), "--abis", "arm64-v8a,x86_64")
 }
 android.sourceSets.getByName("main") {
+    assets.directories.add(rootProject.projectDir.parentFile.resolve("Packaging/new/turn-sounds").path)
     assets.directories.add(layout.buildDirectory.dir("voice-deps/assets").get().asFile.path)
     jniLibs.directories.add(layout.buildDirectory.dir("voice-deps/jniLibs").get().asFile.path)
 }

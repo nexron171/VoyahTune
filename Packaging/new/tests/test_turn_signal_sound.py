@@ -20,7 +20,7 @@ class TurnSoundTest(unittest.TestCase):
         self.state = root / 'state'
         self.originals = {}
         for part in ['di', 'da']:
-            data = (ASSETS / ('original.' + part + '.wav')).read_bytes()
+            data = (ASSETS / ('turn_signal_original_' + ('tick' if part == 'di' else 'tock') + '.wav')).read_bytes()
             path = self.audio / ('turn_' + part + '+3dB.wav')
             path.write_bytes(data)
             self.originals[path] = data
@@ -28,8 +28,8 @@ class TurnSoundTest(unittest.TestCase):
         self.mount.start()
         self.addCleanup(self.mount.stop)
 
-    def run_action(self, action, sound='Tesla', volume=60):
-        sounds = {part: (ASSETS / (sound + '.' + part + '.wav')).read_bytes().hex() for part in ['di', 'da']}
+    def run_action(self, action, sound='Audi', volume=60):
+        sounds = {part: (ASSETS / ('turn_signal_' + sound.lower() + '_' + ('tick' if part == 'di' else 'tock') + '.wav')).read_bytes().hex() for part in ['di', 'da']}
         return MODULE.execute(action, sound, volume, sounds, self.audio, self.state)
 
     def test_disabled_by_default_and_restore_without_backup_is_noop(self):
@@ -39,9 +39,9 @@ class TurnSoundTest(unittest.TestCase):
             self.assertEqual(path.read_bytes(), original)
 
     def test_every_sound_and_volume_restores_exact_original_bytes(self):
-        for path in ASSETS.glob('*.di.wav'):
+        for path in ASSETS.glob('turn_signal_*_tick.wav'):
             for volume in [15, 60, 100]:
-                self.run_action('apply', path.name[:-7], volume)
+                self.run_action('apply', path.name.removeprefix('turn_signal_').removesuffix('_tick.wav'), volume)
                 self.assertTrue(self.run_action('status')['enabled'])
                 self.run_action('restore')
                 for target, original in self.originals.items():

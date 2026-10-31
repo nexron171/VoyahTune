@@ -31,45 +31,31 @@ import java.util.concurrent.Executors;
 final class TurnSoundSettingsPage {
     private static final String[] KEYS = {
         "original",
-        "Tesla",
-        "Aurus",
         "Alfa_Romeo",
         "Audi",
-        "Bentley",
         "BMW",
-        "Ferrari_ICE",
         "Ferrari_Luce",
-        "Infiniti",
         "Land_Rover",
         "Lexus_LFA",
         "Lexus_LS",
         "Mercedes",
         "Mini_Cooper",
         "Porsche",
-        "Range_Rover",
-        "Toyota_Century",
         "Volvo",
         "Xiaomi_SU7"
     };
     private static final String[] LABELS = {
-        "Штатный (из набора)",
-        "Tesla",
-        "Aurus",
+        "Оригинальный (из набора)",
         "Alfa Romeo",
         "Audi",
-        "Bentley",
         "BMW",
-        "Ferrari (ICE)",
-        "Ferrari (Luce)",
-        "Infiniti",
+        "Ferrari Luce",
         "Land Rover",
         "Lexus LFA",
         "Lexus LS",
-        "Mercedes",
+        "Mercedes-Benz",
         "Mini Cooper",
         "Porsche",
-        "Range Rover",
-        "Toyota Century",
         "Volvo",
         "Xiaomi SU7"
     };
@@ -80,6 +66,7 @@ final class TurnSoundSettingsPage {
     private final Runnable changed;
     private final SettingsComponents components;
     private final Handler main = new Handler(Looper.getMainLooper());
+    private final TurnSoundPreview preview;
     private TextView progressLabel;
     private boolean closed;
     private boolean busy;
@@ -92,8 +79,11 @@ final class TurnSoundSettingsPage {
     TurnSoundSettingsPage(Activity activity, SharedPreferences preferences, Runnable changed) {
         this.activity = activity;
         this.preferences = preferences;
+        preview = new TurnSoundPreview(activity);
         sound = preferences.getString("turnSignalSoundType", "original");
-        if (!java.util.Arrays.asList(KEYS).contains(sound)) sound = "original";
+        if (!java.util.Arrays.asList(KEYS).contains(sound)) {
+            sound = "original";
+        }
         volume = Math.max(15, Math.min(100, preferences.getInt("turnSignalSoundVolume", 60)));
         this.changed = changed;
         components = new SettingsComponents(activity);
@@ -101,6 +91,7 @@ final class TurnSoundSettingsPage {
     }
 
     void close() {
+        preview.stop();
         closed = true;
         progressLabel = null;
     }
@@ -117,11 +108,11 @@ final class TurnSoundSettingsPage {
                             toggle.setChecked(enabled);
                             toggle.setEnabled(known && !busy);
                             toggle.setOnCheckedChangeListener(
-                                    (button, checked) -> request(checked ? "apply" : "restore"));
+                                    (button, checked) -> enabled = checked);
 
                             Button choose = new Button(activity);
                             choose.setText(label());
-                            choose.setEnabled(known && !busy);
+                            choose.setEnabled(!busy);
                             choose.setOnClickListener(view -> chooseSound());
 
                             TextView level = components.text(volume + "%", 22, 0xffb2d3fb);
@@ -129,7 +120,7 @@ final class TurnSoundSettingsPage {
                                     new androidx.appcompat.widget.AppCompatSeekBar(activity);
                             slider.setMax(85);
                             slider.setProgress(Math.max(0, volume - 15));
-                            slider.setEnabled(known && !busy);
+                            slider.setEnabled(!busy);
                             slider.setContentDescription("Громкость звука поворотников");
                             slider.setProgressTintList(ColorStateList.valueOf(0xffaccdff));
                             slider.setThumbTintList(ColorStateList.valueOf(0xffaccdff));
@@ -139,6 +130,7 @@ final class TurnSoundSettingsPage {
                                         public void onProgressChanged(
                                                 SeekBar view, int progress, boolean fromUser) {
                                             if (fromUser) {
+                                                preview.stop();
                                                 volume = progress + 15;
                                                 level.setText(volume + "%");
                                             }
@@ -150,16 +142,27 @@ final class TurnSoundSettingsPage {
                                         @Override
                                         public void onStopTrackingTouch(SeekBar view) {
                                             saveSelection();
-                                            if (enabled) request("apply");
                                         }
                                     });
+
+                            Button listen = new Button(activity);
+                            listen.setText("Прослушать");
+                            listen.setEnabled(!busy);
+                            listen.setOnClickListener(view -> preview.play(sound, volume));
+
+                            Button apply = new Button(activity);
+                            apply.setText("Применить");
+                            apply.setEnabled(known && !busy);
+                            apply.setOnClickListener(
+                                    view -> request(enabled ? "apply" : "restore"));
 
                             LinearLayout card =
                                     components.card(
                                             components.row(
                                                     "Изменять звук поворотников",
-                                                    "Выключение возвращает сохранённый звук и его"
-                                                            + " исходную громкость",
+                                                    "Выберите состояние и нажмите «Применить»."
+                                                            + " Выключение вернёт сохранённый звук"
+                                                            + " и его исходную громкость.",
                                                     toggle),
                                             progressPanel(),
                                             components.text(
@@ -177,6 +180,12 @@ final class TurnSoundSettingsPage {
                                                     "15–100% от амплитуды выбранного звука",
                                                     level),
                                             slider,
+                                            components.row(
+                                                    "Предпрослушивание",
+                                                    "Через динамики мультимедиа; громкость приборки"
+                                                            + " может отличаться",
+                                                    listen),
+                                            apply,
                                             components.text(
                                                     "Оригиналы сохраняются перед первой заменой и"
                                                         + " не удаляются при удалении VoyahTune.",
@@ -221,15 +230,21 @@ final class TurnSoundSettingsPage {
     private void showProgress(String stage) {
         main.post(
                 () -> {
-                    if (closed || activity.isDestroyed() || !busy) return;
+                    if (closed || activity.isDestroyed() || !busy) {
+                        return;
+                    }
                     status = TurnSoundProgress.text(stage);
-                    if (progressLabel != null) progressLabel.setText(status);
+                    if (progressLabel != null) {
+                        progressLabel.setText(status);
+                    }
                 });
     }
 
     private String label() {
         for (int index = 0; index < KEYS.length; index++) {
-            if (KEYS[index].equals(sound)) return LABELS[index];
+            if (KEYS[index].equals(sound)) {
+                return LABELS[index];
+            }
         }
         return sound;
     }
@@ -237,7 +252,9 @@ final class TurnSoundSettingsPage {
     private void chooseSound() {
         int selected = 0;
         for (int index = 0; index < KEYS.length; index++) {
-            if (KEYS[index].equals(sound)) selected = index;
+            if (KEYS[index].equals(sound)) {
+                selected = index;
+            }
         }
         new MaterialAlertDialogBuilder(activity, R.style.SettingsDialog)
                 .setTitle("Тип звука поворотников")
@@ -245,11 +262,11 @@ final class TurnSoundSettingsPage {
                         LABELS,
                         selected,
                         (dialog, index) -> {
+                            preview.stop();
                             sound = KEYS[index];
                             saveSelection();
                             dialog.dismiss();
-                            if (enabled) request("apply");
-                            else changed.run();
+                            changed.run();
                         })
                 .setNegativeButton("Отмена", null)
                 .show();
@@ -264,7 +281,10 @@ final class TurnSoundSettingsPage {
     }
 
     private void request(String action) {
-        if (busy || closed) return;
+        if (busy || closed) {
+            return;
+        }
+        preview.stop();
         busy = true;
         status =
                 "status".equals(action)
@@ -276,7 +296,9 @@ final class TurnSoundSettingsPage {
         final int selectedVolume = volume;
         main.post(
                 () -> {
-                    if (!closed && !activity.isDestroyed()) changed.run();
+                    if (!closed && !activity.isDestroyed()) {
+                        changed.run();
+                    }
                 });
         WORKER.execute(
                 () -> {
@@ -301,19 +323,35 @@ final class TurnSoundSettingsPage {
                     final String failure = error;
                     main.post(
                             () -> {
-                                if (closed || activity.isDestroyed()) return;
+                                if (closed || activity.isDestroyed()) {
+                                    return;
+                                }
                                 busy = false;
                                 known = response != null;
                                 if (known) {
                                     enabled = response.optBoolean("enabled", false);
-                                    if (enabled) {
-                                        sound = response.optString("sound", "original");
-                                        volume = response.optInt("volume", 60);
+                                    if (enabled && "status".equals(action)) {
+                                        String appliedSound =
+                                                response.optString("sound", "original");
+                                        sound =
+                                                java.util.Arrays.asList(KEYS).contains(appliedSound)
+                                                        ? appliedSound
+                                                        : "original";
+                                        volume =
+                                                Math.max(
+                                                        15,
+                                                        Math.min(
+                                                                100,
+                                                                response.optInt("volume", 60)));
                                     }
                                     status =
                                             enabled
-                                                    ? "Файлы выбранного звука записаны"
-                                                    : "Выключено · замена звука не активна";
+                                                    ? "Файлы звука записаны · требуется полная"
+                                                            + " перезагрузка"
+                                                    : "restore".equals(action)
+                                                            ? "Оригиналы восстановлены · требуется"
+                                                                  + " полная перезагрузка"
+                                                            : "Выключено · замена звука не активна";
                                 } else {
                                     status = failure;
                                 }
