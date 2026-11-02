@@ -15,6 +15,7 @@ import ru.big.town.restoremode.widgets.clock.ClockWidgetView;
 import ru.big.town.restoremode.widgets.dials.DialWidgetStore;
 import ru.big.town.restoremode.widgets.energy.VehicleWidgets;
 import ru.big.town.restoremode.widgets.headlights.HeadlightWidgetLayout;
+import ru.big.town.restoremode.widgets.brightness.BrightnessWidgetLayout;
 import ru.big.town.restoremode.widgets.links.LinkShortcutStore;
 import ru.big.town.restoremode.widgets.media.MediaWidgetLayout;
 import ru.big.town.restoremode.widgets.radio.RadioWidgetLayout;
@@ -28,6 +29,7 @@ public class TileOrderStore {
     private static final String KEY = "tileOrder";
     private static final String[] KNOWN_WIDGETS = {
         HeadlightWidgetLayout.ID,
+        BrightnessWidgetLayout.ID,
         RadioWidgetLayout.ID,
         ClockWidgetView.ID,
         SystemWidgetLayout.CPU,

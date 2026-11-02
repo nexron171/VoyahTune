@@ -10,6 +10,7 @@ import android.view.View;
 import android.view.ViewGroup;
 
 import ru.big.town.restoremode.R;
+import ru.big.town.restoremode.widgets.brightness.BrightnessWidgetView;
 import ru.big.town.restoremode.widgets.energy.VehicleWidgetView;
 import ru.big.town.restoremode.widgets.headlights.HeadlightWidgetView;
 import ru.big.town.restoremode.widgets.radio.RadioWidgetView;
@@ -163,6 +164,9 @@ public final class DashboardAppearance implements AutoCloseable {
         }
         if (tile instanceof HeadlightWidgetView) {
             ((HeadlightWidgetView) tile).setSurfaceAlpha(settings.surfaceAlpha());
+        }
+        if (tile instanceof BrightnessWidgetView) {
+            ((BrightnessWidgetView) tile).setSurfaceAlpha(settings.surfaceAlpha());
         }
         int left = tile.getPaddingLeft();
         int top = tile.getPaddingTop();

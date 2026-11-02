@@ -16,6 +16,7 @@ import android.util.Log;
 
 import androidx.core.app.NotificationCompat;
 
+import ru.big.town.common.BrightnessWidgetProtocol;
 import ru.big.town.common.ScreenBrightnessSettings;
 
 import java.util.List;
@@ -26,7 +27,7 @@ public final class ScreenBrightnessService extends Service {
             "ru.big.town.anative.permission.BIND_SET_MODES_SERVICE";
     private static final String CHANNEL = "screen_brightness";
     // A stalled vendor Binder must not create a new worker on each service restart.
-    private static final Handler WORKER;
+    static final Handler WORKER;
 
     static {
         HandlerThread thread = new HandlerThread("ScreenBrightness");
@@ -45,8 +46,10 @@ public final class ScreenBrightnessService extends Service {
     private volatile String status = "Подключение к экранам…";
     private final LightSensorService.LevelListener sensorListener =
             level -> {
-                sensor = level;
-                schedule();
+                if (preferences != null && rulesActive()) {
+                    sensor = level;
+                    schedule();
+                }
             };
     private final BroadcastReceiver requestReceiver =
             new BroadcastReceiver() {
@@ -62,8 +65,8 @@ public final class ScreenBrightnessService extends Service {
                     if (!active) return;
                     try {
                         transport.connect(getApplicationContext());
-                        boolean enabled =
-                                preferences.getBoolean(ScreenBrightnessSettings.ENABLED, false);
+                        int override = currentOverride();
+                        boolean enabled = rulesActive();
                         if (enabled
                                 && !preferences.getBoolean(
                                         ScreenBrightnessModeController.RESTORE_PENDING, false)) {
@@ -79,19 +82,17 @@ public final class ScreenBrightnessService extends Service {
                             boolean confirmed =
                                     ScreenBrightnessModeController.apply(
                                             transport,
-                                            ScreenBrightnessModeController.AUTO,
+                                            override,
                                             () ->
-                                                    active
-                                                            && !preferences.getBoolean(
-                                                                    ScreenBrightnessSettings
-                                                                            .ENABLED,
-                                                                    false));
+                                                    active && currentOverride() == override
+                                                            && (!preferences.getBoolean(ScreenBrightnessSettings.ENABLED, false)
+                                                                || BrightnessWidgetProtocol.paused(override)));
                             if (!confirmed) {
                                 throw new IllegalStateException(
                                         "OEM brightness mode not confirmed");
                             }
-                            if (preferences.getBoolean(ScreenBrightnessSettings.ENABLED, false))
-                                return;
+                            if (preferences.getBoolean(ScreenBrightnessSettings.ENABLED, false)
+                                    && !BrightnessWidgetProtocol.paused(override)) return;
                             if (!preferences
                                     .edit()
                                     .putBoolean(
@@ -99,7 +100,9 @@ public final class ScreenBrightnessService extends Service {
                                     .commit()) {
                                 throw new IllegalStateException("Cannot persist mode restoration");
                             }
-                            status = "Автоматический режим восстановлен";
+                            status = BrightnessWidgetProtocol.paused(override)
+                                    ? (override == BrightnessWidgetProtocol.DAY ? "День" : "Ночь") + " · правила на паузе"
+                                    : "Автоматический режим восстановлен";
                             publishStatus();
                             int completedStart = latestStartId;
                             main.post(
@@ -121,12 +124,11 @@ public final class ScreenBrightnessService extends Service {
                                         transport,
                                         snapshot,
                                         sensor,
+                                        nightThreshold(),
                                         () ->
                                                 active
                                                         && rules == snapshot
-                                                        && preferences.getBoolean(
-                                                                ScreenBrightnessSettings.ENABLED,
-                                                                false));
+                                                        && rulesActive());
                         status =
                                 result.target < 0
                                         ? "Основной экран: яркость недоступна"
@@ -166,7 +168,7 @@ public final class ScreenBrightnessService extends Service {
                 new NotificationCompat.Builder(this, CHANNEL)
                         .setSmallIcon(R.drawable.ic_launcher_foreground)
                         .setContentTitle("Яркость экрана")
-                        .setContentText("Регулировка по датчику освещённости")
+                        .setContentText("Управление яркостью дисплеев")
                         .setOngoing(true)
                         .build());
         registerReceiver(
@@ -180,22 +182,26 @@ public final class ScreenBrightnessService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         latestStartId = startId;
+        if (intent != null && intent.hasExtra(BrightnessWidgetProtocol.MODE)) {
+            int mode = intent.getIntExtra(BrightnessWidgetProtocol.MODE, -1);
+            if (mode >= 0 && mode <= 2) {
+                preferences.edit().putInt(BrightnessWidgetProtocol.OVERRIDE, mode)
+                        .putBoolean(ScreenBrightnessModeController.RESTORE_PENDING, true).apply();
+            }
+        }
         boolean enabled = preferences.getBoolean(ScreenBrightnessSettings.ENABLED, false);
-        if ((!enabled
+        if (!enabled
                 && !preferences.getBoolean(
-                        ScreenBrightnessModeController.RESTORE_PENDING, false))) {
+                        ScreenBrightnessModeController.RESTORE_PENDING, false)) {
             active = false;
             stopSelf();
             return START_NOT_STICKY;
         }
         try {
             rules =
-                    !enabled
+                    !rulesActive()
                             ? java.util.Collections.emptyList()
-                            : ScreenBrightnessSettings.decode(
-                                    preferences.getString(
-                                            ScreenBrightnessSettings.RULES,
-                                            ScreenBrightnessSettings.DEFAULT_RULES));
+                            : configuredRules();
         } catch (IllegalArgumentException error) {
             Log.w(TAG, "Invalid saved brightness rules", error);
             active = false;
@@ -203,15 +209,64 @@ public final class ScreenBrightnessService extends Service {
             return START_NOT_STICKY;
         }
         active = true;
-        if (enabled) {
+        if (rulesActive()) {
             LightSensorService.addLevelListener(sensorListener);
             sensor = LightSensorService.lastKnownLevel();
         } else {
             LightSensorService.removeLevelListener(sensorListener);
             sensor = -1;
         }
+        if (intent != null && intent.hasExtra("manualPercent")) {
+            int percent = intent.getIntExtra("manualPercent", -1);
+            int screen = intent.getIntExtra("manualScreen", -1);
+            int level = intent.getIntExtra("manualSensor", -1);
+            WORKER.post(() -> learnManualBrightness(level, percent, screen));
+        }
         schedule();
         return START_STICKY;
+    }
+
+    private int nightThreshold() {
+        String encoded = preferences.getString(ScreenBrightnessSettings.RULES, ScreenBrightnessSettings.DEFAULT_RULES);
+        return preferences.getInt(ScreenBrightnessSettings.NIGHT_THRESHOLD, ScreenBrightnessSettings.nightThreshold(encoded));
+    }
+
+    private List<ScreenBrightnessSettings.Rule> configuredRules() {
+        String encoded = preferences.getString(ScreenBrightnessSettings.RULES, ScreenBrightnessSettings.DEFAULT_RULES);
+        return ScreenBrightnessSettings.levels(encoded);
+    }
+
+    private void learnManualBrightness(int level, int percent, int screen) {
+        if (!active || !rulesActive() || !preferences.getBoolean(ScreenBrightnessSettings.ADAPTIVE, true)
+                || level < 0 || level > 7 || percent < 1 || percent > 100
+                || (screen != 1 && screen != 2 && screen != 16)) return;
+        try {
+            transport.connect(getApplicationContext());
+            if (transport.read(screen) != percent) return;
+            android.os.Bundle arguments = new android.os.Bundle();
+            arguments.putInt("sensor", level);
+            arguments.putInt("percent", percent);
+            android.os.Bundle response = getContentResolver().call(
+                    android.net.Uri.parse("content://ru.big.town.restoremode.restoremodecontentprovider/"),
+                    ScreenBrightnessSettings.LEARN_METHOD, null, arguments);
+            if (response == null || !response.containsKey(ScreenBrightnessSettings.RULES)) return;
+            preferences.edit()
+                    .putString(ScreenBrightnessSettings.RULES, response.getString(ScreenBrightnessSettings.RULES))
+                    .putInt(ScreenBrightnessSettings.NIGHT_THRESHOLD, response.getInt(ScreenBrightnessSettings.NIGHT_THRESHOLD))
+                    .apply();
+            rules = configuredRules();
+        } catch (Exception | LinkageError error) {
+            Log.w(TAG, "Brightness calibration unavailable", error);
+        }
+    }
+
+    private boolean rulesActive() {
+        return BrightnessWidgetProtocol.rulesActive(
+                preferences.getBoolean(ScreenBrightnessSettings.ENABLED, false), currentOverride());
+    }
+
+    private int currentOverride() {
+        return preferences.getInt(BrightnessWidgetProtocol.OVERRIDE, BrightnessWidgetProtocol.AUTO);
     }
 
     private void schedule() {

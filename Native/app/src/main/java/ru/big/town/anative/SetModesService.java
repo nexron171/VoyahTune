@@ -118,6 +118,7 @@ public class SetModesService extends Service {
 
     private SuspensionWidgetController suspensionWidget;
     private HeadlightWidgetController headlightWidget;
+    private BrightnessWidgetController brightnessWidget;
     private EnergyWidgetController energyWidgets;
     private CarPlayVehicleController carPlayVehicle;
     private CarPlayAudioController carPlayAudio;
@@ -146,6 +147,12 @@ public class SetModesService extends Service {
                                     Log.w(TAG, "Quick control client disconnected", exception);
                                 }
                             });
+                    break;
+                case ru.big.town.common.BrightnessWidgetProtocol.WATCH:
+                case ru.big.town.common.BrightnessWidgetProtocol.UNWATCH:
+                case ru.big.town.common.BrightnessWidgetProtocol.SELECT:
+                    if (brightnessWidget == null) brightnessWidget = new BrightnessWidgetController(SetModesService.this);
+                    brightnessWidget.handle(msg);
                     break;
                 case ru.big.town.common.HeadlightWidgetProtocol.WATCH:
                 case ru.big.town.common.HeadlightWidgetProtocol.UNWATCH:
@@ -2526,6 +2533,7 @@ public class SetModesService extends Service {
         Log.i(TAG, "onDestroy()");
         if (applicationStartup != null) applicationStartup.close();
         if (suspensionWidget != null) suspensionWidget.close();
+        if (brightnessWidget != null) brightnessWidget.close();
         if (headlightWidget != null) {
             headlightWidget.close();
         }

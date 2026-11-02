@@ -8,6 +8,8 @@ import org.json.JSONObject;
 import ru.voyahtune.agent.HookBridge;
 import ru.voyahtune.agent.HookRegistry;
 import ru.voyahtune.agent.modules.AccModule;
+import ru.voyahtune.agent.modules.BrightnessModule;
+import ru.voyahtune.agent.modules.AndroidBrightnessDelivery;
 import ru.voyahtune.agent.modules.AndroidAccPlatform;
 import ru.voyahtune.agent.modules.AndroidClientGeometryPlatform;
 import ru.voyahtune.agent.modules.AndroidClientInputMethodPlatform;
@@ -191,6 +193,11 @@ public final class AgentRuntime {
                                                         new AndroidMultidisplayPlatform(
                                                                 (Context) applicationContext,
                                                                 methods));
+                                            }
+                                            if (id.equals("brightness")) {
+                                                return new BrightnessModule(methods, hooks,
+                                                        new AndroidBrightnessDelivery((Context) applicationContext),
+                                                        failure -> android.util.Log.w("vt_brightness", "Calibration delivery failed", failure));
                                             }
                                             if (id.equals("vehicle-air")) {
                                                 return new VehicleAirModule(

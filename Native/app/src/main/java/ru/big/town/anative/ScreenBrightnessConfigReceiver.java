@@ -11,11 +11,21 @@ import ru.big.town.common.ScreenBrightnessSettings;
 public final class ScreenBrightnessConfigReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
-        if (intent == null || !ScreenBrightnessSettings.ACTION_CONFIG.equals(intent.getAction()))
+        if (intent == null) return;
+        if (ScreenBrightnessSettings.MANUAL.equals(intent.getAction())) {
+            context.startForegroundService(new Intent(context, ScreenBrightnessService.class)
+                    .putExtra("manualPercent", intent.getIntExtra("percent", -1))
+                    .putExtra("manualScreen", intent.getIntExtra("screen", -1))
+                    .putExtra("manualSensor", LightSensorService.lastKnownLevel()));
             return;
+        }
+        if (!ScreenBrightnessSettings.ACTION_CONFIG.equals(intent.getAction())) return;
         String rules = intent.getStringExtra(ScreenBrightnessSettings.RULES);
         try {
             ScreenBrightnessSettings.decode(rules);
+            int threshold = intent.getIntExtra(ScreenBrightnessSettings.NIGHT_THRESHOLD,
+                    ScreenBrightnessSettings.nightThreshold(rules));
+            if (threshold < 0 || threshold > 7) throw new IllegalArgumentException("Invalid night threshold");
         } catch (IllegalArgumentException error) {
             Log.w("ScreenBrightness", "Rejected invalid configuration", error);
             return;
@@ -35,6 +45,11 @@ public final class ScreenBrightnessConfigReceiver extends BroadcastReceiver {
                         ScreenBrightnessSettings.ENABLED,
                         intent.getBooleanExtra(ScreenBrightnessSettings.ENABLED, false))
                 .putString(ScreenBrightnessSettings.RULES, rules)
+                .putBoolean(ScreenBrightnessSettings.ADAPTIVE,
+                        intent.getBooleanExtra(ScreenBrightnessSettings.ADAPTIVE, true))
+                .putInt(ScreenBrightnessSettings.NIGHT_THRESHOLD,
+                        intent.getIntExtra(ScreenBrightnessSettings.NIGHT_THRESHOLD,
+                                ScreenBrightnessSettings.nightThreshold(rules)))
                 .apply();
         Context application = context.getApplicationContext();
         // Restore can hold the observation lock while querying a remote settings provider.

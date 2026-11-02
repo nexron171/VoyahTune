@@ -70,6 +70,12 @@ public final class SplitConfigSync {
                 ScreenBrightnessSettings.RULES,
                 prefs.getString(
                         ScreenBrightnessSettings.RULES, ScreenBrightnessSettings.DEFAULT_RULES));
+        intent.putExtra(ScreenBrightnessSettings.ADAPTIVE,
+                prefs.getBoolean(ScreenBrightnessSettings.ADAPTIVE, true));
+        intent.putExtra(ScreenBrightnessSettings.NIGHT_THRESHOLD,
+                prefs.getInt(ScreenBrightnessSettings.NIGHT_THRESHOLD,
+                        ScreenBrightnessSettings.nightThreshold(prefs.getString(
+                                ScreenBrightnessSettings.RULES, ScreenBrightnessSettings.DEFAULT_RULES))));
         context.sendBroadcast(intent);
     }
 

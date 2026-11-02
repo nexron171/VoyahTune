@@ -51,6 +51,25 @@ public class ScreenBrightnessModeControllerTest {
         assertTrue(ScreenBrightnessModeController.apply(modes, 2, () -> true));
     }
 
+    @Test
+    public void nightSelectsEveryDisplayAndPreservesAlreadySelectedModes() throws Exception {
+        Modes modes = new Modes(2);
+        modes.values.put(2, 0);
+        assertTrue(ScreenBrightnessModeController.apply(modes, 0, () -> true));
+        assertEquals(Arrays.asList("1=0", "16=0"), modes.writes);
+        assertEquals(Integer.valueOf(0), modes.values.get(1));
+        assertEquals(Integer.valueOf(0), modes.values.get(2));
+        assertEquals(Integer.valueOf(0), modes.values.get(16));
+    }
+
+    @Test
+    public void manualModesPauseRulesAndAutoResumesOnlyEnabledRules() {
+        assertFalse(ru.big.town.common.BrightnessWidgetProtocol.rulesActive(true, 0));
+        assertFalse(ru.big.town.common.BrightnessWidgetProtocol.rulesActive(true, 1));
+        assertTrue(ru.big.town.common.BrightnessWidgetProtocol.rulesActive(true, 2));
+        assertFalse(ru.big.town.common.BrightnessWidgetProtocol.rulesActive(false, 2));
+    }
+
     private static final class Modes implements ScreenBrightnessModeController.Modes {
         final Map<Integer, Integer> values = new HashMap<>();
         final List<String> writes = new ArrayList<>();
