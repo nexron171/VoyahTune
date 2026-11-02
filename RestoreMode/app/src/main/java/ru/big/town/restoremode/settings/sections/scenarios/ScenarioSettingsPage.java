@@ -475,13 +475,19 @@ public final class ScenarioSettingsPage {
                                 }));
         buttons.addView(light);
         MaterialButton driveMode = actionButton("Режим движения");
-        driveMode.setOnClickListener(view -> pickOne("Переход в режим движения",
-                ScenarioProtocol.DRIVE_MODES.toArray(new String[0]), index -> {
-                    scenario.triggers.add(new ScenarioStore.Trigger(
-                            ScenarioProtocol.TRIGGER_DRIVE_MODE,
-                            ScenarioProtocol.DRIVE_MODES.get(index), ""));
-                    save();
-                }));
+        driveMode.setOnClickListener(
+                view ->
+                        pickOne(
+                                "Переход в режим движения",
+                                ScenarioProtocol.DRIVE_MODES.toArray(new String[0]),
+                                index -> {
+                                    scenario.triggers.add(
+                                            new ScenarioStore.Trigger(
+                                                    ScenarioProtocol.TRIGGER_DRIVE_MODE,
+                                                    ScenarioProtocol.DRIVE_MODES.get(index),
+                                                    ""));
+                                    save();
+                                }));
         buttons.addView(driveMode);
         block.addView(buttons);
         if (scenario.triggers.isEmpty()) {
@@ -593,6 +599,18 @@ public final class ScenarioSettingsPage {
                                 1,
                                 0));
         buttons.addView(temp);
+        MaterialButton cabinTemperature = actionButton("В салоне t°");
+        cabinTemperature.setOnClickListener(
+                v ->
+                        addNumberCondition(
+                                scenario,
+                                ScenarioProtocol.CONDITION_TEMP_IN,
+                                "Температура в салоне, °C",
+                                -40,
+                                85,
+                                1,
+                                20));
+        buttons.addView(cabinTemperature);
         MaterialButton soc = actionButton("Заряд");
         soc.setOnClickListener(
                 v ->
@@ -778,6 +796,8 @@ public final class ScenarioSettingsPage {
         String name;
         if (ScenarioProtocol.CONDITION_LIGHT.equals(condition.type)) {
             name = "Освещённость";
+        } else if (ScenarioProtocol.CONDITION_TEMP_IN.equals(condition.type)) {
+            name = "В салоне t°";
         } else if (ScenarioProtocol.CONDITION_TEMP_OUT.equals(condition.type)) {
             name = "Уличная t°";
         } else {
@@ -946,11 +966,18 @@ public final class ScenarioSettingsPage {
         }
         List<ActionNode> wallpapers = new ArrayList<>();
         for (AppearanceSettings.Wallpaper wallpaper : WallpaperStore.available(preferences)) {
-            wallpapers.add(new ActionNode(wallpaper.title,
-                    WallpaperProtocol.ACTION_PREFIX + wallpaper.key, null));
+            wallpapers.add(
+                    new ActionNode(
+                            wallpaper.title,
+                            WallpaperProtocol.ACTION_PREFIX + wallpaper.key,
+                            null));
         }
-        sections.add(new ActionNode("Оформление", null, java.util.Collections.singletonList(
-                new ActionNode("Сменить обои", null, wallpapers))));
+        sections.add(
+                new ActionNode(
+                        "Оформление",
+                        null,
+                        java.util.Collections.singletonList(
+                                new ActionNode("Сменить обои", null, wallpapers))));
         return sections;
     }
 
@@ -1202,8 +1229,8 @@ public final class ScenarioSettingsPage {
 
     private String actionTitle(String action) {
         if (WallpaperProtocol.handles(action)) {
-            AppearanceSettings.Wallpaper wallpaper = WallpaperStore.find(
-                    preferences, WallpaperProtocol.wallpaperId(action));
+            AppearanceSettings.Wallpaper wallpaper =
+                    WallpaperStore.find(preferences, WallpaperProtocol.wallpaperId(action));
             return "Сменить обои: " + (wallpaper == null ? "недоступны" : wallpaper.title);
         }
         for (VoiceCommandCatalog.Command command : VoiceCommands.load(activity)) {

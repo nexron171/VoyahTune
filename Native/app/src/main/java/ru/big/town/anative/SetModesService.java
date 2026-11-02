@@ -120,6 +120,7 @@ public class SetModesService extends Service {
     private HeadlightWidgetController headlightWidget;
     private BrightnessWidgetController brightnessWidget;
     private EnergyWidgetController energyWidgets;
+    private CabinTemperatureController cabinTemperature;
     private CarPlayVehicleController carPlayVehicle;
     private CarPlayAudioController carPlayAudio;
     private ClearAppsController clearApps;
@@ -148,10 +149,15 @@ public class SetModesService extends Service {
                                 }
                             });
                     break;
+                case ru.big.town.common.CabinTemperatureProtocol.WATCH:
+                case ru.big.town.common.CabinTemperatureProtocol.UNWATCH:
+                    CabinTemperatureController.get(SetModesService.this).handle(msg);
+                    break;
                 case ru.big.town.common.BrightnessWidgetProtocol.WATCH:
                 case ru.big.town.common.BrightnessWidgetProtocol.UNWATCH:
                 case ru.big.town.common.BrightnessWidgetProtocol.SELECT:
-                    if (brightnessWidget == null) brightnessWidget = new BrightnessWidgetController(SetModesService.this);
+                    if (brightnessWidget == null)
+                        brightnessWidget = new BrightnessWidgetController(SetModesService.this);
                     brightnessWidget.handle(msg);
                     break;
                 case ru.big.town.common.HeadlightWidgetProtocol.WATCH:
@@ -2040,6 +2046,7 @@ public class SetModesService extends Service {
         enableWifiOnStartup();
         StartupBluetooth.enable(this);
         energyWidgets = new EnergyWidgetController(this);
+        cabinTemperature = CabinTemperatureController.get(this);
         clearApps = new ClearAppsController(this::performCloseAllApps);
         ApplyEngine.activateWake("service create");
         // A stale file from an earlier boot is fail-closed and removed on first service creation.
@@ -2538,6 +2545,7 @@ public class SetModesService extends Service {
             headlightWidget.close();
         }
         if (energyWidgets != null) energyWidgets.close();
+        if (cabinTemperature != null) cabinTemperature.close();
         if (carPlayVehicle != null) carPlayVehicle.destroy();
         if (carPlayAudio != null) carPlayAudio.destroy();
         if (clearApps != null) clearApps.close();

@@ -57,23 +57,30 @@ interface ScenarioEnvironment {
 
             @Override
             public Subscription driveMode(Handler handler, Consumer<String> listener) {
-                CanBusEventHub.Subscription subscription = CanBusEventHub.get(service).subscribe(
-                        CanBusEventRouter.INTEREST_CONNECTION | CanBusEventRouter.INTEREST_VEHICLE_STATE,
-                        new int[] {ModeFeedbackDecoder.DRIVE_MODE_VSTATE_ID},
-                        handler,
-                        event -> {
-                            if (event.kind == CanBusEvent.Kind.CONNECTION
-                                    || event.kind == CanBusEvent.Kind.CONNECTION_LOST) {
-                                driveMode = null;
-                                listener.accept(null);
-                            } else if (event.kind == CanBusEvent.Kind.VEHICLE_STATE
-                                    && event.first == ModeFeedbackDecoder.DRIVE_MODE_VSTATE_ID) {
-                                ModeFeedbackDecoder.Feedback feedback =
-                                        ModeFeedbackDecoder.decode(event.first, event.second);
-                                driveMode = feedback == null ? null : feedback.mode;
-                                listener.accept(driveMode);
-                            }
-                        });
+                CanBusEventHub.Subscription subscription =
+                        CanBusEventHub.get(service)
+                                .subscribe(
+                                        CanBusEventRouter.INTEREST_CONNECTION
+                                                | CanBusEventRouter.INTEREST_VEHICLE_STATE,
+                                        new int[] {ModeFeedbackDecoder.DRIVE_MODE_VSTATE_ID},
+                                        handler,
+                                        event -> {
+                                            if (event.kind == CanBusEvent.Kind.CONNECTION
+                                                    || event.kind
+                                                            == CanBusEvent.Kind.CONNECTION_LOST) {
+                                                driveMode = null;
+                                                listener.accept(null);
+                                            } else if (event.kind == CanBusEvent.Kind.VEHICLE_STATE
+                                                    && event.first
+                                                            == ModeFeedbackDecoder
+                                                                    .DRIVE_MODE_VSTATE_ID) {
+                                                ModeFeedbackDecoder.Feedback feedback =
+                                                        ModeFeedbackDecoder.decode(
+                                                                event.first, event.second);
+                                                driveMode = feedback == null ? null : feedback.mode;
+                                                listener.accept(driveMode);
+                                            }
+                                        });
                 return subscription::close;
             }
 
@@ -118,7 +125,10 @@ interface ScenarioEnvironment {
                         drive,
                         calendar.get(Calendar.HOUR_OF_DAY) * 60 + calendar.get(Calendar.MINUTE),
                         ((calendar.get(Calendar.DAY_OF_WEEK) + 5) % 7) + 1,
-                        states.gear().currentGear());
+                        states.gear().currentGear(),
+                        ScenarioPolicy.hasCondition(scenario, ScenarioProtocol.CONDITION_TEMP_IN)
+                                ? CabinTemperatureController.get(service).temperature()
+                                : Double.NaN);
             }
 
             @Override

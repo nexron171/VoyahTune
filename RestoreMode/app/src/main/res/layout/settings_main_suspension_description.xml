@@ -8,4 +8,6 @@
     android:lineSpacingMultiplier="1.5"
     android:textColor="#97a6bc"
     android:includeFontPadding="false"
-    android:layout_marginTop="16dp" />
+    android:layout_marginTop="16dp"
+    android:paddingHorizontal="24dp"
+    android:paddingBottom="22dp" />

@@ -4,10 +4,13 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.os.Bundle;
+import android.os.Parcelable;
 import android.os.Message;
 import android.os.RemoteException;
 import android.util.Log;
 import android.view.View;
+import android.widget.LinearLayout;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
 import android.widget.Switch;
@@ -16,20 +19,97 @@ import android.widget.TextView;
 import ru.big.town.common.ScreenBrightnessSettings;
 import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.integration.GlobalVars;
+import ru.big.town.restoremode.settings.core.SettingsHost;
 import ru.big.town.restoremode.settings.core.SettingsSection;
 import ru.big.town.restoremode.settings.core.SettingsSectionFragment;
 import ru.big.town.restoremode.settings.core.SettingsSectionLayouts;
 import ru.big.town.restoremode.settings.ui.controls.SettingsControls;
 import ru.big.town.restoremode.settings.ui.list.SettingsList;
+import ru.big.town.restoremode.settings.ui.layout.SettingsGrid;
+import ru.big.town.restoremode.settings.ui.style.SettingsDesign;
 import ru.big.town.restoremode.vehicle.DriveSelectionPreferences;
 import ru.big.town.restoremode.vehicle.FragranceSettings;
 
 import java.util.List;
+import java.util.ArrayList;
 
 public final class VehicleSettingsFragment extends SettingsSectionFragment {
     @Override
     public SettingsSection section() {
         return SettingsSection.VEHICLE;
+    }
+
+    private VehicleSettingsCategory category;
+    private Parcelable menuScroll;
+
+    @Override
+    protected void onSectionViewCreated(Bundle state) {
+        String saved = state.getString("vehicleCategory");
+        category = saved == null ? null : VehicleSettingsCategory.valueOf(saved);
+        menuScroll = state.getParcelable("vehicleMenuScroll");
+    }
+
+    @Override
+    protected void saveSectionState(Bundle state) {
+        state.putString("vehicleCategory", category == null ? null : category.name());
+        state.putParcelable("vehicleMenuScroll", menuScroll);
+    }
+
+    @Override
+    public String categoryTitle() {
+        return category == null ? null : category.title;
+    }
+
+    @Override
+    protected SettingsSectionLayouts.Item[] sectionLayouts() {
+        return category == null ? new SettingsSectionLayouts.Item[0] : category.layouts();
+    }
+
+    @Override
+    protected void showRows(boolean resetScroll) {
+        if (category == null) {
+            List<SettingsList.Row> rows = new ArrayList<>();
+            rows.add(layoutRow(R.layout.settings_vehicle_intro));
+            rows.add(new SettingsList.Row("vehicleCategories", this::categoryGrid));
+            settingsList.submit(rows, resetScroll);
+        } else {
+            super.showRows(resetScroll);
+        }
+        if (getActivity() instanceof SettingsHost) {
+            ((SettingsHost) requireActivity()).refreshHeader();
+        }
+    }
+
+    private View categoryGrid(LinearLayout parent) {
+        SettingsGrid grid =
+                (SettingsGrid) getLayoutInflater()
+                        .inflate(R.layout.settings_main_categories, parent, false);
+        for (VehicleSettingsCategory item : VehicleSettingsCategory.values()) {
+            View tile = getLayoutInflater().inflate(R.layout.settings_main_category, grid, false);
+            ((TextView) tile.findViewById(R.id.mainCategoryTitle)).setText(item.title);
+            ((TextView) tile.findViewById(R.id.mainCategoryDescription)).setText(item.description);
+            tile.setMinimumHeight(SettingsDesign.dp(tile, 150));
+            tile.setOnClickListener(view -> {
+                menuScroll = settingsList.getLayoutManager().onSaveInstanceState();
+                category = item;
+                showRows(true);
+            });
+            grid.addView(tile);
+        }
+        return grid;
+    }
+
+    @Override
+    public boolean navigateUp() {
+        if (category == null || settingsList == null) {
+            return false;
+        }
+        category = null;
+        showRows(true);
+        if (menuScroll != null) {
+            settingsList.getLayoutManager().onRestoreInstanceState(menuScroll);
+        }
+        return true;
     }
 
     private ScreenBrightnessSettingsPage brightnessPage;
@@ -39,7 +119,9 @@ public final class VehicleSettingsFragment extends SettingsSectionFragment {
             new BroadcastReceiver() {
                 @Override
                 public void onReceive(Context context, Intent intent) {
-                    if (brightnessPage != null) brightnessPage.update(intent);
+                    if (brightnessPage != null) {
+                        brightnessPage.update(intent);
+                    }
                 }
             };
 
@@ -47,7 +129,6 @@ public final class VehicleSettingsFragment extends SettingsSectionFragment {
     protected void addDynamicRows(
             List<SettingsList.Row> rows, SettingsSectionLayouts.DynamicContent kind) {
         if (kind == SettingsSectionLayouts.DynamicContent.TURN_SOUND) {
-            if (!ru.big.town.common.VehiclePlatform.current().isH97XY()) return;
             if (turnSoundPage == null) {
                 turnSoundPage =
                         new TurnSoundSettingsPage(
@@ -72,7 +153,9 @@ public final class VehicleSettingsFragment extends SettingsSectionFragment {
     @Override
     protected void onSectionViewDestroyed() {
         brightnessPage = null;
-        if (turnSoundPage != null) turnSoundPage.close();
+        if (turnSoundPage != null) {
+            turnSoundPage.close();
+        }
         turnSoundPage = null;
     }
 
@@ -260,7 +343,9 @@ public final class VehicleSettingsFragment extends SettingsSectionFragment {
     private void bindMediaPlay() {
         View row = settingView(R.id.playMediaOnDoorRow);
         Switch toggle = settingView(R.id.switchPlayMediaOnDoor);
-        if (row == null || toggle == null) return;
+        if (row == null || toggle == null) {
+            return;
+        }
         boolean supported = ru.big.town.common.VehiclePlatform.current().isH97XY();
         row.setVisibility(supported ? View.VISIBLE : View.GONE);
         toggle.setChecked(
@@ -638,7 +723,9 @@ public final class VehicleSettingsFragment extends SettingsSectionFragment {
 
     @Override
     protected void releaseSettingsRow(View row) {
-        if (brightnessPage != null) brightnessPage.release(row);
+        if (brightnessPage != null) {
+            brightnessPage.release(row);
+        }
         if (isDescendant(row, autoLightGroup)) {
             autoLightGroup = null;
         }

@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ru.big.town.restoremode.settings.ui.layout.SettingsWidgetCard
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/radioWidgetCard"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/settings_card"
+    app:settingsToggleRef="@id/switchShowRadio"
+    android:padding="1dp">
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="24dp"
+        android:paddingVertical="22dp"
+        android:minHeight="100dp">
+        <ImageView
+            android:layout_width="52dp"
+            android:layout_height="52dp"
+            android:padding="12dp"
+            android:src="@drawable/radio_widget_background"
+            android:background="@drawable/settings_icon"
+            android:importantForAccessibility="no"
+            android:layout_marginEnd="16dp" />
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_weight="1">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Радио"
+                android:textSize="23sp"
+                android:textColor="#f3f5fa"
+                android:includeFontPadding="false" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Станция, частота и управление воспроизведением"
+                android:textSize="16sp"
+                android:textColor="#95a5bd"
+                android:includeFontPadding="false"
+                android:layout_marginTop="7dp"
+                android:lineSpacingMultiplier="1.45" />
+        </LinearLayout>
+        <ru.big.town.restoremode.settings.ui.controls.SettingsToggle
+            android:id="@+id/switchShowRadio"
+            android:layout_width="58dp"
+            android:layout_height="32dp"
+            android:thumb="@drawable/switch_thumb"
+            android:track="@drawable/switch_track" />
+    </LinearLayout>
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="24dp"
+        android:paddingVertical="22dp"
+        android:background="@color/settings_inset">
+        <ImageView
+            android:layout_width="64dp"
+            android:layout_height="64dp"
+            android:layout_marginEnd="24dp"
+            android:padding="8dp"
+            android:src="@drawable/radio_widget_background"
+            android:importantForAccessibility="no" />
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_weight="1">
+            <LinearLayout
+                android:id="@+id/radioSizeRow"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="center_vertical"
+                android:visibility="gone">
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="ШИРИНА × ВЫСОТА, ЯЧЕЙКИ"
+                    android:textSize="13sp"
+                    android:textColor="#8497b1"
+                    android:includeFontPadding="false"
+                    android:letterSpacing="0.077"
+                    android:layout_marginBottom="12dp" />
+                <Spinner
+                    android:id="@+id/radioSettingWidth"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:contentDescription="Ширина виджета радио"
+                    android:popupBackground="@color/settings_inset"
+                    android:background="@drawable/settings_field" />
+                <Spinner
+                    android:id="@+id/radioSettingHeight"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="8dp"
+                    android:contentDescription="Высота виджета радио"
+                    android:popupBackground="@color/settings_inset"
+                    android:background="@drawable/settings_field" />
+                <ru.big.town.restoremode.settings.ui.preview.SettingsPreviewView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:layout_marginBottom="12dp"
+                    app:settingsPreviewKind="grid"
+                    app:settingsTileKey="radioWidget"
+                    app:settingsTileWidth="2"
+                    app:settingsTileHeight="2"
+                    android:tag="settings.cell-grid" />
+            </LinearLayout>
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Включите виджет,&#10;чтобы выбрать размер"
+                android:textSize="16sp"
+                android:textColor="#788ba5"
+                android:includeFontPadding="false"
+                android:tag="settings.off-note" />
+        </LinearLayout>
+    </LinearLayout>
+</ru.big.town.restoremode.settings.ui.layout.SettingsWidgetCard>

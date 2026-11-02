@@ -11,6 +11,7 @@ final class ScenarioPolicy {
 
         final int gearValue;
         final int lightLevel; // 0..7 или -1
+        final double cabinTemperature;
         final int ambientTemp; // °C или UNKNOWN
         final int socPercent; // 0..100 или -1
         final String driveMode; // ECO/COMFORT/SPORT/OUTING/INDIVIDUAL/SNOW или null
@@ -25,6 +26,27 @@ final class ScenarioPolicy {
                 int minutesOfDay,
                 int dayOfWeek,
                 int gearValue) {
+            this(
+                    lightLevel,
+                    ambientTemp,
+                    socPercent,
+                    driveMode,
+                    minutesOfDay,
+                    dayOfWeek,
+                    gearValue,
+                    Double.NaN);
+        }
+
+        Snapshot(
+                int lightLevel,
+                int ambientTemp,
+                int socPercent,
+                String driveMode,
+                int minutesOfDay,
+                int dayOfWeek,
+                int gearValue,
+                double cabinTemperature) {
+            this.cabinTemperature = cabinTemperature;
             this.gearValue = gearValue;
             this.lightLevel = lightLevel;
             this.ambientTemp = ambientTemp;
@@ -126,34 +148,77 @@ final class ScenarioPolicy {
         return null;
     }
 
-    private static String describeFailure(ScenarioDefinition.Condition condition, Snapshot snapshot) {
+    private static String describeFailure(
+            ScenarioDefinition.Condition condition, Snapshot snapshot) {
         if (ScenarioProtocol.CONDITION_GEAR.equals(condition.type)) {
             String currentGear = ScenarioProtocol.gearName(snapshot.gearValue);
-            return "селектор (нужно " + ScenarioProtocol.gearName(condition.value) + ", "
-                    + (currentGear == null ? "данных нет" : "сейчас " + currentGear) + ")";
+            return "селектор (нужно "
+                    + ScenarioProtocol.gearName(condition.value)
+                    + ", "
+                    + (currentGear == null ? "данных нет" : "сейчас " + currentGear)
+                    + ")";
         }
         if (ScenarioProtocol.CONDITION_LIGHT.equals(condition.type)) {
-            return "освещённость (нужно " + symbol(condition.op) + " " + condition.value + ", "
-                    + current(snapshot.lightLevel, "") + ")";
+            return "освещённость (нужно "
+                    + symbol(condition.op)
+                    + " "
+                    + condition.value
+                    + ", "
+                    + current(snapshot.lightLevel, "")
+                    + ")";
+        }
+        if (ScenarioProtocol.CONDITION_TEMP_IN.equals(condition.type)) {
+            return "температура в салоне (нужно "
+                    + symbol(condition.op)
+                    + " "
+                    + condition.value
+                    + " °C, "
+                    + (Double.isFinite(snapshot.cabinTemperature)
+                            ? "сейчас "
+                                    + ru.big.town.common.CabinTemperatureProtocol.format(
+                                            snapshot.cabinTemperature)
+                                    + " °C"
+                            : "данных нет")
+                    + ")";
         }
         if (ScenarioProtocol.CONDITION_TEMP_OUT.equals(condition.type)) {
-            return "уличная температура (нужно " + symbol(condition.op) + " " + condition.value + " °C, "
+            return "уличная температура (нужно "
+                    + symbol(condition.op)
+                    + " "
+                    + condition.value
+                    + " °C, "
                     + (snapshot.ambientTemp == Snapshot.UNKNOWN
-                            ? "данных нет" : "сейчас " + snapshot.ambientTemp + " °C") + ")";
+                            ? "данных нет"
+                            : "сейчас " + snapshot.ambientTemp + " °C")
+                    + ")";
         }
         if (ScenarioProtocol.CONDITION_SOC.equals(condition.type)) {
-            return "заряд (нужно " + symbol(condition.op) + " " + condition.value + " %, "
-                    + current(snapshot.socPercent, " %") + ")";
+            return "заряд (нужно "
+                    + symbol(condition.op)
+                    + " "
+                    + condition.value
+                    + " %, "
+                    + current(snapshot.socPercent, " %")
+                    + ")";
         }
         if (ScenarioProtocol.CONDITION_DRIVE_MODE.equals(condition.type)) {
-            return "режим движения (нужно " + condition.mode + ", "
-                    + (snapshot.driveMode == null ? "данных нет" : "сейчас " + snapshot.driveMode) + ")";
+            return "режим движения (нужно "
+                    + condition.mode
+                    + ", "
+                    + (snapshot.driveMode == null ? "данных нет" : "сейчас " + snapshot.driveMode)
+                    + ")";
         }
         if (ScenarioProtocol.CONDITION_TIME.equals(condition.type)) {
-            return "время (нужно " + condition.from + "–" + condition.to
+            return "время (нужно "
+                    + condition.from
+                    + "–"
+                    + condition.to
                     + (condition.days == null || condition.days.trim().isEmpty()
-                            ? ", ежедневно" : ", дни " + condition.days)
-                    + ", сейчас " + clock(snapshot.minutesOfDay) + ")";
+                            ? ", ежедневно"
+                            : ", дни " + condition.days)
+                    + ", сейчас "
+                    + clock(snapshot.minutesOfDay)
+                    + ")";
         }
         return condition.type;
     }
@@ -183,6 +248,15 @@ final class ScenarioPolicy {
         if (ScenarioProtocol.CONDITION_LIGHT.equals(condition.type)) {
             return snapshot.lightLevel >= 0
                     && ScenarioProtocol.compare(snapshot.lightLevel, condition.op, condition.value);
+        }
+        if (ScenarioProtocol.CONDITION_TEMP_IN.equals(condition.type)) {
+            if (!Double.isFinite(snapshot.cabinTemperature)) return false;
+            if (ScenarioProtocol.OP_LE.equals(condition.op))
+                return snapshot.cabinTemperature <= condition.value;
+            if (ScenarioProtocol.OP_GE.equals(condition.op))
+                return snapshot.cabinTemperature >= condition.value;
+            return ScenarioProtocol.OP_EQ.equals(condition.op)
+                    && snapshot.cabinTemperature == condition.value;
         }
         if (ScenarioProtocol.CONDITION_TEMP_OUT.equals(condition.type)) {
             return snapshot.ambientTemp != Snapshot.UNKNOWN

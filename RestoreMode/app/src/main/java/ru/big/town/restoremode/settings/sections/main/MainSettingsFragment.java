@@ -3,6 +3,7 @@ package ru.big.town.restoremode.settings.sections.main;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Bundle;
+import android.os.Parcelable;
 import android.os.RemoteException;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -26,6 +27,7 @@ import ru.big.town.restoremode.dashboard.tiles.TileOrderStore;
 import ru.big.town.restoremode.dashboard.tiles.TileScrollSnap;
 import ru.big.town.restoremode.dashboard.tiles.TileSizeStore;
 import ru.big.town.restoremode.integration.GlobalVars;
+import ru.big.town.restoremode.settings.core.SettingsHost;
 import ru.big.town.restoremode.settings.core.SettingsSection;
 import ru.big.town.restoremode.settings.core.SettingsSectionFragment;
 import ru.big.town.restoremode.settings.core.SettingsSectionLayouts;
@@ -39,12 +41,13 @@ import ru.big.town.restoremode.settings.ui.preview.SettingsPreviewView;
 import ru.big.town.restoremode.settings.ui.style.SettingsDesign;
 import ru.big.town.restoremode.widgets.apps.AppShortcutStore;
 import ru.big.town.restoremode.widgets.apps.AppWidgetStore;
+import ru.big.town.restoremode.widgets.brightness.BrightnessWidgetLayout;
+import ru.big.town.restoremode.widgets.climate.CabinTemperatureWidgetLayout;
 import ru.big.town.restoremode.widgets.clock.ClockWidgetView;
 import ru.big.town.restoremode.widgets.dials.DialWidgetStore;
 import ru.big.town.restoremode.widgets.energy.EnergyWidgetLayout;
 import ru.big.town.restoremode.widgets.energy.EnergyWidgetPreferences;
 import ru.big.town.restoremode.widgets.headlights.HeadlightWidgetLayout;
-import ru.big.town.restoremode.widgets.brightness.BrightnessWidgetLayout;
 import ru.big.town.restoremode.widgets.links.LinkBrowserPicker;
 import ru.big.town.restoremode.widgets.links.LinkShortcutStore;
 import ru.big.town.restoremode.widgets.media.MediaWidgetLayout;
@@ -53,9 +56,13 @@ import ru.big.town.restoremode.widgets.system.SystemWidgetLayout;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.BiFunction;
+import java.util.function.Function;
 
 public class MainSettingsFragment extends SettingsSectionFragment {
     private SharedPreferences globalPreferences;
+    private MainSettingsCategory category;
+    private Parcelable menuScroll;
 
     @Override
     public void onCreate(Bundle state) {
@@ -71,6 +78,107 @@ public class MainSettingsFragment extends SettingsSectionFragment {
     @Override
     public SettingsSection section() {
         return SettingsSection.MAIN;
+    }
+
+    @Override
+    protected void onSectionViewCreated(Bundle state) {
+        String savedCategory = state.getString("mainCategory");
+        category = savedCategory == null ? null : MainSettingsCategory.valueOf(savedCategory);
+        menuScroll = state.getParcelable("mainMenuScroll");
+    }
+
+    @Override
+    protected void saveSectionState(Bundle state) {
+        state.putString("mainCategory", category == null ? null : category.name());
+        state.putParcelable("mainMenuScroll", menuScroll);
+    }
+
+    @Override
+    protected SettingsSectionLayouts.Item[] sectionLayouts() {
+        if (category == null) {
+            return super.sectionLayouts();
+        }
+        List<SettingsSectionLayouts.Item> layouts = new ArrayList<>();
+        if (profile().isPassenger() && category == MainSettingsCategory.GRID) {
+            layouts.add(SettingsSectionLayouts.layout(R.layout.settings_passenger_autostart_row));
+        }
+        java.util.Collections.addAll(layouts, category.layouts());
+        return layouts.toArray(new SettingsSectionLayouts.Item[0]);
+    }
+
+    @Override
+    protected void showRows(boolean resetScroll) {
+        boolean carPlayEnabled =
+                ru.big.town.restoremode.carplay.CarPlayFeature.isEnabled(requireContext());
+        if (category == MainSettingsCategory.CARPLAY && !carPlayEnabled) {
+            category = null;
+        }
+        List<SettingsList.Row> rows = new ArrayList<>();
+        if (category == null) {
+            rows.add(
+                    layoutRow(
+                            profile().isPassenger()
+                                    ? R.layout.settings_passenger_intro
+                                    : R.layout.settings_main_overview));
+            rows.add(
+                    new SettingsList.Row(
+                            "mainCategories", parent -> categoryGrid(parent, carPlayEnabled)));
+            settingsList.submit(rows, resetScroll);
+        } else {
+            super.showRows(resetScroll);
+        }
+        if (getActivity() instanceof SettingsHost) {
+            ((SettingsHost) requireActivity()).refreshHeader();
+        }
+    }
+
+    public String categoryTitle() {
+        return category == null ? null : category.title;
+    }
+
+    private View categoryGrid(LinearLayout parent, boolean carPlayEnabled) {
+        SettingsGrid grid =
+                (SettingsGrid)
+                        getLayoutInflater()
+                                .inflate(R.layout.settings_main_categories, parent, false);
+        for (MainSettingsCategory item : MainSettingsCategory.values()) {
+            if (item == MainSettingsCategory.CARPLAY && !carPlayEnabled) {
+                continue;
+            }
+            View tile =
+                    categoryLink(
+                            grid,
+                            item.title,
+                            item.description,
+                            () -> {
+                                menuScroll = settingsList.getLayoutManager().onSaveInstanceState();
+                                category = item;
+                                showRows(true);
+                            });
+            tile.setMinimumHeight(SettingsDesign.dp(tile, 150));
+            grid.addView(tile);
+        }
+        return grid;
+    }
+
+    private View categoryLink(ViewGroup parent, String title, String description, Runnable action) {
+        View row = getLayoutInflater().inflate(R.layout.settings_main_category, parent, false);
+        ((TextView) row.findViewById(R.id.mainCategoryTitle)).setText(title);
+        ((TextView) row.findViewById(R.id.mainCategoryDescription)).setText(description);
+        row.setOnClickListener(view -> action.run());
+        return row;
+    }
+
+    public boolean navigateUp() {
+        if (category == null || settingsList == null) {
+            return false;
+        }
+        category = null;
+        showRows(true);
+        if (menuScroll != null) {
+            settingsList.getLayoutManager().onRestoreInstanceState(menuScroll);
+        }
+        return true;
     }
 
     private void syncTiles() {
@@ -125,6 +233,8 @@ public class MainSettingsFragment extends SettingsSectionFragment {
                 R.id.headlightSizeRow);
         bindHeadlightSize();
         bindShowSwitch(R.id.switchShowBrightness, BrightnessWidgetLayout.VISIBLE, false);
+        bindShowSwitch(
+                R.id.switchShowCabinTemperature, CabinTemperatureWidgetLayout.VISIBLE, false);
         bindShowSwitch(R.id.switchShowRadio, RadioWidgetLayout.VISIBLE, false, R.id.radioSizeRow);
         bindTileSizeSpinners(
                 R.id.radioSettingWidth, R.id.radioSettingHeight, RadioWidgetLayout.ID, 2, 2);
@@ -274,10 +384,12 @@ public class MainSettingsFragment extends SettingsSectionFragment {
                 });
 
         NumberPicker tileSpacing = settingView(R.id.pickerTileSpacing);
-        ((View) tileSpacing.getParent()).setVisibility(profile().isPassenger() ? View.VISIBLE : View.GONE);
+        ((View) tileSpacing.getParent())
+                .setVisibility(profile().isPassenger() ? View.VISIBLE : View.GONE);
         tileSpacing.setMinValue(0);
         tileSpacing.setMaxValue(24);
-        tileSpacing.setValue(Math.max(0, Math.min(24, globalPreferences.getInt("tileSpacingDp", 4))));
+        tileSpacing.setValue(
+                Math.max(0, Math.min(24, globalPreferences.getInt("tileSpacingDp", 4))));
         tileSpacing.setOnValueChangedListener(
                 (picker, oldValue, newValue) ->
                         globalPreferences.edit().putInt("tileSpacingDp", newValue).apply());
@@ -1227,6 +1339,32 @@ public class MainSettingsFragment extends SettingsSectionFragment {
         }
     }
 
+    private <T> void addShortcutRows(
+            List<SettingsList.Row> rows,
+            List<T> entries,
+            String prefix,
+            Function<T, String> identifier,
+            BiFunction<LinearLayout, T, View> factory) {
+        final int columns = 2;
+        for (int index = 0; index < entries.size(); index += columns) {
+            List<T> group =
+                    new ArrayList<>(
+                            entries.subList(index, Math.min(index + columns, entries.size())));
+            rows.add(
+                    new SettingsList.Row(
+                            prefix + identifier.apply(group.get(0)),
+                            parent -> {
+                                SettingsGrid grid = new SettingsGrid(requireContext(), null);
+                                for (T entry : group) {
+                                    View content = factory.apply(grid, entry);
+                                    grid.addView(
+                                            SettingsPanels.appSelectionPanel(content, true, true));
+                                }
+                                return SettingsPanels.spaced(grid);
+                            }));
+        }
+    }
+
     @Override
     protected void addDynamicRows(
             List<SettingsList.Row> rows, SettingsSectionLayouts.DynamicContent kind) {
@@ -1238,18 +1376,20 @@ public class MainSettingsFragment extends SettingsSectionFragment {
                 addAppWidgetRows(rows);
                 break;
             case LINK_SHORTCUTS:
-                for (LinkShortcutStore.Entry entry : LinkShortcutStore.load(preferences)) {
-                    rows.add(
-                            new SettingsList.Row(
-                                    "link:" + entry.id, parent -> linkShortcutRow(parent, entry)));
-                }
+                addShortcutRows(
+                        rows,
+                        LinkShortcutStore.load(preferences),
+                        "link:",
+                        entry -> entry.id,
+                        this::linkShortcutRow);
                 break;
             case DIAL_CARDS:
-                for (DialWidgetStore.Entry entry : DialWidgetStore.load(preferences)) {
-                    rows.add(
-                            new SettingsList.Row(
-                                    "dial:" + entry.id, parent -> dialRow(parent, entry)));
-                }
+                addShortcutRows(
+                        rows,
+                        DialWidgetStore.load(preferences),
+                        "dial:",
+                        entry -> entry.id,
+                        this::dialRow);
                 break;
             case SHORTCUTS:
                 SettingsPanels.addAppChipRows(

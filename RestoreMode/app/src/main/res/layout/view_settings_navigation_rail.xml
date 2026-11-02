@@ -40,19 +40,6 @@
                 android:includeFontPadding="false"
                 android:lineSpacingMultiplier="1.18" />
             <TextView
-                android:id="@+id/navAppearance"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:background="@drawable/nav_rail_item_bg"
-                android:paddingHorizontal="16dp"
-                android:paddingVertical="14dp"
-                android:text="Оформление"
-                android:textColor="@color/settings_text"
-                android:textSize="23sp"
-                android:includeFontPadding="false"
-                android:lineSpacingMultiplier="1.18" />
-            <TextView
                 android:id="@+id/navPassenger"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -61,6 +48,19 @@
                 android:paddingHorizontal="16dp"
                 android:paddingVertical="14dp"
                 android:text="Пассажирский экран"
+                android:textColor="@color/settings_text"
+                android:textSize="23sp"
+                android:includeFontPadding="false"
+                android:lineSpacingMultiplier="1.18" />
+            <TextView
+                android:id="@+id/navAppearance"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:background="@drawable/nav_rail_item_bg"
+                android:paddingHorizontal="16dp"
+                android:paddingVertical="14dp"
+                android:text="Оформление"
                 android:textColor="@color/settings_text"
                 android:textSize="23sp"
                 android:includeFontPadding="false"

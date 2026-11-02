@@ -117,8 +117,8 @@ public class TileScrollSnapTest {
 
     @Test
     public void unknownKeyFallsBackToDefault() {
-        assertEquals(Mode.TILE, TileScrollSnap.fromKey(null));
-        assertEquals(Mode.TILE, TileScrollSnap.fromKey("unknown"));
+        assertEquals(Mode.OFF, TileScrollSnap.fromKey(null));
+        assertEquals(Mode.OFF, TileScrollSnap.fromKey("unknown"));
         assertEquals(Mode.OFF, TileScrollSnap.fromKey("off"));
         assertEquals(Mode.COLUMN, TileScrollSnap.fromKey("column"));
         assertEquals(Mode.PAGE, TileScrollSnap.fromKey("page"));

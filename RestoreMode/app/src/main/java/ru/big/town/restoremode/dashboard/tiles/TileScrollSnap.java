@@ -34,7 +34,7 @@ public final class TileScrollSnap {
     };
 
     /** Режим по умолчанию, если настройка ещё не задана или повреждена. */
-    public static final Mode DEFAULT_MODE = Mode.TILE;
+    public static final Mode DEFAULT_MODE = Mode.OFF;
 
     private TileScrollSnap() {}
 

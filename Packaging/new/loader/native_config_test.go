@@ -92,10 +92,14 @@ func TestCompiledRegistryReturnsIndependentCopies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	originalModule := first.Agents[0].Modules[0]
 	first.Agents[0].Modules[0] = "changed"
 	second, err := loadNativeConfigWithCode(directory, code)
-	if err != nil || second.Agents[0].Modules[0] != "acc" {
-		t.Fatal(second, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Agents[0].Modules[0] != originalModule {
+		t.Fatalf("registry module changed through another config: got %q, want %q", second.Agents[0].Modules[0], originalModule)
 	}
 }
 
