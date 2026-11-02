@@ -4,6 +4,7 @@ import android.animation.ValueAnimator;
 import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
 import android.graphics.Bitmap;
+import android.graphics.Rect;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
 import android.view.View;
@@ -25,6 +26,8 @@ public final class DashboardAppearance implements AutoCloseable {
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final WallpaperDrawable wallpaperLayer = new WallpaperDrawable(null);
     private final WallpaperDrawable blurredLayer = new WallpaperDrawable(null);
+    private final Rect visibleTileBounds = new Rect();
+    private final java.util.WeakHashMap<View, Boolean> styledTiles = new java.util.WeakHashMap<>();
     private final ValueAnimator crossfade = ValueAnimator.ofFloat(0f, 1f);
     private final SharedPreferences.OnSharedPreferenceChangeListener wallpaperListener;
     private ViewGroup tiles;
@@ -67,13 +70,23 @@ public final class DashboardAppearance implements AutoCloseable {
     }
 
     public void apply(ViewGroup tiles) {
+        AppearanceSettings updated = AppearanceSettings.load(preferences);
+        boolean restyle = this.tiles != tiles
+                || settings.backgroundColor != updated.backgroundColor
+                || settings.transparencyEnabled != updated.transparencyEnabled
+                || settings.transparencyPercent != updated.transparencyPercent
+                || settings.blurEnabled != updated.blurEnabled
+                || settings.blurAmount != updated.blurAmount;
         this.tiles = tiles;
-        settings = AppearanceSettings.load(preferences);
+        settings = updated;
         int blurAmount = settings.blursWallpaper() ? settings.blurAmount : 0;
         if (!java.util.Objects.equals(loadedWallpaper, settings.wallpaper) || loadedBlur != blurAmount) {
             loadWallpaper(settings.wallpaper, blurAmount);
         }
-        styleTiles();
+        styleTiles(restyle);
+        if (!restyle) {
+            invalidateTiles();
+        }
     }
 
     private void loadWallpaper(AppearanceSettings.Wallpaper selected, int blurAmount) {
@@ -128,7 +141,7 @@ public final class DashboardAppearance implements AutoCloseable {
             wallpaperLayer.show(image);
             blurredLayer.show(blurred != null ? blurred : image);
         }
-        styleTiles();
+        invalidateTiles();
     }
 
     public void onViewportChanged() {
@@ -139,17 +152,24 @@ public final class DashboardAppearance implements AutoCloseable {
     private void invalidateTiles() {
         if (tiles != null) {
             for (int index = 0; index < tiles.getChildCount(); index++) {
-                tiles.getChildAt(index).invalidate();
+                View tile = tiles.getChildAt(index);
+                if (tile.isShown() && tile.getAlpha() > 0f
+                        && tile.getGlobalVisibleRect(visibleTileBounds)) {
+                    tile.invalidate();
+                }
             }
         }
     }
 
-    private void styleTiles() {
+    private void styleTiles(boolean restyle) {
         if (tiles == null) {
             return;
         }
         for (int index = 0; index < tiles.getChildCount(); index++) {
-            styleTile(tiles.getChildAt(index));
+            View tile = tiles.getChildAt(index);
+            if (restyle || !styledTiles.containsKey(tile)) {
+                styleTile(tile);
+            }
         }
     }
 
@@ -178,6 +198,7 @@ public final class DashboardAppearance implements AutoCloseable {
         tile.setBackground(new RippleDrawable(ColorStateList.valueOf(0x40ffffff),
                 new WidgetSurfaceDrawable(tile, wallpaperView, settings, blurredLayer), mask));
         tile.setPadding(left, top, right, bottom);
+        styledTiles.put(tile, Boolean.TRUE);
     }
 
     private static void clearBackground(View view) {
@@ -206,6 +227,7 @@ public final class DashboardAppearance implements AutoCloseable {
         crossfade.cancel();
         ++generation;
         tiles = null;
+        styledTiles.clear();
         worker.shutdownNow();
     }
 }
