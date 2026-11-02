@@ -125,8 +125,10 @@ def check_candidate(stage, configured_gson=None):
         rust_environment["PATH"] = str(cached_cargo / "bin") + os.pathsep + rust_environment["PATH"]
     rust_environment["RUSTUP_TOOLCHAIN"] = tomllib.loads((repository / "Installer/rust-toolchain.toml").read_text())["toolchain"]["channel"]
     rust_environment["CARGO_TARGET_DIR"] = str(repository / "Installer/target")
-    subprocess.run(["cargo", "build", "--offline", "--locked", "--manifest-path",
-                    str(ROOT / "tests/install-contract-driver/Cargo.toml")], env=rust_environment, check=True)
+    subprocess.run([
+        "cargo", "build", "--locked", "--manifest-path",
+        str(ROOT / "tests/install-contract-driver/Cargo.toml"),
+    ], env=rust_environment, check=True)
     install_driver = Path(rust_environment["CARGO_TARGET_DIR"]) / "debug/install-contract-driver"
     command = [sys.executable, str(ROOT / "scripts/agent_contract_candidate.py"),
                "--java-bin", str(java / "bin/java"),
