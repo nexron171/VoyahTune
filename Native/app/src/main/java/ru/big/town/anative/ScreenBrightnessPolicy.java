@@ -18,18 +18,19 @@ final class ScreenBrightnessPolicy {
 
     private Target target = new Target(-1, false);
 
-    Target next(List<ScreenBrightnessSettings.Rule> rules, int sensor, int primary) {
-        ScreenBrightnessSettings.Rule matched =
-                ScreenBrightnessSettings.matchingRule(rules, sensor);
-        if (target.percent < 0 && (matched == null || !matched.night)) {
-            if (primary >= 1 && primary <= 100) {
-                target = new Target(primary, false);
-            }
-            return target;
+    Target next(List<ScreenBrightnessSettings.Rule> rules, int sensor, int primary, int nightThreshold) {
+        if (nightThreshold < 0 || nightThreshold > 7) {
+            throw new IllegalArgumentException("Invalid night threshold");
         }
-        if (matched != null) {
-            target = new Target(matched.percent, matched.night);
+        ScreenBrightnessSettings.Rule matched = ScreenBrightnessSettings.matchingRule(rules, sensor);
+        boolean night = sensor >= 0 && sensor <= 7 ? sensor <= nightThreshold : target.night;
+        int percent = target.percent;
+        if (percent < 0 && (matched == null || !night)) {
+            if (primary >= 1 && primary <= 100) percent = primary;
+        } else if (matched != null) {
+            percent = matched.percent;
         }
+        target = new Target(percent, night);
         return target;
     }
 }

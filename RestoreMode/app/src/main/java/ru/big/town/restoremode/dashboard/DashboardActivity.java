@@ -93,7 +93,9 @@ import ru.big.town.restoremode.widgets.energy.TripWidgetView;
 import ru.big.town.restoremode.widgets.energy.VehicleWidgetView;
 import ru.big.town.restoremode.widgets.energy.VehicleWidgets;
 import ru.big.town.restoremode.widgets.headlights.HeadlightWidgetDashboard;
+import ru.big.town.restoremode.widgets.brightness.BrightnessWidgetDashboard;
 import ru.big.town.restoremode.widgets.headlights.HeadlightWidgetLayout;
+import ru.big.town.restoremode.widgets.brightness.BrightnessWidgetLayout;
 import ru.big.town.restoremode.widgets.links.LinkShortcutLauncher;
 import ru.big.town.restoremode.widgets.links.LinkShortcutStore;
 import ru.big.town.restoremode.widgets.media.MediaWidgetDashboard;
@@ -358,6 +360,7 @@ public class DashboardActivity extends AppCompatActivity {
 
     private final RadioWidgetDashboard radioWidget = new RadioWidgetDashboard(this);
 
+    private final BrightnessWidgetDashboard brightnessWidget = new BrightnessWidgetDashboard(this);
     private final HeadlightWidgetDashboard headlightWidget = new HeadlightWidgetDashboard(this);
 
     private void watchHeadlightWidget() {
@@ -416,6 +419,7 @@ public class DashboardActivity extends AppCompatActivity {
 
     private void watchSuspension() {
         watchHeadlightWidget();
+        brightnessWidget.watch(suspensionScreenResumed && sharedPreferences.getBoolean(BrightnessWidgetLayout.VISIBLE, false));
         radioWidget.watch(
                 suspensionScreenResumed
                         && sharedPreferences.getBoolean(RadioWidgetLayout.VISIBLE, false));
@@ -1020,6 +1024,7 @@ public class DashboardActivity extends AppCompatActivity {
         GlobalVars.clientDisconnected();
         systemWidgets.disconnected();
         headlightWidget.disconnected();
+        brightnessWidget.disconnected();
     }
 
     private void restartMessengerBinding(String reason) {
@@ -1796,6 +1801,8 @@ public class DashboardActivity extends AppCompatActivity {
         switch (widgetId) {
             case RadioWidgetLayout.ID:
                 return sharedPreferences.getBoolean(RadioWidgetLayout.VISIBLE, false);
+            case BrightnessWidgetLayout.ID:
+                return sharedPreferences.getBoolean(BrightnessWidgetLayout.VISIBLE, false);
             case HeadlightWidgetLayout.ID:
                 return sharedPreferences.getBoolean(HeadlightWidgetLayout.VISIBLE, false);
             case "suspensionWidget":
@@ -1911,6 +1918,9 @@ public class DashboardActivity extends AppCompatActivity {
 
     /** Получить размеры элемента в ячейках smart-grid: {ширина, высота}. */
     private int[] getWidgetDimensions(String widgetId) {
+        if (BrightnessWidgetLayout.ID.equals(widgetId)) {
+            return new int[] {BrightnessWidgetLayout.WIDTH, BrightnessWidgetLayout.HEIGHT};
+        }
         if (RadioWidgetLayout.ID.equals(widgetId)) {
             return TileSizeStore.dimensions(sharedPreferences, widgetId, 2, 2);
         }
@@ -1999,6 +2009,7 @@ public class DashboardActivity extends AppCompatActivity {
         systemWidgets.resetViews();
         mediaWidgets.resetViews();
         headlightWidget.resetView();
+        brightnessWidget.resetView();
         radioWidget.resetView();
         watchSuspension();
         watchEnergyWidgets();
@@ -2254,6 +2265,9 @@ public class DashboardActivity extends AppCompatActivity {
                     case RadioWidgetLayout.ID:
                         int[] radioSize = getWidgetDimensions(tile.id);
                         widgetView = radioWidget.create(radioSize[0], radioSize[1]);
+                        break;
+                    case BrightnessWidgetLayout.ID:
+                        widgetView = brightnessWidget.create();
                         break;
                     case HeadlightWidgetLayout.ID:
                         widgetView = headlightWidget.create(getWidgetDimensions(tile.id)[0]);
@@ -4226,6 +4240,7 @@ public class DashboardActivity extends AppCompatActivity {
         systemWidgets.close();
         mediaWidgets.close();
         headlightWidget.close();
+        brightnessWidget.close();
         radioWidget.close();
         if (tileDragController != null) {
             tileDragController.cancel();

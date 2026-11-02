@@ -3,6 +3,13 @@ package main
 func compiledAgents() []nativeAgentConfig {
 	return []nativeAgentConfig{
 		{
+			ID:             "brightness",
+			Target:         "com.qinggan.app.hiboard",
+			MaxAttempts:    3,
+			TimeoutSeconds: 35,
+			Modules:        []string{"brightness"},
+		},
+		{
 			ID:             "acc",
 			Target:         "com.qinggan.canbus.service",
 			MaxAttempts:    4,

@@ -6,15 +6,21 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-/** Ordered rules shared by the editor and the Native controller. */
+/** Per-sensor brightness levels, with decoding support for legacy ordered rules. */
 public final class ScreenBrightnessSettings {
+    public static final String ADAPTIVE = "screenBrightnessAdaptive";
+    public static final String NIGHT_THRESHOLD = "screenBrightnessNightThreshold";
+    public static final int DEFAULT_NIGHT_THRESHOLD = 1;
+    public static final String MANUAL = "ru.big.town.anative.SCREEN_BRIGHTNESS_MANUAL";
+    public static final String MANUAL_METHOD = "screenBrightnessManual";
+    public static final String LEARN_METHOD = "learnScreenBrightness";
     public static final String ENABLED = "screenBrightnessEnabled";
     public static final String RULES = "screenBrightnessRules";
     public static final String ACTION_CONFIG = "ru.big.town.anative.SCREEN_BRIGHTNESS_CONFIG";
     public static final String ACTION_STATUS = "ru.big.town.anative.SCREEN_BRIGHTNESS_STATUS";
     public static final String ACTION_REQUEST = "ru.big.town.anative.SCREEN_BRIGHTNESS_REQUEST";
     public static final String DEFAULT_RULES =
-            "bright,ge,5,100\nmedium,ge,3,80\ndim,ge,2,50\ndark,lt,2,20";
+            "level0,eq,0,20\nlevel1,eq,1,20\nlevel2,eq,2,50\nlevel3,eq,3,80\nlevel4,eq,4,80\nlevel5,eq,5,100\nlevel6,eq,6,100\nlevel7,eq,7,100";
     public static final String[] OPERATORS = {"ge", "gt", "le", "lt", "eq"};
     public static final String[] SYMBOLS = {"≥", ">", "≤", "<", "="};
 
@@ -122,6 +128,37 @@ public final class ScreenBrightnessSettings {
         String encoded = result.toString();
         decode(encoded);
         return encoded;
+    }
+
+    public static List<Rule> levels(String encoded) {
+        List<Rule> legacy = decode(encoded);
+        List<Rule> result = new ArrayList<>();
+        for (int level = 0; level <= 7; level++) {
+            Rule matched = matchingRule(legacy, level);
+            if (matched != null) result.add(new Rule("level" + level, "eq", level, matched.percent));
+        }
+        return Collections.unmodifiableList(result);
+    }
+
+    public static int nightThreshold(String encoded) {
+        int threshold = -1;
+        List<Rule> rules = decode(encoded);
+        for (int level = 0; level <= 7; level++) {
+            Rule matched = matchingRule(rules, level);
+            if (matched != null && matched.night) threshold = level;
+        }
+        return threshold < 0 ? DEFAULT_NIGHT_THRESHOLD : threshold;
+    }
+
+    public static String calibrate(String encoded, int sensor, int percent) {
+        if (sensor < 0 || sensor > 7 || percent < 1 || percent > 100) {
+            throw new IllegalArgumentException("Invalid brightness calibration");
+        }
+        List<Rule> result = new ArrayList<>(levels(encoded));
+        result.removeIf(rule -> rule.threshold == sensor);
+        result.add(new Rule("level" + sensor, "eq", sensor, percent));
+        result.sort(java.util.Comparator.comparingInt(rule -> rule.threshold));
+        return encode(result);
     }
 
     private static boolean validOperator(String operator) {

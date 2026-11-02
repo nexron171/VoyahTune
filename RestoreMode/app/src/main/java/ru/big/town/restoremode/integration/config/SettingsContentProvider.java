@@ -12,6 +12,7 @@ import android.os.Binder;
 import android.os.Bundle;
 import android.util.Log;
 
+import ru.big.town.common.ScreenBrightnessSettings;
 import ru.big.town.common.DriveSelectionPolicy;
 import ru.big.town.common.SmartSaveSettings;
 import ru.big.town.common.WallpaperProtocol;
@@ -134,6 +135,28 @@ public class SettingsContentProvider extends ContentProvider {
      */
     @Override
     public Bundle call(String method, String arg, Bundle extras) {
+        if (ScreenBrightnessSettings.MANUAL_METHOD.equals(method)) {
+            int uid = Binder.getCallingUid();
+            if (uid != 0 && uid != android.os.Process.SYSTEM_UID && uid != android.os.Process.myUid()) {
+                throw new SecurityException("OEM brightness caller required");
+            }
+            if (extras != null) {
+                int percent = extras.getInt("percent", -1);
+                int screen = extras.getInt("screen", -1);
+                if (percent >= 1 && percent <= 100 && (screen == 1 || screen == 2 || screen == 16)) {
+                    getContext().sendBroadcast(new Intent(ScreenBrightnessSettings.MANUAL)
+                            .setClassName("ru.big.town.anative", "ru.big.town.anative.ScreenBrightnessConfigReceiver")
+                            .putExtra("percent", percent).putExtra("screen", screen));
+                }
+            }
+            return new Bundle();
+        }
+        if (ScreenBrightnessSettings.LEARN_METHOD.equals(method)) {
+            getContext().enforceCallingOrSelfPermission(
+                    "ru.big.town.anative.permission.BIND_SET_MODES_SERVICE", "Brightness calibration");
+            return extras == null ? new Bundle() : BrightnessCalibration.learn(sharedPreferences,
+                    extras.getInt("sensor", -1), extras.getInt("percent", -1));
+        }
         if (WallpaperProtocol.METHOD_SET.equals(method)) {
             getContext().enforceCallingOrSelfPermission(WallpaperProtocol.PERMISSION, "Wallpaper change");
             Bundle result = new Bundle();

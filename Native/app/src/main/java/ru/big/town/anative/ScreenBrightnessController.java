@@ -43,11 +43,23 @@ final class ScreenBrightnessController {
             int sensor,
             BooleanSupplier active)
             throws Exception {
+        return reconcile(screens, rules, sensor,
+                ScreenBrightnessSettings.nightThreshold(ScreenBrightnessSettings.encode(rules)), active);
+    }
+
+    Result reconcile(
+            Screens screens,
+            List<ScreenBrightnessSettings.Rule> rules,
+            int sensor,
+            int nightThreshold,
+            BooleanSupplier active)
+            throws Exception {
         ScreenBrightnessPolicy.Target target = new ScreenBrightnessPolicy.Target(-1, false);
         if (!active.getAsBoolean()) return new Result(target, 0, false);
         boolean synchronizationConfirmed = enableSynchronization(screens, active);
         if (!active.getAsBoolean()) return new Result(target, 0, synchronizationConfirmed);
-        target = policy.next(rules, sensor, screens.read(1));
+        int primary = screens.read(1);
+        target = policy.next(rules, sensor, primary, nightThreshold);
         int confirmed = 0;
         if (target.percent < 0) return new Result(target, confirmed, synchronizationConfirmed);
         int mode =

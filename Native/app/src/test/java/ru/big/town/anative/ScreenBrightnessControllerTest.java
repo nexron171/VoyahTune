@@ -194,9 +194,9 @@ public class ScreenBrightnessControllerTest {
         ScreenBrightnessController.Result uncovered =
                 controller.reconcile(screens, new ArrayList<>(), 5, () -> true);
         assertEquals(75, uncovered.target);
-        assertTrue(uncovered.night);
+        assertFalse(uncovered.night);
         assertTrue(screens.writes.isEmpty());
-        assertTrue(screens.modeWrites.isEmpty());
+        assertEquals(Arrays.asList("1=1", "2=1", "16=1"), screens.modeWrites);
         ScreenBrightnessController.Result day = controller.reconcile(screens, rules, 3, () -> true);
         assertEquals(45, day.target);
         assertFalse(day.night);
@@ -342,6 +342,47 @@ public class ScreenBrightnessControllerTest {
         result = controller.reconcile(screens, defaults, 3, () -> true);
         assertEquals(0, result.confirmed);
         assertTrue(screens.writes.isEmpty());
+    }
+
+    @Test
+    public void manualSelectionBlocksSensorWritesUntilAutoResumesEnabledRules() throws Exception {
+        FakeScreens screens = new FakeScreens();
+        ScreenBrightnessController controller = new ScreenBrightnessController();
+        controller.reconcile(screens, defaults, 7, () -> true);
+        screens.writes.clear();
+        screens.modeWrites.clear();
+        for (int manual : new int[] {0, 1}) {
+            ScreenBrightnessModeController.apply(screens, manual, () -> true);
+            screens.modeWrites.clear();
+            controller.reconcile(screens, defaults, 0,
+                    () -> ru.big.town.common.BrightnessWidgetProtocol.rulesActive(true, manual));
+            assertTrue(screens.writes.isEmpty());
+            assertTrue(screens.modeWrites.isEmpty());
+            assertEquals(Integer.valueOf(manual), screens.modes.get(16));
+        }
+        ScreenBrightnessController.Result resumed = controller.reconcile(screens, defaults, 0,
+                () -> ru.big.town.common.BrightnessWidgetProtocol.rulesActive(true, 2));
+        assertEquals(20, resumed.target);
+        assertEquals(3, resumed.confirmed);
+        assertEquals(Arrays.asList("1=20", "2=20", "16=20"), screens.writes);
+    }
+
+    @Test
+    public void independentNightThresholdAppliesWithoutMatchingBrightnessRule() throws Exception {
+        FakeScreens screens = new FakeScreens();
+        ScreenBrightnessController controller = new ScreenBrightnessController();
+        ScreenBrightnessController.Result night = controller.reconcile(screens,
+                ScreenBrightnessSettings.decode("only,eq,7,80"), 3, 3, () -> true);
+        assertTrue(night.night);
+        assertEquals(60, night.target);
+        assertEquals(Integer.valueOf(0), screens.modes.get(1));
+        assertEquals(Integer.valueOf(0), screens.modes.get(16));
+        ScreenBrightnessController.Result day = controller.reconcile(screens,
+                ScreenBrightnessSettings.decode("only,eq,7,80"), 4, 3, () -> true);
+        assertFalse(day.night);
+        assertEquals(60, day.target);
+        assertEquals(Integer.valueOf(1), screens.modes.get(1));
+        assertEquals(Integer.valueOf(1), screens.modes.get(16));
     }
 
     private static final class FakeScreens implements ScreenBrightnessController.Screens {
