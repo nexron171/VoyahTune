@@ -1493,46 +1493,21 @@ public class DashboardActivity extends AppCompatActivity {
 
     /** Контекстное меню иконки «Быстрого запуска»: куда открыть приложение. */
     private void showLaunchAppMenu(View anchor, String pkg) {
-        final int idMainDisplay = 0;
-        final int idPassengerDisplay = 1;
-        final int idNoWidgets = 10;
-        final int idWidgetBase = 100;
-        java.util.List<AppWidgetStore.Entry> widgets = AppWidgetStore.load(sharedPreferences);
-        android.widget.PopupMenu menu = new android.widget.PopupMenu(this, anchor);
-        menu.getMenu().add(0, idMainDisplay, 0, "Запустить на основном дисплее");
-        menu.getMenu().add(0, idPassengerDisplay, 1, "Запустить на пассажирском экране");
+        LaunchAppMenu menu = new LaunchAppMenu(this, pkg);
+        menu.addDestination("Основной экран", R.drawable.settings_icon_fullscreen,
+                () -> launchAppOnDisplay(pkg, 0));
+        menu.addDestination("Пассажирский экран", R.drawable.settings_icon_fullscreen,
+                () -> launchAppOnDisplay(pkg, 1));
+        List<AppWidgetStore.Entry> widgets = AppWidgetStore.load(sharedPreferences);
         if (widgets.isEmpty()) {
-            menu.getMenu().add(0, idNoWidgets, 2, "Нет виджетов приложения").setEnabled(false);
+            menu.addDestination("Нет виджетов приложения", R.drawable.settings_icon_apps, null);
         } else {
-            // По пункту на каждый созданный пользователем виджет приложения.
-            for (int i = 0; i < widgets.size(); i++) {
-                menu.getMenu()
-                        .add(
-                                0,
-                                idWidgetBase + i,
-                                i + 2,
-                                "Запустить в виджете: " + appWidgetTitle(widgets.get(i)));
+            for (AppWidgetStore.Entry widget : widgets) {
+                menu.addDestination("Виджет " + appWidgetTitle(widget), R.drawable.settings_icon_apps,
+                        () -> launchInsideAppWidget(pkg, widget.id));
             }
         }
-        menu.setOnMenuItemClickListener(
-                item -> {
-                    int id = item.getItemId();
-                    if (id == idMainDisplay) {
-                        launchAppOnDisplay(pkg, 0);
-                        return true;
-                    }
-                    if (id == idPassengerDisplay) {
-                        launchAppOnDisplay(pkg, 1);
-                        return true;
-                    }
-                    int index = id - idWidgetBase;
-                    if (index >= 0 && index < widgets.size()) {
-                        launchInsideAppWidget(pkg, widgets.get(index).id);
-                        return true;
-                    }
-                    return false;
-                });
-        menu.show();
+        menu.show(anchor, appearance);
     }
 
     /** Подпись виджета в меню: обозначение и приложение — запущенное или выбранное в настройках. */

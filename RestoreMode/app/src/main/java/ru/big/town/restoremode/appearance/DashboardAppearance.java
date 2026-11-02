@@ -4,6 +4,7 @@ import android.animation.ValueAnimator;
 import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
 import android.graphics.Bitmap;
+import android.graphics.Canvas;
 import android.graphics.Rect;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
@@ -199,6 +200,31 @@ public final class DashboardAppearance implements AutoCloseable {
                 new WidgetSurfaceDrawable(tile, wallpaperView, settings, blurredLayer), mask));
         tile.setPadding(left, top, right, bottom);
         styledTiles.put(tile, Boolean.TRUE);
+    }
+
+    public Runnable stylePopup(View popup) {
+        AppearanceSettings popupSettings = AppearanceSettings.load(preferences);
+        View scene = wallpaperView.getRootView();
+        Bitmap blurred = null;
+        if (popupSettings.transparencyEnabled && popupSettings.blurEnabled
+                && popupSettings.blurAmount > 0 && scene.getWidth() > 0 && scene.getHeight() > 0) {
+            // Capture before attaching the popup so its own content stays sharp.
+            Bitmap snapshot = Bitmap.createBitmap(
+                    scene.getWidth(), scene.getHeight(), Bitmap.Config.ARGB_8888);
+            scene.draw(new Canvas(snapshot));
+            blurred = WallpaperBlur.create(snapshot, popupSettings.blurAmount);
+            snapshot.recycle();
+        }
+        Bitmap backdrop = blurred;
+        popup.setBackground(new WidgetSurfaceDrawable(
+                popup, scene, popupSettings, backdrop == null ? null : new WallpaperDrawable(backdrop)));
+        popup.setClipToOutline(true);
+        return () -> {
+            popup.setBackground(null);
+            if (backdrop != null) {
+                backdrop.recycle();
+            }
+        };
     }
 
     private static void clearBackground(View view) {
