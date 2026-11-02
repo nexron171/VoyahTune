@@ -108,7 +108,7 @@ final class TurnSoundSettingsPage {
                         parent -> {
                             SettingsToggle toggle = new SettingsToggle(activity, null);
                             toggle.setChecked(enabled);
-                            toggle.setEnabled(known && !busy);
+                            toggle.setEnabled(!busy);
                             toggle.setOnCheckedChangeListener(
                                     (button, checked) -> enabled = checked);
 
@@ -154,7 +154,7 @@ final class TurnSoundSettingsPage {
 
                             Button apply = new Button(activity);
                             apply.setText("Применить");
-                            apply.setEnabled(known && !busy);
+                            apply.setEnabled(!busy);
                             apply.setOnClickListener(
                                     view -> request(enabled ? "apply" : "restore"));
 
@@ -344,7 +344,11 @@ final class TurnSoundSettingsPage {
                     } catch (Exception failure) {
                         error =
                                 failure instanceof UnsupportedOperationException
-                                        ? "Требуется обновление root-службы через USB"
+                                        ? "status".equals(action)
+                                                ? "Состояние недоступно · выберите настройки и нажмите"
+                                                        + " «Применить»"
+                                                : "Root-служба не поддерживает изменение звука."
+                                                        + " Обновите VoyahTune по проводу (USB)."
                                         : "Не удалось подтвердить состояние: "
                                                 + failure.getMessage();
                     }
