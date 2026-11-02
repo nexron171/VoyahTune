@@ -1389,6 +1389,27 @@ public class DashboardActivity extends AppCompatActivity {
         }
         grid.removeAllViews();
 
+        View.OnLongClickListener dragLauncher = view -> launchAppsWidget.performLongClick();
+        grid.setOnLongClickListener(dragLauncher);
+        View scroll = launchAppsWidget.findViewById(R.id.launchAppsScroll);
+        if (scroll != null) {
+            // ScrollView handles background touches without View's long-press detection.
+            GestureDetector dragDetector =
+                    new GestureDetector(
+                            this,
+                            new GestureDetector.SimpleOnGestureListener() {
+                                @Override
+                                public void onLongPress(MotionEvent event) {
+                                    launchAppsWidget.performLongClick();
+                                }
+                            });
+            scroll.setOnTouchListener(
+                    (view, event) -> {
+                        dragDetector.onTouchEvent(event);
+                        return false;
+                    });
+        }
+
         PackageManager pm = getPackageManager();
         Intent query = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
 
@@ -1432,10 +1453,9 @@ public class DashboardActivity extends AppCompatActivity {
             } catch (Exception ignored) {
             }
 
-            item.setOnClickListener(v -> launchAppNormally(pkg));
-            // Долгий тап по иконке — контекстное меню запуска (основной дисплей / пассажирский /
-            // первый app_widget). Перенос самой плитки остаётся на долгом тапе по её фону.
-            item.setOnLongClickListener(
+            View shortcut = item.findViewById(R.id.launchAppGridShortcut);
+            shortcut.setOnClickListener(v -> launchAppNormally(pkg));
+            shortcut.setOnLongClickListener(
                     v -> {
                         showLaunchAppMenu(v, pkg);
                         return true;
