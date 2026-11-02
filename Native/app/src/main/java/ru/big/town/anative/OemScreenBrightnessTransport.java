@@ -15,6 +15,7 @@ import java.lang.reflect.Method;
 final class OemScreenBrightnessTransport
         implements ScreenBrightnessController.Screens, ScreenBrightnessModeController.Modes {
     private static final Uri SYSTEM_SETTINGS = Uri.parse("content://qinggan.settings/system");
+    private static final int FLAG_NOT_NOTIFY = 1;
     private static final String BRIGHTNESS_SYNC_KEY = "sync_bright_switcher_value";
 
     private ContentResolver contentResolver;
@@ -58,8 +59,8 @@ final class OemScreenBrightnessTransport
 
     @Override
     public boolean write(int screen, int percent) throws Exception {
-        // FLAG_DEFAULT notifies stock UI; background retries must not open warning dialogs.
-        return Boolean.TRUE.equals(setter.invoke(service, percent, 0, screen, false));
+        // SystemUI opens its center slider only for FLAG_DEFAULT (0).
+        return Boolean.TRUE.equals(setter.invoke(service, percent, FLAG_NOT_NOTIFY, screen, false));
     }
 
     @Override
@@ -69,7 +70,7 @@ final class OemScreenBrightnessTransport
 
     @Override
     public boolean writeMode(int screen, int mode) throws Exception {
-        return Boolean.TRUE.equals(modeSetter.invoke(service, mode, 0, screen, false));
+        return Boolean.TRUE.equals(modeSetter.invoke(service, mode, FLAG_NOT_NOTIFY, screen, false));
     }
 
     @Override
