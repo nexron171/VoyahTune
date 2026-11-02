@@ -8,9 +8,9 @@ import org.json.JSONObject;
 import ru.voyahtune.agent.HookBridge;
 import ru.voyahtune.agent.HookRegistry;
 import ru.voyahtune.agent.modules.AccModule;
-import ru.voyahtune.agent.modules.BrightnessModule;
-import ru.voyahtune.agent.modules.AndroidBrightnessDelivery;
 import ru.voyahtune.agent.modules.AndroidAccPlatform;
+import ru.voyahtune.agent.modules.AndroidBrightnessDelivery;
+import ru.voyahtune.agent.modules.AndroidCabinClimateDelivery;
 import ru.voyahtune.agent.modules.AndroidClientGeometryPlatform;
 import ru.voyahtune.agent.modules.AndroidClientInputMethodPlatform;
 import ru.voyahtune.agent.modules.AndroidClusterPlatform;
@@ -24,6 +24,8 @@ import ru.voyahtune.agent.modules.AndroidRdsPlatform;
 import ru.voyahtune.agent.modules.AndroidStatusBarPlatform;
 import ru.voyahtune.agent.modules.AndroidWindowsPlatform;
 import ru.voyahtune.agent.modules.ApolloModule;
+import ru.voyahtune.agent.modules.BrightnessModule;
+import ru.voyahtune.agent.modules.CabinClimateModule;
 import ru.voyahtune.agent.modules.ClientGeometryModule;
 import ru.voyahtune.agent.modules.ClientInputMethodModule;
 import ru.voyahtune.agent.modules.ClientModule;
@@ -141,7 +143,7 @@ public final class AgentRuntime {
                                                                                 .getPackageName())) {
                                                     throw new IllegalArgumentException(
                                                             "Navigation audio module package"
-                                                                + " mismatch");
+                                                                    + " mismatch");
                                                 }
                                                 return new NavigationAudioModule(
                                                         methods,
@@ -195,9 +197,17 @@ public final class AgentRuntime {
                                                                 methods));
                                             }
                                             if (id.equals("brightness")) {
-                                                return new BrightnessModule(methods, hooks,
-                                                        new AndroidBrightnessDelivery((Context) applicationContext),
-                                                        failure -> android.util.Log.w("vt_brightness", "Calibration delivery failed", failure));
+                                                return new BrightnessModule(
+                                                        methods,
+                                                        hooks,
+                                                        new AndroidBrightnessDelivery(
+                                                                (Context) applicationContext),
+                                                        failure ->
+                                                                android.util.Log.w(
+                                                                        "vt_brightness",
+                                                                        "Calibration delivery"
+                                                                            + " failed",
+                                                                        failure));
                                             }
                                             if (id.equals("vehicle-air")) {
                                                 return new VehicleAirModule(
@@ -220,6 +230,14 @@ public final class AgentRuntime {
                                                         new AndroidDriveResetPlatform(
                                                                 (Context) applicationContext,
                                                                 methods));
+                                            }
+                                            if (id.equals("cabin-climate")) {
+                                                return new CabinClimateModule(
+                                                        methods,
+                                                        hooks,
+                                                        android.os.SystemClock::elapsedRealtime,
+                                                        new AndroidCabinClimateDelivery(
+                                                                (Context) applicationContext));
                                             }
                                             if (id.equals("acc")) {
                                                 return new AccModule(

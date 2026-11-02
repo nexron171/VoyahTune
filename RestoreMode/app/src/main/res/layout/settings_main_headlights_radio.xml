@@ -279,4 +279,5 @@
                 android:track="@drawable/switch_track" />
         </LinearLayout>
     </ru.big.town.restoremode.settings.ui.layout.SettingsWidgetCard>
+    <include layout="@layout/settings_main_cabin_temperature" />
 </ru.big.town.restoremode.settings.ui.layout.SettingsGrid>

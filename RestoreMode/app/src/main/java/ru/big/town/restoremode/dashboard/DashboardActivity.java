@@ -66,9 +66,9 @@ import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.TaskManagerActivity;
 import ru.big.town.restoremode.TripHistoryActivity;
 import ru.big.town.restoremode.VoiceActivity;
-import ru.big.town.restoremode.apps.AppDpiStore;
 import ru.big.town.restoremode.appearance.AppearanceSettings;
 import ru.big.town.restoremode.appearance.DashboardAppearance;
+import ru.big.town.restoremode.apps.AppDpiStore;
 import ru.big.town.restoremode.apps.split.SplitStore;
 import ru.big.town.restoremode.carplay.CarPlayWidgetPlaceholder;
 import ru.big.town.restoremode.dashboard.tiles.TileDragController;
@@ -85,6 +85,10 @@ import ru.big.town.restoremode.trips.location.TripLocationPermission;
 import ru.big.town.restoremode.voice.commands.VoiceCommands;
 import ru.big.town.restoremode.widgets.apps.AppWidgetSessionStore;
 import ru.big.town.restoremode.widgets.apps.AppWidgetStore;
+import ru.big.town.restoremode.widgets.brightness.BrightnessWidgetDashboard;
+import ru.big.town.restoremode.widgets.brightness.BrightnessWidgetLayout;
+import ru.big.town.restoremode.widgets.climate.CabinTemperatureWidgetDashboard;
+import ru.big.town.restoremode.widgets.climate.CabinTemperatureWidgetLayout;
 import ru.big.town.restoremode.widgets.clock.ClockWidgetView;
 import ru.big.town.restoremode.widgets.dials.DialWidgetStore;
 import ru.big.town.restoremode.widgets.energy.CarAppearance;
@@ -93,9 +97,7 @@ import ru.big.town.restoremode.widgets.energy.TripWidgetView;
 import ru.big.town.restoremode.widgets.energy.VehicleWidgetView;
 import ru.big.town.restoremode.widgets.energy.VehicleWidgets;
 import ru.big.town.restoremode.widgets.headlights.HeadlightWidgetDashboard;
-import ru.big.town.restoremode.widgets.brightness.BrightnessWidgetDashboard;
 import ru.big.town.restoremode.widgets.headlights.HeadlightWidgetLayout;
-import ru.big.town.restoremode.widgets.brightness.BrightnessWidgetLayout;
 import ru.big.town.restoremode.widgets.links.LinkShortcutLauncher;
 import ru.big.town.restoremode.widgets.links.LinkShortcutStore;
 import ru.big.town.restoremode.widgets.media.MediaWidgetDashboard;
@@ -360,6 +362,8 @@ public class DashboardActivity extends AppCompatActivity {
 
     private final RadioWidgetDashboard radioWidget = new RadioWidgetDashboard(this);
 
+    private final CabinTemperatureWidgetDashboard cabinTemperatureWidget =
+            new CabinTemperatureWidgetDashboard(this);
     private final BrightnessWidgetDashboard brightnessWidget = new BrightnessWidgetDashboard(this);
     private final HeadlightWidgetDashboard headlightWidget = new HeadlightWidgetDashboard(this);
 
@@ -419,7 +423,13 @@ public class DashboardActivity extends AppCompatActivity {
 
     private void watchSuspension() {
         watchHeadlightWidget();
-        brightnessWidget.watch(suspensionScreenResumed && sharedPreferences.getBoolean(BrightnessWidgetLayout.VISIBLE, false));
+        cabinTemperatureWidget.watch(
+                suspensionScreenResumed
+                        && sharedPreferences.getBoolean(
+                                CabinTemperatureWidgetLayout.VISIBLE, false));
+        brightnessWidget.watch(
+                suspensionScreenResumed
+                        && sharedPreferences.getBoolean(BrightnessWidgetLayout.VISIBLE, false));
         radioWidget.watch(
                 suspensionScreenResumed
                         && sharedPreferences.getBoolean(RadioWidgetLayout.VISIBLE, false));
@@ -1025,6 +1035,7 @@ public class DashboardActivity extends AppCompatActivity {
         systemWidgets.disconnected();
         headlightWidget.disconnected();
         brightnessWidget.disconnected();
+        cabinTemperatureWidget.disconnected();
     }
 
     private void restartMessengerBinding(String reason) {
@@ -1140,11 +1151,12 @@ public class DashboardActivity extends AppCompatActivity {
     }
 
     private void updateAppearanceSpacing() {
-        runOnUiThread(() -> {
-            if (suspensionScreenResumed && splitTilesGrid != null) {
-                renderSplitTiles();
-            }
-        });
+        runOnUiThread(
+                () -> {
+                    if (suspensionScreenResumed && splitTilesGrid != null) {
+                        renderSplitTiles();
+                    }
+                });
     }
 
     /** Passenger entry point can select its layout independently of display probing. */
@@ -1801,6 +1813,8 @@ public class DashboardActivity extends AppCompatActivity {
         switch (widgetId) {
             case RadioWidgetLayout.ID:
                 return sharedPreferences.getBoolean(RadioWidgetLayout.VISIBLE, false);
+            case CabinTemperatureWidgetLayout.ID:
+                return sharedPreferences.getBoolean(CabinTemperatureWidgetLayout.VISIBLE, false);
             case BrightnessWidgetLayout.ID:
                 return sharedPreferences.getBoolean(BrightnessWidgetLayout.VISIBLE, false);
             case HeadlightWidgetLayout.ID:
@@ -1918,6 +1932,11 @@ public class DashboardActivity extends AppCompatActivity {
 
     /** Получить размеры элемента в ячейках smart-grid: {ширина, высота}. */
     private int[] getWidgetDimensions(String widgetId) {
+        if (CabinTemperatureWidgetLayout.ID.equals(widgetId)) {
+            return new int[] {
+                CabinTemperatureWidgetLayout.WIDTH, CabinTemperatureWidgetLayout.HEIGHT
+            };
+        }
         if (BrightnessWidgetLayout.ID.equals(widgetId)) {
             return new int[] {BrightnessWidgetLayout.WIDTH, BrightnessWidgetLayout.HEIGHT};
         }
@@ -2010,6 +2029,7 @@ public class DashboardActivity extends AppCompatActivity {
         mediaWidgets.resetViews();
         headlightWidget.resetView();
         brightnessWidget.resetView();
+        cabinTemperatureWidget.resetView();
         radioWidget.resetView();
         watchSuspension();
         watchEnergyWidgets();
@@ -2265,6 +2285,9 @@ public class DashboardActivity extends AppCompatActivity {
                     case RadioWidgetLayout.ID:
                         int[] radioSize = getWidgetDimensions(tile.id);
                         widgetView = radioWidget.create(radioSize[0], radioSize[1]);
+                        break;
+                    case CabinTemperatureWidgetLayout.ID:
+                        widgetView = cabinTemperatureWidget.create();
                         break;
                     case BrightnessWidgetLayout.ID:
                         widgetView = brightnessWidget.create();
@@ -4241,6 +4264,7 @@ public class DashboardActivity extends AppCompatActivity {
         mediaWidgets.close();
         headlightWidget.close();
         brightnessWidget.close();
+        cabinTemperatureWidget.close();
         radioWidget.close();
         if (tileDragController != null) {
             tileDragController.cancel();

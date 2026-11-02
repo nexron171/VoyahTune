@@ -409,6 +409,11 @@ public final class ScenarioStore {
         if (ScenarioProtocol.CONDITION_LIGHT.equals(condition.type)) {
             return validRange(condition, ScenarioProtocol.LIGHT_MIN, ScenarioProtocol.LIGHT_MAX);
         }
+        if (ScenarioProtocol.CONDITION_TEMP_IN.equals(condition.type)) {
+            return ScenarioProtocol.validOp(condition.op)
+                    && condition.value >= -40
+                    && condition.value <= 85;
+        }
         if (ScenarioProtocol.CONDITION_TEMP_OUT.equals(condition.type)
                 || ScenarioProtocol.CONDITION_SOC.equals(condition.type)) {
             return validRange(condition, -60, 100);

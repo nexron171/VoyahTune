@@ -15,7 +15,7 @@ func compiledAgents() []nativeAgentConfig {
 			MaxAttempts:    4,
 			TimeoutSeconds: 35,
 			CrashLimit:     3,
-			Modules:        []string{"acc"},
+			Modules:        []string{"acc", "cabin-climate"},
 		},
 		{
 			ID:             "drive-reset",

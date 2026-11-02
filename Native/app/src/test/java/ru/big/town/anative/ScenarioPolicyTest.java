@@ -17,11 +17,44 @@ import java.util.List;
 public class ScenarioPolicyTest {
 
     @Test
+    public void cabinConditionUsesLastKnownHalfDegreesAndRejectsMissingValue() {
+        for (String operator :
+                new String[] {
+                    ScenarioProtocol.OP_LE, ScenarioProtocol.OP_GE, ScenarioProtocol.OP_EQ
+                }) {
+            ScenarioDefinition.Condition condition =
+                    new ScenarioDefinition.Condition(
+                            ScenarioProtocol.CONDITION_TEMP_IN, operator, 20, "", "", "", "");
+            ScenarioDefinition definition =
+                    scenario(Collections.emptyList(), Collections.singletonList(condition));
+            assertTrue(
+                    ScenarioPolicy.conditionsMet(
+                            definition, new ScenarioPolicy.Snapshot(0, 0, 0, null, 0, 1, -1, 20)));
+            assertFalse(
+                    ScenarioPolicy.conditionsMet(
+                            definition,
+                            new ScenarioPolicy.Snapshot(0, 0, 0, null, 0, 1, -1, Double.NaN)));
+            assertEquals(
+                    ScenarioProtocol.OP_GE.equals(operator),
+                    ScenarioPolicy.conditionsMet(
+                            definition,
+                            new ScenarioPolicy.Snapshot(0, 0, 0, null, 0, 1, -1, 20.5)));
+            assertEquals(
+                    ScenarioProtocol.OP_LE.equals(operator),
+                    ScenarioPolicy.conditionsMet(
+                            definition,
+                            new ScenarioPolicy.Snapshot(0, 0, 0, null, 0, 1, -1, 19.5)));
+        }
+    }
+
+    @Test
     public void driveModeTriggerRequiresAnActualTransitionToTheSelectedMode() {
-        ScenarioDefinition definition = scenario(
-                Collections.singletonList(new ScenarioDefinition.Trigger(
-                        ScenarioProtocol.TRIGGER_DRIVE_MODE, "SPORT", "")),
-                Collections.emptyList());
+        ScenarioDefinition definition =
+                scenario(
+                        Collections.singletonList(
+                                new ScenarioDefinition.Trigger(
+                                        ScenarioProtocol.TRIGGER_DRIVE_MODE, "SPORT", "")),
+                        Collections.emptyList());
         assertFalse(ScenarioPolicy.matchesDriveMode(definition, null, "SPORT"));
         assertFalse(ScenarioPolicy.matchesDriveMode(definition, "SPORT", "SPORT"));
         assertFalse(ScenarioPolicy.matchesDriveMode(definition, "SPORT", "ECO"));

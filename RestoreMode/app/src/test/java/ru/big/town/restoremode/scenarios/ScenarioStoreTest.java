@@ -16,13 +16,33 @@ import java.util.List;
 public class ScenarioStoreTest {
 
     @Test
+    public void cabinConditionAcceptsSupportedOperatorsAndValidatesThresholds() {
+        ScenarioStore.Condition condition = new ScenarioStore.Condition();
+        condition.type = ScenarioProtocol.CONDITION_TEMP_IN;
+        for (String operator : ScenarioProtocol.OPS) {
+            condition.op = operator;
+            for (int value : new int[] {-41, -40, 0, 20, 85, 86}) {
+                condition.value = value;
+                assertEquals(value >= -40 && value <= 85, ScenarioStore.validCondition(condition));
+            }
+        }
+        condition.value = 20;
+        condition.op = "unknown";
+        assertFalse(ScenarioStore.validCondition(condition));
+    }
+
+    @Test
     public void driveModeTriggerAcceptsKnownModesAndRejectsUnknownValues() {
         for (String mode : ScenarioProtocol.DRIVE_MODES) {
-            assertTrue(ScenarioStore.validTrigger(new ScenarioStore.Trigger(
-                    ScenarioProtocol.TRIGGER_DRIVE_MODE, mode, "")));
+            assertTrue(
+                    ScenarioStore.validTrigger(
+                            new ScenarioStore.Trigger(
+                                    ScenarioProtocol.TRIGGER_DRIVE_MODE, mode, "")));
         }
-        assertFalse(ScenarioStore.validTrigger(new ScenarioStore.Trigger(
-                ScenarioProtocol.TRIGGER_DRIVE_MODE, "unknown", "")));
+        assertFalse(
+                ScenarioStore.validTrigger(
+                        new ScenarioStore.Trigger(
+                                ScenarioProtocol.TRIGGER_DRIVE_MODE, "unknown", "")));
     }
 
     private static ScenarioStore.Scenario scenario(String id, String name) {

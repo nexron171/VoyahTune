@@ -45,6 +45,7 @@ import ru.big.town.restoremode.widgets.energy.EnergyWidgetLayout;
 import ru.big.town.restoremode.widgets.energy.EnergyWidgetPreferences;
 import ru.big.town.restoremode.widgets.headlights.HeadlightWidgetLayout;
 import ru.big.town.restoremode.widgets.brightness.BrightnessWidgetLayout;
+import ru.big.town.restoremode.widgets.climate.CabinTemperatureWidgetLayout;
 import ru.big.town.restoremode.widgets.links.LinkBrowserPicker;
 import ru.big.town.restoremode.widgets.links.LinkShortcutStore;
 import ru.big.town.restoremode.widgets.media.MediaWidgetLayout;
@@ -125,6 +126,7 @@ public class MainSettingsFragment extends SettingsSectionFragment {
                 R.id.headlightSizeRow);
         bindHeadlightSize();
         bindShowSwitch(R.id.switchShowBrightness, BrightnessWidgetLayout.VISIBLE, false);
+        bindShowSwitch(R.id.switchShowCabinTemperature, CabinTemperatureWidgetLayout.VISIBLE, false);
         bindShowSwitch(R.id.switchShowRadio, RadioWidgetLayout.VISIBLE, false, R.id.radioSizeRow);
         bindTileSizeSpinners(
                 R.id.radioSettingWidth, R.id.radioSettingHeight, RadioWidgetLayout.ID, 2, 2);

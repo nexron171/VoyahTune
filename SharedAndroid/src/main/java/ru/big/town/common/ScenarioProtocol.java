@@ -110,6 +110,7 @@ public final class ScenarioProtocol {
     // --- Условия ---
     public static final String CONDITION_LIGHT = "light";
     public static final String CONDITION_TEMP_OUT = "tempOut";
+    public static final String CONDITION_TEMP_IN = "tempIn";
     public static final String CONDITION_SOC = "soc";
     public static final String CONDITION_GEAR = "gear";
     public static final String CONDITION_DRIVE_MODE = "driveMode";
