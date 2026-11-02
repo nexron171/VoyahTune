@@ -48,6 +48,16 @@ public final class SplitConfigSync {
                 preferences.getBoolean(
                         ClusterNavigationSettings.ENABLED,
                         ClusterNavigationSettings.DEFAULT_ENABLED));
+        intent.putExtra(
+                ClusterNavigationSettings.SHOW_STREET,
+                preferences.getBoolean(
+                        ClusterNavigationSettings.SHOW_STREET,
+                        ClusterNavigationSettings.DEFAULT_SHOW_STREET));
+        intent.putExtra(
+                ClusterNavigationSettings.TRANSLITERATION,
+                preferences.getBoolean(
+                        ClusterNavigationSettings.TRANSLITERATION,
+                        ClusterNavigationSettings.DEFAULT_TRANSLITERATION));
         context.sendBroadcast(intent);
     }
 

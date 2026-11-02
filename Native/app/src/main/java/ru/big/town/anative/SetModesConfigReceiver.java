@@ -148,6 +148,28 @@ public class SetModesConfigReceiver extends BroadcastReceiver {
                     enabled ? 1 : 0)) {
                 Log.e(TAG, "Cluster navigation setting was not saved");
             }
+            if (intent.hasExtra(ClusterNavigationSettings.SHOW_STREET)) {
+                boolean showStreet = intent.getBooleanExtra(
+                        ClusterNavigationSettings.SHOW_STREET,
+                        ClusterNavigationSettings.DEFAULT_SHOW_STREET);
+                if (!Settings.Global.putInt(
+                        context.getContentResolver(),
+                        ClusterNavigationSettings.GLOBAL_SHOW_STREET,
+                        showStreet ? 1 : 0)) {
+                    Log.e(TAG, "Cluster navigation street visibility was not saved");
+                }
+            }
+            if (intent.hasExtra(ClusterNavigationSettings.TRANSLITERATION)) {
+                boolean transliteration = intent.getBooleanExtra(
+                        ClusterNavigationSettings.TRANSLITERATION,
+                        ClusterNavigationSettings.DEFAULT_TRANSLITERATION);
+                if (!Settings.Global.putInt(
+                        context.getContentResolver(),
+                        ClusterNavigationSettings.GLOBAL_TRANSLITERATION,
+                        transliteration ? 1 : 0)) {
+                    Log.e(TAG, "Cluster navigation transliteration was not saved");
+                }
+            }
         }
     }
 

@@ -36,6 +36,8 @@ final class ClusterNavigationController {
     private volatile IBinder binder;
     private volatile ClusterNavigationLease.Maneuver requested;
     private ServiceConnection connection;
+    private boolean transliteration;
+    private boolean showStreet;
     private boolean busy;
     private boolean ownsOutput;
     private boolean watching;
@@ -81,6 +83,18 @@ final class ClusterNavigationController {
                         Settings.Global.getUriFor(ClusterNavigationSettings.GLOBAL_ENABLED),
                         false,
                         settingsObserver);
+        this.context
+                .getContentResolver()
+                .registerContentObserver(
+                        Settings.Global.getUriFor(ClusterNavigationSettings.GLOBAL_TRANSLITERATION),
+                        false,
+                        settingsObserver);
+        this.context
+                .getContentResolver()
+                .registerContentObserver(
+                        Settings.Global.getUriFor(ClusterNavigationSettings.GLOBAL_SHOW_STREET),
+                        false,
+                        settingsObserver);
         refreshEnabled();
     }
 
@@ -90,6 +104,18 @@ final class ClusterNavigationController {
                                 context.getContentResolver(),
                                 ClusterNavigationSettings.GLOBAL_ENABLED,
                                 ClusterNavigationSettings.DEFAULT_ENABLED ? 1 : 0)
+                        != 0;
+        transliteration =
+                Settings.Global.getInt(
+                                context.getContentResolver(),
+                                ClusterNavigationSettings.GLOBAL_TRANSLITERATION,
+                                ClusterNavigationSettings.DEFAULT_TRANSLITERATION ? 1 : 0)
+                        != 0;
+        showStreet =
+                Settings.Global.getInt(
+                                context.getContentResolver(),
+                                ClusterNavigationSettings.GLOBAL_SHOW_STREET,
+                                ClusterNavigationSettings.DEFAULT_SHOW_STREET ? 1 : 0)
                         != 0;
         sources.setEnabled(enabled, SystemClock.elapsedRealtime());
         refreshOutput();
@@ -119,7 +145,8 @@ final class ClusterNavigationController {
     }
 
     private void pump() {
-        ClusterNavigationLease.Maneuver wanted = sources.current(SystemClock.elapsedRealtime());
+        ClusterNavigationLease.Maneuver wanted =
+                formatManeuver(sources.current(SystemClock.elapsedRealtime()));
         requested = wanted;
         if (wanted == null) {
             watching = false;
@@ -179,6 +206,17 @@ final class ClusterNavigationController {
                                 pump();
                             });
                 });
+    }
+
+    private ClusterNavigationLease.Maneuver formatManeuver(
+            ClusterNavigationLease.Maneuver maneuver) {
+        if (maneuver == null) {
+            return null;
+        }
+        return new ClusterNavigationLease.Maneuver(
+                maneuver.icon,
+                maneuver.distance,
+                ClusterNavigationText.format(maneuver.road, transliteration, showStreet));
     }
 
     private void bind() {

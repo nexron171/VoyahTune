@@ -628,21 +628,30 @@ public final class AppsSettingsFragment extends SettingsSectionFragment {
     }
 
     private void bindClusterNavigation() {
-        Switch toggle = settingView(R.id.switchClusterNavigation);
+        bindClusterNavigationToggle(
+                R.id.switchClusterNavigation,
+                ClusterNavigationSettings.ENABLED,
+                ClusterNavigationSettings.DEFAULT_ENABLED);
+        bindClusterNavigationToggle(
+                R.id.switchClusterNavigationShowStreet,
+                ClusterNavigationSettings.SHOW_STREET,
+                ClusterNavigationSettings.DEFAULT_SHOW_STREET);
+        bindClusterNavigationToggle(
+                R.id.switchClusterNavigationTransliteration,
+                ClusterNavigationSettings.TRANSLITERATION,
+                ClusterNavigationSettings.DEFAULT_TRANSLITERATION);
+    }
+
+    private void bindClusterNavigationToggle(int viewId, String key, boolean defaultValue) {
+        Switch toggle = settingView(viewId);
         if (toggle == null) {
             return;
         }
         toggle.setOnCheckedChangeListener(null);
-        toggle.setChecked(
-                preferences.getBoolean(
-                        ClusterNavigationSettings.ENABLED,
-                        ClusterNavigationSettings.DEFAULT_ENABLED));
+        toggle.setChecked(preferences.getBoolean(key, defaultValue));
         toggle.setOnCheckedChangeListener(
                 (button, checked) -> {
-                    preferences
-                            .edit()
-                            .putBoolean(ClusterNavigationSettings.ENABLED, checked)
-                            .apply();
+                    preferences.edit().putBoolean(key, checked).apply();
                     SplitConfigSync.pushClusterNavigation(requireContext(), preferences);
                 });
     }
