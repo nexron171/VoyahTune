@@ -6,6 +6,7 @@ import android.content.res.ColorStateList;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
@@ -19,6 +20,7 @@ import org.json.JSONObject;
 import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.settings.ui.controls.SettingsToggle;
 import ru.big.town.restoremode.settings.ui.layout.SettingsComponents;
+import ru.big.town.restoremode.settings.ui.layout.SettingsFlow;
 import ru.big.town.restoremode.settings.ui.layout.SettingsPanels;
 import ru.big.town.restoremode.settings.ui.list.SettingsList;
 import ru.big.town.restoremode.settings.ui.style.SettingsDesign;
@@ -165,14 +167,12 @@ final class TurnSoundSettingsPage {
                                                             + " и его исходную громкость.",
                                                     toggle),
                                             progressPanel(),
-                                            components.text(
+                                            paragraph(
                                                     "Изменения вступают в силу после полной"
                                                         + " перезагрузки. Одновременно зажмите"
                                                         + " кнопки «звёздочка» и «трубка» на руле и"
                                                         + " удерживайте не менее 15 секунд, пока не"
-                                                        + " погаснут экраны.",
-                                                    17,
-                                                    0xff9aaac0),
+                                                        + " погаснут экраны."),
                                             components.row(
                                                     "Тип звука", "Два звука: тик и так", choose),
                                             components.row(
@@ -180,36 +180,65 @@ final class TurnSoundSettingsPage {
                                                     "15–100% от амплитуды выбранного звука",
                                                     level),
                                             slider,
-                                            components.row(
-                                                    "Предпрослушивание",
-                                                    "Через динамики мультимедиа; громкость приборки"
-                                                            + " может отличаться",
-                                                    listen),
-                                            apply,
-                                            components.text(
+                                            paragraph(
+                                                    "Предпрослушивание — через динамики мультимедиа;"
+                                                            + " громкость приборки может отличаться."),
+                                            actionButtons(listen, apply),
+                                            paragraph(
                                                     "Оригиналы сохраняются перед первой заменой и"
-                                                        + " не удаляются при удалении VoyahTune.",
-                                                    17,
-                                                    0xff9aaac0));
+                                                        + " не удаляются при удалении VoyahTune."));
                             if (!known && !busy) {
                                 Button retry = new Button(activity);
                                 retry.setText("Проверить состояние");
                                 retry.setOnClickListener(view -> request("status"));
-                                card.addView(retry);
                                 Button restore = new Button(activity);
                                 restore.setText("Восстановить оригиналы");
                                 restore.setOnClickListener(view -> request("restore"));
-                                card.addView(restore);
+                                card.addView(actionButtons(retry, restore));
                             }
+                            improveReadability(card);
                             SettingsDesign.bindRow(activity, card);
                             return SettingsPanels.spaced(card);
                         }));
     }
 
+    private View actionButtons(Button... buttons) {
+        SettingsFlow flow = new SettingsFlow(activity, null);
+        flow.setGapDp(16);
+        for (Button button : buttons) {
+            flow.addView(button, new LinearLayout.LayoutParams(-2, components.dp(56)));
+        }
+        LinearLayout row = components.column(flow);
+        row.setPadding(0, components.dp(16), 0, components.dp(16));
+        return row;
+    }
+
+    private TextView paragraph(String value) {
+        TextView text = components.text(value, 20, 0xff9aaac0);
+        text.setPadding(0, components.dp(12), 0, components.dp(12));
+        return text;
+    }
+
+    private void improveReadability(View view) {
+        if (view instanceof TextView && !(view instanceof Button)) {
+            TextView text = (TextView) view;
+            float size = text.getTextSize() / activity.getResources().getDisplayMetrics().scaledDensity;
+            text.setTextSize(Math.max(20, size));
+            text.setLineSpacing(0, 1.35f);
+        }
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int index = 0; index < group.getChildCount(); index++) {
+                improveReadability(group.getChildAt(index));
+            }
+        }
+    }
+
     private LinearLayout progressPanel() {
         LinearLayout panel = new LinearLayout(activity);
         panel.setOrientation(LinearLayout.VERTICAL);
-        progressLabel = components.text(status, 17, 0xffb2d3fb);
+        progressLabel = components.text(status, 20, 0xffb2d3fb);
+        panel.setPadding(0, components.dp(12), 0, components.dp(12));
         progressLabel.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         panel.addView(progressLabel);
         ProgressBar bar =

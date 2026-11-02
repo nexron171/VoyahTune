@@ -20,7 +20,6 @@ public final class SettingsSectionLayouts {
         layout(R.layout.settings_main_voice_scenarios),
         layout(R.layout.settings_main_forced_ev_suspension_maintenance),
         layout(R.layout.settings_main_launch_apps_suspension),
-        layout(R.layout.settings_main_suspension_description),
         layout(R.layout.settings_main_headlights_radio),
         layout(R.layout.settings_main_clock),
         layout(R.layout.settings_main_carplay_heading),
@@ -153,7 +152,7 @@ public final class SettingsSectionLayouts {
         APPEARANCE
     }
 
-    static final class Item {
+    public static final class Item {
         final int layoutResource;
         final DynamicContent dynamicContent;
 
@@ -163,11 +162,11 @@ public final class SettingsSectionLayouts {
         }
     }
 
-    private static Item layout(int resource) {
+    public static Item layout(int resource) {
         return new Item(resource, null);
     }
 
-    private static Item dynamic(DynamicContent content) {
+    public static Item dynamic(DynamicContent content) {
         return new Item(0, content);
     }
 

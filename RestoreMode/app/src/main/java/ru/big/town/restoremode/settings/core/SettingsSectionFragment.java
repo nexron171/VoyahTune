@@ -32,22 +32,34 @@ public abstract class SettingsSectionFragment extends Fragment {
     protected View bindingRoot;
     private SettingsSectionViewModel stateModel;
     private final Map<Integer, SettingsList.Row> staticRows = new HashMap<>();
-    private final BroadcastReceiver carPlayFeatureReceiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            staticRows.clear();
-            refreshSettingsRows();
-        }
-    };
+    private final BroadcastReceiver carPlayFeatureReceiver =
+            new BroadcastReceiver() {
+                @Override
+                public void onReceive(Context context, Intent intent) {
+                    staticRows.clear();
+                    refreshSettingsRows();
+                }
+            };
 
     public abstract SettingsSection section();
+
+    public String categoryTitle() {
+        return null;
+    }
+
+    public boolean navigateUp() {
+        return false;
+    }
 
     @Override
     public void onResume() {
         super.onResume();
-        requireContext().registerReceiver(carPlayFeatureReceiver,
-                new IntentFilter(ru.big.town.restoremode.carplay.CarPlayFeature.ACTION_CHANGED),
-                Context.RECEIVER_NOT_EXPORTED);
+        requireContext()
+                .registerReceiver(
+                        carPlayFeatureReceiver,
+                        new IntentFilter(
+                                ru.big.town.restoremode.carplay.CarPlayFeature.ACTION_CHANGED),
+                        Context.RECEIVER_NOT_EXPORTED);
     }
 
     @Override
@@ -114,7 +126,7 @@ public abstract class SettingsSectionFragment extends Fragment {
 
     protected void showRows(boolean resetScroll) {
         List<SettingsList.Row> rows = new ArrayList<>();
-        for (SettingsSectionLayouts.Item item : SettingsSectionLayouts.forSection(section())) {
+        for (SettingsSectionLayouts.Item item : sectionLayouts()) {
             if (item.layoutResource == 0) {
                 addDynamicRows(rows, item.dynamicContent);
             } else if (!cacheLayout(item.layoutResource)) {
@@ -126,7 +138,11 @@ public abstract class SettingsSectionFragment extends Fragment {
         settingsList.submit(rows, resetScroll);
     }
 
-    private SettingsList.Row layoutRow(int resource) {
+    protected SettingsSectionLayouts.Item[] sectionLayouts() {
+        return SettingsSectionLayouts.forSection(section());
+    }
+
+    protected final SettingsList.Row layoutRow(int resource) {
         return new SettingsList.Row(
                 "layout:" + resource, parent -> inflateSettingsRow(resource, parent));
     }

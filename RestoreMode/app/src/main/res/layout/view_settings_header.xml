@@ -11,6 +11,17 @@
     android:background="@drawable/settings_header"
     android:paddingBottom="24dp"
     android:minHeight="112dp">
+    <ImageButton
+        android:id="@+id/settingsCategoryBack"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:layout_marginEnd="16dp"
+        android:padding="16dp"
+        android:background="@drawable/settings_back"
+        android:src="@drawable/settings_icon_back"
+        android:scaleType="fitCenter"
+        android:contentDescription="К категориям главного экрана"
+        android:visibility="gone" />
     <LinearLayout
         android:layout_width="0dp"
         android:layout_height="wrap_content"

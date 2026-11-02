@@ -70,7 +70,7 @@ public class SettingsActivity extends AppCompatActivity implements SettingsHost 
         navigation.showCustomCommands(preferences.getBoolean(PREF_SHOW_CUSTOM_COMMANDS, false));
         preferences.registerOnSharedPreferenceChangeListener(navigationPreferences);
         header.onApply(this::applySettings);
-        applyModel.applying().observe(this, applying -> updateHeader());
+        applyModel.applying().observe(this, applying -> refreshHeader());
         getOnBackPressedDispatcher()
                 .addCallback(
                         this,
@@ -111,11 +111,22 @@ public class SettingsActivity extends AppCompatActivity implements SettingsHost 
         }
         currentSection = section;
         navigation.select(section);
-        updateHeader();
+        refreshHeader();
     }
 
-    private void updateHeader() {
-        header.setTitle(currentSection.title, currentSection.category);
+    @Override
+    public void refreshHeader() {
+        Fragment current =
+                getSupportFragmentManager().findFragmentByTag("settings:" + currentSection.name());
+        SettingsSectionFragment section =
+                current instanceof SettingsSectionFragment
+                        ? (SettingsSectionFragment) current
+                        : null;
+        String categoryTitle = section == null ? null : section.categoryTitle();
+        header.setTitle(
+                categoryTitle == null ? currentSection.title : categoryTitle,
+                categoryTitle == null ? currentSection.category : currentSection.title);
+        header.onNavigateUp(categoryTitle == null ? null : section::navigateUp);
         header.setApplying(applyModel.isApplying(), currentSection.savesImmediately());
     }
 
@@ -145,6 +156,13 @@ public class SettingsActivity extends AppCompatActivity implements SettingsHost 
     }
 
     private void finishWithCustomCommands() {
+        Fragment current =
+                getSupportFragmentManager().findFragmentByTag("settings:" + currentSection.name());
+        if (current instanceof SettingsSectionFragment
+                && ((SettingsSectionFragment) current).navigateUp()) {
+            return;
+        }
+
         if (!commands.save(preferences)) {
             return;
         }

@@ -13,6 +13,7 @@ import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.settings.ui.style.SettingsDesign;
 
 public final class SettingsHeaderView extends FrameLayout {
+    private final View backButton;
     private final TextView title;
     private final TextView category;
     private final Button applyButton;
@@ -21,6 +22,7 @@ public final class SettingsHeaderView extends FrameLayout {
     public SettingsHeaderView(Context context, AttributeSet attributes) {
         super(context, attributes);
         LayoutInflater.from(context).inflate(R.layout.view_settings_header, this, true);
+        backButton = findViewById(R.id.settingsCategoryBack);
         title = findViewById(R.id.sectionTitle);
         category = findViewById(R.id.settingsEyebrow);
         applyButton = findViewById(R.id.buttonApplyAdvance);
@@ -34,6 +36,12 @@ public final class SettingsHeaderView extends FrameLayout {
     public void setTitle(String title, String category) {
         this.title.setText(title);
         this.category.setText(category);
+        backButton.setContentDescription("Назад: " + category);
+    }
+
+    public void onNavigateUp(Runnable action) {
+        backButton.setVisibility(action == null ? View.GONE : View.VISIBLE);
+        backButton.setOnClickListener(action == null ? null : view -> action.run());
     }
 
     public void onApply(Runnable listener) {
