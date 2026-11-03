@@ -359,15 +359,15 @@ python3 Installer/scripts/package-linux.py \
 ```sh
 mkdir -p Releases/cache
 curl -fL -H 'Accept: application/octet-stream' \
-  https://api.github.com/repos/linuxdeploy/linuxdeploy/releases/assets/602438599 \
+  https://api.github.com/repos/linuxdeploy/linuxdeploy/releases/assets/699514588 \
   -o Releases/cache/linuxdeploy-x86_64-new.AppImage.download
 shasum -a 256 Releases/cache/linuxdeploy-x86_64-new.AppImage.download
 ```
 
-Ожидаемый SHA-256: `8aea8da0f7f7039d2a2cecb14657d752a222a5e1d3825caeef186c82f751cdd1`.
+Ожидаемый SHA-256: `df908b19f1ed1cdafa79508d415aa12d6c56ce4d56d4149aa8c09286718706e5`.
 Только после совпадения переименуйте файл в
 `Releases/cache/linuxdeploy-x86_64-new.AppImage`. Скрипт повторно проверит сумму.
-Версия: commit07333c6; SquashFS offset944632 относится именно к этому файлу.
+Версия: commit07333c6, build 373 (2026-11-01); SquashFS offset944632 относится именно к этому файлу.
 Проверены распаковка и сборка минимального AppDir в Linux x64 под Rosetta.
 Артефакты continuous могут пересоздаваться даже для того же коммита.
 Если asset удалён, используйте проверенную копию прежнего кэша или отдельно
