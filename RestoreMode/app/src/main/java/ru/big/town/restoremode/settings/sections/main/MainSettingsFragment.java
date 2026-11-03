@@ -43,6 +43,7 @@ import ru.big.town.restoremode.widgets.apps.AppShortcutStore;
 import ru.big.town.restoremode.widgets.apps.AppWidgetStore;
 import ru.big.town.restoremode.widgets.brightness.BrightnessWidgetLayout;
 import ru.big.town.restoremode.widgets.climate.CabinTemperatureWidgetLayout;
+import ru.big.town.restoremode.widgets.climate.RecirculationWidgetLayout;
 import ru.big.town.restoremode.widgets.clock.ClockWidgetView;
 import ru.big.town.restoremode.widgets.dials.DialWidgetStore;
 import ru.big.town.restoremode.widgets.energy.EnergyWidgetLayout;
@@ -233,6 +234,7 @@ public class MainSettingsFragment extends SettingsSectionFragment {
                 false,
                 R.id.headlightSizeRow);
         bindHeadlightSize();
+        bindShowSwitch(R.id.switchShowRecirculation, RecirculationWidgetLayout.VISIBLE, false);
         bindShowSwitch(R.id.switchShowFuelFlap, FuelFlapWidgetLayout.VISIBLE, false);
         bindShowSwitch(R.id.switchShowBrightness, BrightnessWidgetLayout.VISIBLE, false);
         bindShowSwitch(

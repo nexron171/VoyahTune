@@ -89,6 +89,8 @@ import ru.big.town.restoremode.widgets.brightness.BrightnessWidgetDashboard;
 import ru.big.town.restoremode.widgets.brightness.BrightnessWidgetLayout;
 import ru.big.town.restoremode.widgets.climate.CabinTemperatureWidgetDashboard;
 import ru.big.town.restoremode.widgets.climate.CabinTemperatureWidgetLayout;
+import ru.big.town.restoremode.widgets.climate.RecirculationWidgetDashboard;
+import ru.big.town.restoremode.widgets.climate.RecirculationWidgetLayout;
 import ru.big.town.restoremode.widgets.clock.ClockWidgetView;
 import ru.big.town.restoremode.widgets.dials.DialWidgetStore;
 import ru.big.town.restoremode.widgets.energy.CarAppearance;
@@ -367,6 +369,8 @@ public class DashboardActivity extends AppCompatActivity {
     private final CabinTemperatureWidgetDashboard cabinTemperatureWidget =
             new CabinTemperatureWidgetDashboard(this);
     private final BrightnessWidgetDashboard brightnessWidget = new BrightnessWidgetDashboard(this);
+    private final RecirculationWidgetDashboard recirculationWidget =
+            new RecirculationWidgetDashboard(this);
     private final FuelFlapWidgetDashboard fuelFlapWidget = new FuelFlapWidgetDashboard(this);
     private final HeadlightWidgetDashboard headlightWidget = new HeadlightWidgetDashboard(this);
 
@@ -426,6 +430,9 @@ public class DashboardActivity extends AppCompatActivity {
 
     private void watchSuspension() {
         watchHeadlightWidget();
+        recirculationWidget.watch(
+                suspensionScreenResumed
+                        && sharedPreferences.getBoolean(RecirculationWidgetLayout.VISIBLE, false));
         fuelFlapWidget.watch(
                 suspensionScreenResumed
                         && sharedPreferences.getBoolean(FuelFlapWidgetLayout.VISIBLE, false));
@@ -1039,6 +1046,7 @@ public class DashboardActivity extends AppCompatActivity {
         connectionReported = false;
         GlobalVars.clientDisconnected();
         systemWidgets.disconnected();
+        recirculationWidget.disconnected();
         fuelFlapWidget.disconnected();
         headlightWidget.disconnected();
         brightnessWidget.disconnected();
@@ -1821,6 +1829,8 @@ public class DashboardActivity extends AppCompatActivity {
         switch (widgetId) {
             case RadioWidgetLayout.ID:
                 return sharedPreferences.getBoolean(RadioWidgetLayout.VISIBLE, false);
+            case RecirculationWidgetLayout.ID:
+                return sharedPreferences.getBoolean(RecirculationWidgetLayout.VISIBLE, false);
             case FuelFlapWidgetLayout.ID:
                 return sharedPreferences.getBoolean(FuelFlapWidgetLayout.VISIBLE, false);
             case CabinTemperatureWidgetLayout.ID:
@@ -1942,6 +1952,9 @@ public class DashboardActivity extends AppCompatActivity {
 
     /** Получить размеры элемента в ячейках smart-grid: {ширина, высота}. */
     private int[] getWidgetDimensions(String widgetId) {
+        if (RecirculationWidgetLayout.ID.equals(widgetId)) {
+            return new int[] {RecirculationWidgetLayout.WIDTH, RecirculationWidgetLayout.HEIGHT};
+        }
         if (FuelFlapWidgetLayout.ID.equals(widgetId)) {
             return new int[] {FuelFlapWidgetLayout.WIDTH, FuelFlapWidgetLayout.HEIGHT};
         }
@@ -2040,6 +2053,7 @@ public class DashboardActivity extends AppCompatActivity {
         energyWidgetViews.clear();
         systemWidgets.resetViews();
         mediaWidgets.resetViews();
+        recirculationWidget.resetView();
         fuelFlapWidget.resetView();
         headlightWidget.resetView();
         brightnessWidget.resetView();
@@ -2299,6 +2313,9 @@ public class DashboardActivity extends AppCompatActivity {
                     case RadioWidgetLayout.ID:
                         int[] radioSize = getWidgetDimensions(tile.id);
                         widgetView = radioWidget.create(radioSize[0], radioSize[1]);
+                        break;
+                    case RecirculationWidgetLayout.ID:
+                        widgetView = recirculationWidget.create();
                         break;
                     case FuelFlapWidgetLayout.ID:
                         widgetView = fuelFlapWidget.create();
@@ -4279,6 +4296,7 @@ public class DashboardActivity extends AppCompatActivity {
         appearance.close();
         systemWidgets.close();
         mediaWidgets.close();
+        recirculationWidget.close();
         fuelFlapWidget.close();
         headlightWidget.close();
         brightnessWidget.close();

@@ -119,6 +119,7 @@ public class SetModesService extends Service {
     private SuspensionWidgetController suspensionWidget;
     private HeadlightWidgetController headlightWidget;
     private FuelFlapWidgetController fuelFlapWidget;
+    private RecirculationWidgetController recirculationWidget;
     private BrightnessWidgetController brightnessWidget;
     private EnergyWidgetController energyWidgets;
     private CabinTemperatureController cabinTemperature;
@@ -160,6 +161,15 @@ public class SetModesService extends Service {
                     if (brightnessWidget == null)
                         brightnessWidget = new BrightnessWidgetController(SetModesService.this);
                     brightnessWidget.handle(msg);
+                    break;
+                case ru.big.town.common.RecirculationWidgetProtocol.WATCH:
+                case ru.big.town.common.RecirculationWidgetProtocol.UNWATCH:
+                case ru.big.town.common.RecirculationWidgetProtocol.CYCLE:
+                    if (recirculationWidget == null) {
+                        recirculationWidget =
+                                new RecirculationWidgetController(SetModesService.this);
+                    }
+                    recirculationWidget.handle(msg);
                     break;
                 case ru.big.town.common.FuelFlapWidgetProtocol.WATCH:
                 case ru.big.town.common.FuelFlapWidgetProtocol.UNWATCH:
@@ -2552,6 +2562,9 @@ public class SetModesService extends Service {
         if (applicationStartup != null) applicationStartup.close();
         if (suspensionWidget != null) suspensionWidget.close();
         if (brightnessWidget != null) brightnessWidget.close();
+        if (recirculationWidget != null) {
+            recirculationWidget.close();
+        }
         if (fuelFlapWidget != null) {
             fuelFlapWidget.close();
         }
