@@ -656,6 +656,16 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             completeSteerAction(completion);
             return;
         }
+        if (SteeringComfortController.handles(action)) {
+            SteeringComfortController.execute(
+                    ctx,
+                    action,
+                    error -> {
+                        if (!error.isEmpty()) Log.w(TAG, error);
+                        completeSteerAction(completion);
+                    });
+            return;
+        }
         if (VehicleClimateAction.handles(action)) {
             VehicleClimateActionController.execute(
                     ctx,

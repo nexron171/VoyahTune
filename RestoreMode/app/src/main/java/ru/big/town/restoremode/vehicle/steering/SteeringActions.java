@@ -21,6 +21,18 @@ public final class SteeringActions {
                             new Action("open_voyahtune", "Открыть VoyahTune"),
                             new Action("open_carplay", "Открыть CarPlay"),
                             new Action("system_back", "Системное действие: Назад"),
+                            new Action("wheel_heat:on", "Обогрев руля: включить"),
+                            new Action("wheel_heat:off", "Обогрев руля: выключить"),
+                            new Action("wheel_heat:toggle", "Обогрев руля: вкл/выкл"),
+                            new Action("seat:driver:heat:on", "Обогрев сиденья водителя: включить"),
+                            new Action("seat:driver:heat:off", "Обогрев сиденья водителя: выключить"),
+                            new Action("seat:driver:heat:toggle", "Обогрев сиденья водителя: вкл/выкл"),
+                            new Action("seat:driver:vent:on", "Вентиляция сиденья водителя: включить"),
+                            new Action("seat:driver:vent:off", "Вентиляция сиденья водителя: выключить"),
+                            new Action("seat:driver:vent:toggle", "Вентиляция сиденья водителя: вкл/выкл"),
+                            new Action("seat:driver:massage:on", "Массаж водителя: включить"),
+                            new Action("seat:driver:massage:off", "Массаж водителя: выключить"),
+                            new Action("seat:driver:massage:toggle", "Массаж водителя: вкл/выкл"),
                             new Action("energy:EV", "Энергорежим: Electric"),
                             new Action("energy:REV", "Энергорежим: Fuel"),
                             new Action("energy:SREV", "Энергорежим: Save"),
@@ -74,15 +86,26 @@ public final class SteeringActions {
     private SteeringActions() {}
 
     public static boolean isSelectable(String id) {
-        if (id == null) return false;
-        for (Action action : ALL) {
-            if (action.id.equals(id)) return true;
+        if (id == null) {
+            return false;
         }
-        if (id.startsWith("app:"))
+        for (Action action : ALL) {
+            if (action.id.equals(id)) {
+                return true;
+            }
+        }
+        if (id.startsWith("app:")) {
             return id.substring(4).matches("[a-zA-Z0-9_]+(?:\\.[a-zA-Z0-9_]+)+");
-        if (id.startsWith("split:")) return id.substring(6).matches("[0-9]+");
-        if (id.startsWith("call:")) return id.substring(5).matches("[0-9]{4,11}");
-        if (id.startsWith("can:")) return SteeringCanCommandPolicy.isValid(id.substring(4));
+        }
+        if (id.startsWith("split:")) {
+            return id.substring(6).matches("[0-9]+");
+        }
+        if (id.startsWith("call:")) {
+            return id.substring(5).matches("[0-9]{4,11}");
+        }
+        if (id.startsWith("can:")) {
+            return SteeringCanCommandPolicy.isValid(id.substring(4));
+        }
         return false;
     }
 }
