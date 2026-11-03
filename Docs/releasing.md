@@ -25,6 +25,7 @@ RunYN входит в архив и устанавливается по усло
 | Что собрать | Команда |
 | --- | --- |
 | Только единый payload | `./make_release.sh 4.5.0 --payload --minimum-installer-version 1.9.0 --minimum-ota-version 4.5.0` |
+| Только единый payload в Linux-контейнере | `./build_in_container.sh 4.5.0 --payload --minimum-installer-version 1.9.0 --minimum-ota-version 4.5.0` |
 | Payload и GUI macOS | `./make_release.sh 4.5.0 --mac --minimum-installer-version 1.9.0 --minimum-ota-version 4.5.0` |
 | Payload и стандартный набор GUI | `./make_release.sh 4.5.0 --installers --minimum-installer-version 1.9.0 --minimum-ota-version 4.5.0` |
 | Только GUI macOS | `./Installer/scripts/build-all-macos.sh --mac` |
@@ -55,6 +56,9 @@ ADB и небольшой remover входят в GUI; payload скачивае�
 Основной путь полного выпуска — **macOS**. Оркестратор релиза
 `make_release.sh --installers` сейчас требует macOS: Windows/Linux он собирает
 в подготовленных Linux-контейнерах Colima.
+
+Единый payload без GUI собирается и на Linux x86-64 в контейнере из
+[build-env/Dockerfile](../build-env/Dockerfile) — см. раздел 2.5.
 
 На Windows/Linux можно нативно пересобрать установщик своей ОС без Android-сборки:
 см. [Installer/BUILDING.md](../Installer/BUILDING.md). Это отдельная сборка desktop,
@@ -162,7 +166,50 @@ Docker Desktop не заменяет подготовку этой среды.
 и Android SDK не проверяет. Первая сборка скачивает недостающие зависимости,
 ADB и упаковочные инструменты. После загрузки payload установка доступна без сети.
 
-### 2.5. Что переносить на другой компьютер
+### 2.5. Сборка payload в Linux-контейнере
+
+Payload — APK Native/RestoreMode/RunYN, root-служба, Go-загрузчик и единый runtime —
+собирается на Linux x86-64 в контейнере, без macOS и Colima:
+
+```sh
+./build_in_container.sh 4.5.0 --payload --minimum-installer-version 1.9.0 --minimum-ota-version 4.5.0
+```
+
+Скрипт собирает образ из `build-env/Dockerfile` и выполняет в нём `./make_release.sh`
+с переданными аргументами под текущим UID, поэтому файлы checkout остаются вашими.
+Результаты те же, что и при нативной сборке: `Releases/build/installer-payload-4.5.0/`
+и `Releases/dist/payload_4.5.0.zip`. Проверка выполняется в том же окружении:
+`./build_in_container.sh --shell`, затем `Installer/target/release/installer-build verify-payload Releases/build/installer-payload-4.5.0`.
+
+Checkout монтируется в контейнер под тем же абсолютным путём, что и на хосте: Gradle,
+CMake и Rust хранят абсолютные пути в кешах, и другой путь ломает инкрементную сборку.
+Поэтому контейнерная и нативная сборки используют одни и те же `build/` и
+`Releases/cache/` и могут чередоваться.
+
+Образ содержит закреплённые версии из раздела 2.2: Ubuntu 24.04, JDK 21, Python 3.12,
+Go 1.27, Node.js 22, Rust 1.98.1 с Android-targets, Android SDK с API 35/36/37.0,
+build-tools 35.0.0/36.0.0, NDK 27.0.12077973 и 28.2.13676358, CMake 3.22.1. Тег образа
+вычисляется из хеша Dockerfile, поэтому изменённый файл собирается заново автоматически;
+принудительно — `--rebuild-image`. Перед запуском скрипт сверяет `ndkVersion` из
+Gradle-проектов с NDK в образе и останавливается с подсказкой, если версии не хватает.
+При изменении `compileSdk`, `ndkVersion` или `Packaging/new/native/dependencies.lock.json`
+обновите список пакетов SDK в образе.
+
+Нужны Docker с контейнерами linux/amd64, около 10 ГБ диска и сеть при первой сборке
+образа и первом скачивании зависимостей. Контейнер всегда запускается как linux/amd64;
+на arm64-хосте это эмуляция и заметно медленнее. Кэши Gradle, реестра cargo и Go остаются
+в `Releases/cache/container/` и `Packaging/new/cache/`. Действующий
+`~/.android/debug.keystore` монтируется в контейнер; без него скрипт останавливается,
+чтобы не выпустить APK с другой подписью. Путь к SDK передаётся отдельным
+`local.properties`, сохранённые в checkout пути в контейнере не действуют.
+Ключи CarPlay release-сборка RestoreMode берёт из `Credentials/CarPlayKeys` в checkout;
+каталог попадает в контейнер вместе с остальными файлами, `DIPLAY_AUTH_ASSETS_DIR`
+в контейнер не передаётся.
+
+Этот образ не собирает GUI: macOS, Windows и Linux-установщики по-прежнему собирает
+macOS-оркестратор из раздела 2.4.
+
+### 2.6. Что переносить на другой компьютер
 
 Кроме checkout, сохраните **действующий** `~/.android/debug.keystore`.
 Сейчас release-сборки Native и RestoreMode используют debug signing config.
