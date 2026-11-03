@@ -16,6 +16,7 @@ import ru.big.town.restoremode.widgets.climate.CabinTemperatureWidgetLayout;
 import ru.big.town.restoremode.widgets.clock.ClockWidgetView;
 import ru.big.town.restoremode.widgets.dials.DialWidgetStore;
 import ru.big.town.restoremode.widgets.energy.VehicleWidgets;
+import ru.big.town.restoremode.widgets.fuel.FuelFlapWidgetLayout;
 import ru.big.town.restoremode.widgets.headlights.HeadlightWidgetLayout;
 import ru.big.town.restoremode.widgets.links.LinkShortcutStore;
 import ru.big.town.restoremode.widgets.media.MediaWidgetLayout;
@@ -32,6 +33,7 @@ public class TileOrderStore {
         HeadlightWidgetLayout.ID,
         BrightnessWidgetLayout.ID,
         CabinTemperatureWidgetLayout.ID,
+        FuelFlapWidgetLayout.ID,
         RadioWidgetLayout.ID,
         ClockWidgetView.ID,
         SystemWidgetLayout.CPU,

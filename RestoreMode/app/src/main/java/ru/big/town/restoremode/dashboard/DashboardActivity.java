@@ -96,6 +96,8 @@ import ru.big.town.restoremode.widgets.energy.EnergyWidgetPreferences;
 import ru.big.town.restoremode.widgets.energy.TripWidgetView;
 import ru.big.town.restoremode.widgets.energy.VehicleWidgetView;
 import ru.big.town.restoremode.widgets.energy.VehicleWidgets;
+import ru.big.town.restoremode.widgets.fuel.FuelFlapWidgetDashboard;
+import ru.big.town.restoremode.widgets.fuel.FuelFlapWidgetLayout;
 import ru.big.town.restoremode.widgets.headlights.HeadlightWidgetDashboard;
 import ru.big.town.restoremode.widgets.headlights.HeadlightWidgetLayout;
 import ru.big.town.restoremode.widgets.links.LinkShortcutLauncher;
@@ -365,6 +367,7 @@ public class DashboardActivity extends AppCompatActivity {
     private final CabinTemperatureWidgetDashboard cabinTemperatureWidget =
             new CabinTemperatureWidgetDashboard(this);
     private final BrightnessWidgetDashboard brightnessWidget = new BrightnessWidgetDashboard(this);
+    private final FuelFlapWidgetDashboard fuelFlapWidget = new FuelFlapWidgetDashboard(this);
     private final HeadlightWidgetDashboard headlightWidget = new HeadlightWidgetDashboard(this);
 
     private void watchHeadlightWidget() {
@@ -423,6 +426,9 @@ public class DashboardActivity extends AppCompatActivity {
 
     private void watchSuspension() {
         watchHeadlightWidget();
+        fuelFlapWidget.watch(
+                suspensionScreenResumed
+                        && sharedPreferences.getBoolean(FuelFlapWidgetLayout.VISIBLE, false));
         cabinTemperatureWidget.watch(
                 suspensionScreenResumed
                         && sharedPreferences.getBoolean(
@@ -1033,6 +1039,7 @@ public class DashboardActivity extends AppCompatActivity {
         connectionReported = false;
         GlobalVars.clientDisconnected();
         systemWidgets.disconnected();
+        fuelFlapWidget.disconnected();
         headlightWidget.disconnected();
         brightnessWidget.disconnected();
         cabinTemperatureWidget.disconnected();
@@ -1494,16 +1501,22 @@ public class DashboardActivity extends AppCompatActivity {
     /** Контекстное меню иконки «Быстрого запуска»: куда открыть приложение. */
     private void showLaunchAppMenu(View anchor, String pkg) {
         LaunchAppMenu menu = new LaunchAppMenu(this, pkg);
-        menu.addDestination("Основной экран", R.drawable.settings_icon_fullscreen,
+        menu.addDestination(
+                "Основной экран",
+                R.drawable.settings_icon_fullscreen,
                 () -> launchAppOnDisplay(pkg, 0));
-        menu.addDestination("Пассажирский экран", R.drawable.settings_icon_fullscreen,
+        menu.addDestination(
+                "Пассажирский экран",
+                R.drawable.settings_icon_fullscreen,
                 () -> launchAppOnDisplay(pkg, 1));
         List<AppWidgetStore.Entry> widgets = AppWidgetStore.load(sharedPreferences);
         if (widgets.isEmpty()) {
             menu.addDestination("Нет виджетов приложения", R.drawable.settings_icon_apps, null);
         } else {
             for (AppWidgetStore.Entry widget : widgets) {
-                menu.addDestination("Виджет " + appWidgetTitle(widget), R.drawable.settings_icon_apps,
+                menu.addDestination(
+                        "Виджет " + appWidgetTitle(widget),
+                        R.drawable.settings_icon_apps,
                         () -> launchInsideAppWidget(pkg, widget.id));
             }
         }
@@ -1808,6 +1821,8 @@ public class DashboardActivity extends AppCompatActivity {
         switch (widgetId) {
             case RadioWidgetLayout.ID:
                 return sharedPreferences.getBoolean(RadioWidgetLayout.VISIBLE, false);
+            case FuelFlapWidgetLayout.ID:
+                return sharedPreferences.getBoolean(FuelFlapWidgetLayout.VISIBLE, false);
             case CabinTemperatureWidgetLayout.ID:
                 return sharedPreferences.getBoolean(CabinTemperatureWidgetLayout.VISIBLE, false);
             case BrightnessWidgetLayout.ID:
@@ -1927,6 +1942,9 @@ public class DashboardActivity extends AppCompatActivity {
 
     /** Получить размеры элемента в ячейках smart-grid: {ширина, высота}. */
     private int[] getWidgetDimensions(String widgetId) {
+        if (FuelFlapWidgetLayout.ID.equals(widgetId)) {
+            return new int[] {FuelFlapWidgetLayout.WIDTH, FuelFlapWidgetLayout.HEIGHT};
+        }
         if (CabinTemperatureWidgetLayout.ID.equals(widgetId)) {
             return new int[] {
                 CabinTemperatureWidgetLayout.WIDTH, CabinTemperatureWidgetLayout.HEIGHT
@@ -2022,6 +2040,7 @@ public class DashboardActivity extends AppCompatActivity {
         energyWidgetViews.clear();
         systemWidgets.resetViews();
         mediaWidgets.resetViews();
+        fuelFlapWidget.resetView();
         headlightWidget.resetView();
         brightnessWidget.resetView();
         cabinTemperatureWidget.resetView();
@@ -2280,6 +2299,9 @@ public class DashboardActivity extends AppCompatActivity {
                     case RadioWidgetLayout.ID:
                         int[] radioSize = getWidgetDimensions(tile.id);
                         widgetView = radioWidget.create(radioSize[0], radioSize[1]);
+                        break;
+                    case FuelFlapWidgetLayout.ID:
+                        widgetView = fuelFlapWidget.create();
                         break;
                     case CabinTemperatureWidgetLayout.ID:
                         widgetView = cabinTemperatureWidget.create();
@@ -4257,6 +4279,7 @@ public class DashboardActivity extends AppCompatActivity {
         appearance.close();
         systemWidgets.close();
         mediaWidgets.close();
+        fuelFlapWidget.close();
         headlightWidget.close();
         brightnessWidget.close();
         cabinTemperatureWidget.close();
