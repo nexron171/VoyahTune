@@ -124,6 +124,65 @@ fn navigation_font_failures_only_log_warnings_and_allow_the_next_step() {
 }
 
 #[test]
+fn qnx_failures_do_not_stop_removal_before_system_preparation() {
+    let directory = tempfile::tempdir().unwrap();
+    let (mut engine, events) = fixture(directory.path(), "qconn-failure");
+    let common = directory.path().join("common");
+    fs::create_dir(&common).unwrap();
+    for name in ["dns-helper.sh", "init.logcat.original.sh"] {
+        fs::write(common.join(name), b"#!/bin/sh\n").unwrap();
+    }
+    engine.payload = Payload::open(directory.path()).unwrap();
+    fs::write(
+        directory.path().join("adb"),
+        r#"#!/bin/sh
+if [ "$1" = -s ]; then shift 2; fi
+case "$1" in
+    devices) printf 'List of devices attached\nCAR-001 device\n' ;;
+    shell)
+        if [ "$2" = -T ]; then
+            printf 'QNX connection failed\n'
+            exit 1
+        fi
+        script=$(cat)
+        case "$script" in *getprop*) echo H97X ;; esac ;;
+esac
+"#,
+    )
+    .unwrap();
+
+    let error = engine
+        .execute(Request {
+            action: Action::Remove,
+            dns: Dns::Keep,
+            options: Default::default(),
+            serial: "CAR-001".into(),
+            inventory_token: String::new(),
+            confirmed: true,
+        })
+        .unwrap_err();
+
+    assert_eq!(error.message, "/system недоступен для записи");
+    let events = events.lock().unwrap();
+    for step_id in ["turn-sound-restore", "navigation-fonts-check"] {
+        assert!(events.iter().any(|event| {
+            event.kind == "step-completed" && event.step_id.as_deref() == Some(step_id)
+        }));
+        assert!(events.iter().any(|event| {
+            event.kind == "diagnostic-warning"
+                && event.step_id.as_deref() == Some(step_id)
+                && event.data["detail"]
+                    .as_str()
+                    .unwrap()
+                    .contains("QNX connection failed")
+        }));
+    }
+    assert_eq!(events.last().unwrap().step_id.as_deref(), Some("system"));
+    let journal = fs::read_to_string(engine.operation.dir.join("events.jsonl")).unwrap();
+    assert!(journal.contains("QNX connection failed"));
+}
+
+#[test]
 fn optional_step_diagnostic_write_errors_do_not_fail_the_step() {
     let directory = tempfile::tempdir().unwrap();
     let (mut engine, events) = fixture(directory.path(), "other-model");

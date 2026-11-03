@@ -342,7 +342,7 @@ fn apply_with_signature_reset(shared: &Shared, allow_native_reset: bool) -> io::
         s.total_steps = 8;
     })?;
     device::wake(true)?;
-    crate::turn_sound::restore()?;
+    crate::turn_sound::restore();
     prepare_system()?;
     let dns_choice = shared
         .lock()

@@ -323,7 +323,7 @@ impl Engine {
             "Остановка OTA-службы и сохранение логов",
             |e| e.ota_prepare(),
         )?;
-        self.step(
+        self.optional_step(
             "turn-sound-restore",
             "Восстановление штатного звука поворотников",
             |engine| engine.adb.restore_turn_sound(),
