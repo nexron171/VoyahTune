@@ -174,7 +174,7 @@ from pathlib import Path
 deployer = Path(sys.argv[1])
 if not deployer.is_file():
     raise SystemExit(f"Missing verified Rosetta deployer: {deployer}. See Installer/BUILDING.md.")
-expected_sha256 = '8aea8da0f7f7039d2a2cecb14657d752a222a5e1d3825caeef186c82f751cdd1'
+expected_sha256 = 'df908b19f1ed1cdafa79508d415aa12d6c56ce4d56d4149aa8c09286718706e5'
 if hashlib.sha256(deployer.read_bytes()).hexdigest() != expected_sha256:
     raise SystemExit(f"Wrong deployer checksum: {deployer}. See Installer/BUILDING.md.")
 PY
@@ -254,7 +254,7 @@ if ! CARGO_TARGET_DIR=/opt/target npm run tauri -- bundle --bundles appimage --c
   cat /tmp/vti-all-bundle.log
   grep -q 'failed to run linuxdeploy' /tmp/vti-all-bundle.log
   # Known Rosetta/static PIE output-plugin failure. Only use the verified deployer.
-  echo '8aea8da0f7f7039d2a2cecb14657d752a222a5e1d3825caeef186c82f751cdd1  /work/Releases/cache/linuxdeploy-pinned.AppImage' | sha256sum -c -
+  echo 'df908b19f1ed1cdafa79508d415aa12d6c56ce4d56d4149aa8c09286718706e5  /work/Releases/cache/linuxdeploy-pinned.AppImage' | sha256sum -c -
   # Its AppImage runtime is also static PIE. Extract the pinned SquashFS directly;
   # offset 944632 belongs to the SHA-256 checked immediately above.
   rm -rf /opt/vti-linuxdeploy-pinned
