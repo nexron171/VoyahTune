@@ -2128,6 +2128,7 @@ public class SetModesService extends Service {
         if (serviceDestroyed) return;
         Log.i(TAG, "Power state changed: " + state + " (" + powerStateName(state) + ")");
         if (isWakeState(state)) {
+            ScenarioTriggerPersistence.wake(this);
             requestWashModeCleanup("power state " + powerStateName(state));
             ApplyEngine.activateWake("power state " + powerStateName(state));
             if (isScreenInteractive()
@@ -2143,6 +2144,7 @@ public class SetModesService extends Service {
             return;
         }
         if (isSleepOrShutdownState(state)) {
+            ScenarioTriggerPersistence.sleep(this);
             screenOffObserved = true;
             pendingPhysicalWake = false;
             endWakeSession();

@@ -61,6 +61,7 @@ public final class ScenarioProtocol {
 
     /** Ребро срабатывания для триггера двери. */
     public static final String KEY_EDGE = "edge";
+    public static final String KEY_FIRST_ONLY = "firstOnly";
 
     public static final String EDGE_OPEN = "open";
     public static final String EDGE_CLOSE = "close";

@@ -15,7 +15,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-
+import java.util.function.Predicate;
 
 /**
  * Движок пользовательских сценариев: событийные триггеры (селектор, двери, освещённость),
@@ -23,7 +23,7 @@ import java.util.concurrent.Executors;
  *
  * <p>Работает в процессе Native, поэтому сценарии срабатывают и при закрытом RestoreMode.
  * Определения приходят снимком из RestoreMode через {@link ScenarioConfigReceiver}; запуск
- * вручную (плитка/голос) — через {@link #runNow(String)}.</p>
+ * вручную (плитка/голос) — через {@link #runNow(String)}.
  */
 final class ScenarioEngine {
     private static final String TAG = "$$$ ScenarioEngine $$$";
@@ -31,15 +31,17 @@ final class ScenarioEngine {
     private static final long MIN_RUN_INTERVAL_MS = 5_000L;
 
     private final ScenarioEnvironment environment;
+    private final ScenarioTriggerHistory triggerHistory = ScenarioTriggerHistory.inMemory();
     private final ScenarioRunner runner;
     private final HandlerThread thread;
     private final Handler handler;
     private final Handler main = new Handler(Looper.getMainLooper());
-    private final ExecutorService conditionExecutor = Executors.newSingleThreadExecutor(runnable -> {
-        Thread thread = new Thread(runnable, "ScenarioConditions");
-        thread.setDaemon(true);
-        return thread;
-    });
+    private final ExecutorService conditionExecutor =
+            Executors.newSingleThreadExecutor(runnable -> {
+                Thread worker = new Thread(runnable, "ScenarioConditions");
+                worker.setDaemon(true);
+                return worker;
+            });
 
     private volatile List<ScenarioDefinition> scenarios = Collections.emptyList();
     private ScenarioEnvironment.Subscription lightSubscription;
@@ -50,6 +52,7 @@ final class ScenarioEngine {
     private final Map<String, Long> lastRunElapsed = new HashMap<>();
     private boolean gearSnapshotSeen;
     private boolean doorSnapshotSeen;
+    private int previousDoorMask;
     private String lastDriveMode;
     private ScenarioPolicy.LightState lastLight = ScenarioPolicy.LightState.HOLD;
 
@@ -143,19 +146,23 @@ final class ScenarioEngine {
             return;
         }
         for (ScenarioDefinition scenario : enabledScenarios()) {
-            if (ScenarioPolicy.matchesGear(scenario, gearValue)) {
+            if (acceptTriggers(
+                    scenario, trigger -> ScenarioPolicy.matchesGear(trigger, gearValue))) {
                 evaluateAndRun(scenario, "селектор " + gearValue);
             }
         }
     }
 
     private void onDoors(int doorMask) {
+        int previous = previousDoorMask;
+        previousDoorMask = doorMask;
         if (!doorSnapshotSeen) {
             doorSnapshotSeen = true;
             return;
         }
         for (ScenarioDefinition scenario : enabledScenarios()) {
-            if (ScenarioPolicy.matchesDoor(scenario, doorMask)) {
+            if (acceptTriggers(
+                    scenario, trigger -> ScenarioPolicy.matchesDoor(trigger, previous, doorMask))) {
                 evaluateAndRun(scenario, "двери " + doorMask);
             }
         }
@@ -165,7 +172,8 @@ final class ScenarioEngine {
         String previous = lastDriveMode;
         lastDriveMode = mode;
         for (ScenarioDefinition scenario : enabledScenarios()) {
-            if (ScenarioPolicy.matchesDriveMode(scenario, previous, mode)) {
+            if (acceptTriggers(
+                    scenario, trigger -> ScenarioPolicy.matchesDriveMode(trigger, previous, mode))) {
                 evaluateAndRun(scenario, "режим движения " + mode);
             }
         }
@@ -178,11 +186,25 @@ final class ScenarioEngine {
             lastLight = state;
             if (state == ScenarioPolicy.LightState.HOLD || state == previous) return;
             for (ScenarioDefinition scenario : enabledScenarios()) {
-                if (ScenarioPolicy.matchesLight(scenario, previous, state)) {
+                if (acceptTriggers(
+                        scenario, trigger -> ScenarioPolicy.matchesLight(trigger, previous, state))) {
                     evaluateAndRun(scenario, "освещённость " + state);
                 }
             }
         });
+    }
+
+    private boolean acceptTriggers(
+            ScenarioDefinition scenario, Predicate<ScenarioDefinition.Trigger> matches) {
+        boolean accepted = false;
+        for (ScenarioDefinition.Trigger trigger : scenario.triggers) {
+            // Consume every matching rule, even when another rule already permits this event.
+            if (matches.test(trigger)
+                    && environment.acceptTrigger(scenario.id, trigger, triggerHistory)) {
+                accepted = true;
+            }
+        }
+        return accepted;
     }
 
     // --- Проверка условий и запуск ---

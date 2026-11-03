@@ -31,6 +31,11 @@ interface ScenarioEnvironment {
 
     void notifyUser(String text);
 
+    default boolean acceptTrigger(
+            String scenarioId, ScenarioDefinition.Trigger trigger, ScenarioTriggerHistory history) {
+        return history.accept(scenarioId, trigger);
+    }
+
     static ScenarioEnvironment oem(SetModesService service) {
         return new ScenarioEnvironment() {
             private final ScenarioActionExecutor actions = new ScenarioActionExecutor(service);
@@ -129,6 +134,14 @@ interface ScenarioEnvironment {
                         ScenarioPolicy.hasCondition(scenario, ScenarioProtocol.CONDITION_TEMP_IN)
                                 ? CabinTemperatureController.get(service).temperature()
                                 : Double.NaN);
+            }
+
+            @Override
+            public boolean acceptTrigger(
+                    String scenarioId, ScenarioDefinition.Trigger trigger,
+                    ScenarioTriggerHistory history) {
+                return !trigger.firstOnly
+                        || ScenarioTriggerPersistence.accept(service, scenarioId, trigger);
             }
 
             @Override

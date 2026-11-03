@@ -17,6 +17,23 @@ import java.util.List;
 public class ScenarioPolicyTest {
 
     @Test
+    public void firstDoorEventRequiresTheSelectedDoorToChange() {
+        ScenarioDefinition.Trigger open = new ScenarioDefinition.Trigger(
+                ScenarioProtocol.TRIGGER_DOOR, ScenarioProtocol.DOOR_DRIVER,
+                ScenarioProtocol.EDGE_OPEN, true);
+        int driver = DoorsStateController.bitFor(ScenarioProtocol.DOOR_DRIVER);
+        int passenger = DoorsStateController.bitFor(ScenarioProtocol.DOOR_PASSENGER);
+        assertTrue(ScenarioPolicy.matchesDoor(open, 0, driver));
+        assertFalse(ScenarioPolicy.matchesDoor(open, driver, driver | passenger));
+        assertFalse(ScenarioPolicy.matchesDoor(open, driver, 0));
+        assertFalse(ScenarioPolicy.matchesDoor(open, CanBusEvent.DOOR_UNKNOWN, driver));
+        ScenarioDefinition.Trigger legacy = new ScenarioDefinition.Trigger(
+                ScenarioProtocol.TRIGGER_DOOR, ScenarioProtocol.DOOR_DRIVER,
+                ScenarioProtocol.EDGE_OPEN);
+        assertTrue(ScenarioPolicy.matchesDoor(legacy, driver, driver | passenger));
+    }
+
+    @Test
     public void cabinConditionUsesLastKnownHalfDegreesAndRejectsMissingValue() {
         for (String operator :
                 new String[] {

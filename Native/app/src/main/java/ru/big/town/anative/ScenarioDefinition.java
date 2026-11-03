@@ -20,11 +20,17 @@ final class ScenarioDefinition {
         final String type;
         final String value;
         final String edge;
+        final boolean firstOnly;
 
         Trigger(String type, String value, String edge) {
+            this(type, value, edge, false);
+        }
+
+        Trigger(String type, String value, String edge, boolean firstOnly) {
             this.type = type;
             this.value = value;
             this.edge = edge;
+            this.firstOnly = firstOnly;
         }
     }
 
@@ -152,7 +158,8 @@ final class ScenarioDefinition {
                         new Trigger(
                                 value.optString(ScenarioProtocol.KEY_TYPE, ""),
                                 value.optString(ScenarioProtocol.KEY_VALUE, ""),
-                                value.optString(ScenarioProtocol.KEY_EDGE, ""));
+                                value.optString(ScenarioProtocol.KEY_EDGE, ""),
+                                value.optBoolean(ScenarioProtocol.KEY_FIRST_ONLY, false));
                 if (validTrigger(trigger)) triggers.add(trigger);
             }
         }

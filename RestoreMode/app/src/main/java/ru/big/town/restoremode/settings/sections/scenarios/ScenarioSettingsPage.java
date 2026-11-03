@@ -234,6 +234,16 @@ public final class ScenarioSettingsPage {
                                 scenario.triggers.remove(trigger);
                                 save();
                             }));
+            MaterialButton frequency = actionButton(
+                    trigger.firstOnly ? "Только первый раз после сна" : "Каждый раз");
+            frequency.setOnClickListener(view -> pickOne(
+                    "Срабатывать",
+                    new String[] {"Каждый раз", "Только первый раз после сна"},
+                    selected -> {
+                        trigger.firstOnly = selected == 1;
+                        save();
+                    }));
+            triggers.addView(frequency);
         }
         if (index < scenario.conditions.size()) {
             ScenarioStore.Condition condition = scenario.conditions.get(index);

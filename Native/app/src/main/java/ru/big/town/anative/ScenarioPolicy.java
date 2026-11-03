@@ -73,60 +73,65 @@ final class ScenarioPolicy {
         return LightState.HOLD;
     }
 
-    /** Триггер по положению селектора. */
-    static boolean matchesGear(ScenarioDefinition scenario, int gearValue) {
-        for (ScenarioDefinition.Trigger trigger : scenario.triggers) {
-            if (!ScenarioProtocol.TRIGGER_GEAR.equals(trigger.type)) continue;
-            Integer wanted = ScenarioProtocol.gearValue(trigger.value);
-            if (wanted != null && wanted == gearValue) return true;
-        }
-        return false;
+    static boolean matchesGear(ScenarioDefinition scenario, int value) {
+        return scenario.triggers.stream().anyMatch(trigger -> matchesGear(trigger, value));
     }
 
-    static boolean matchesDriveMode(ScenarioDefinition scenario, String previous, String current) {
-        if (!ScenarioProtocol.validDriveMode(previous)
-                || !ScenarioProtocol.validDriveMode(current)
-                || current.equals(previous)) {
-            return false;
-        }
-        for (ScenarioDefinition.Trigger trigger : scenario.triggers) {
-            if (ScenarioProtocol.TRIGGER_DRIVE_MODE.equals(trigger.type)
-                    && current.equals(trigger.value)) {
-                return true;
-            }
-        }
-        return false;
+    static boolean matchesDoor(ScenarioDefinition scenario, int mask) {
+        return scenario.triggers.stream().anyMatch(trigger -> matchesDoor(trigger, mask));
     }
 
-    /** Триггер по двери; недостоверная маска (есть недоступное поле) не срабатывает. */
-    static boolean matchesDoor(ScenarioDefinition scenario, int doorMask) {
-        if ((doorMask & CanBusEvent.DOOR_UNKNOWN) != 0) return false;
-        for (ScenarioDefinition.Trigger trigger : scenario.triggers) {
-            if (!ScenarioProtocol.TRIGGER_DOOR.equals(trigger.type)) continue;
-            int bit = DoorsStateController.bitFor(trigger.value);
-            if (bit == 0) continue;
-            boolean open = (doorMask & bit) != 0;
-            if (ScenarioProtocol.EDGE_OPEN.equals(trigger.edge) && open) return true;
-            if (ScenarioProtocol.EDGE_CLOSE.equals(trigger.edge) && !open) return true;
-        }
-        return false;
+    static boolean matchesDriveMode(
+            ScenarioDefinition scenario, String previous, String current) {
+        return scenario.triggers.stream()
+                .anyMatch(trigger -> matchesDriveMode(trigger, previous, current));
     }
 
-    /** Триггер по освещённости: только на ребро перехода в тёмное или светлое состояние. */
     static boolean matchesLight(
             ScenarioDefinition scenario, LightState previous, LightState current) {
-        if (current == LightState.HOLD || current == previous) return false;
-        for (ScenarioDefinition.Trigger trigger : scenario.triggers) {
-            if (!ScenarioProtocol.TRIGGER_LIGHT.equals(trigger.type)) continue;
-            if (ScenarioProtocol.LIGHT_DARK.equals(trigger.value) && current == LightState.DARK) {
-                return true;
-            }
-            if (ScenarioProtocol.LIGHT_BRIGHT.equals(trigger.value)
-                    && current == LightState.BRIGHT) {
-                return true;
-            }
-        }
-        return false;
+        return scenario.triggers.stream()
+                .anyMatch(trigger -> matchesLight(trigger, previous, current));
+    }
+
+    static boolean matchesGear(ScenarioDefinition.Trigger trigger, int value) {
+        return ScenarioProtocol.TRIGGER_GEAR.equals(trigger.type)
+                && java.util.Objects.equals(ScenarioProtocol.gearValue(trigger.value), value);
+    }
+
+    static boolean matchesDoor(ScenarioDefinition.Trigger trigger, int mask) {
+        if (!ScenarioProtocol.TRIGGER_DOOR.equals(trigger.type)
+                || (mask & CanBusEvent.DOOR_UNKNOWN) != 0) return false;
+        int bit = DoorsStateController.bitFor(trigger.value);
+        if (bit == 0) return false;
+        boolean open = (mask & bit) != 0;
+        return (open && ScenarioProtocol.EDGE_OPEN.equals(trigger.edge))
+                || (!open && ScenarioProtocol.EDGE_CLOSE.equals(trigger.edge));
+    }
+
+    static boolean matchesDoor(ScenarioDefinition.Trigger trigger, int previous, int current) {
+        if (!matchesDoor(trigger, current)) return false;
+        if (!trigger.firstOnly) return true;
+        return (previous & CanBusEvent.DOOR_UNKNOWN) == 0
+                && ((previous ^ current) & DoorsStateController.bitFor(trigger.value)) != 0;
+    }
+
+    static boolean matchesDriveMode(
+            ScenarioDefinition.Trigger trigger, String previous, String current) {
+        return ScenarioProtocol.TRIGGER_DRIVE_MODE.equals(trigger.type)
+                && ScenarioProtocol.validDriveMode(previous)
+                && ScenarioProtocol.validDriveMode(current)
+                && !current.equals(previous)
+                && current.equals(trigger.value);
+    }
+
+    static boolean matchesLight(
+            ScenarioDefinition.Trigger trigger, LightState previous, LightState current) {
+        return ScenarioProtocol.TRIGGER_LIGHT.equals(trigger.type)
+                && current != previous
+                && ((current == LightState.DARK
+                                && ScenarioProtocol.LIGHT_DARK.equals(trigger.value))
+                        || (current == LightState.BRIGHT
+                                && ScenarioProtocol.LIGHT_BRIGHT.equals(trigger.value)));
     }
 
     /** Все условия должны быть выполнены; неизвестное значение условия считается невыполненным. */

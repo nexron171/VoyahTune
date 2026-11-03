@@ -29,6 +29,7 @@ public final class ScenarioStore {
         public String type = ScenarioProtocol.TRIGGER_GEAR;
         public String value = "";
         public String edge = "";
+        public boolean firstOnly;
 
         public Trigger() {}
 
@@ -241,6 +242,7 @@ public final class ScenarioStore {
                                 value.optString(ScenarioProtocol.KEY_TYPE, ""),
                                 value.optString(ScenarioProtocol.KEY_VALUE, ""),
                                 value.optString(ScenarioProtocol.KEY_EDGE, ""));
+                trigger.firstOnly = value.optBoolean(ScenarioProtocol.KEY_FIRST_ONLY, false);
                 if (validTrigger(trigger)) {
                     scenario.triggers.add(trigger);
                 }
@@ -303,6 +305,7 @@ public final class ScenarioStore {
                 JSONObject value = new JSONObject();
                 value.put(ScenarioProtocol.KEY_TYPE, trigger.type);
                 value.put(ScenarioProtocol.KEY_VALUE, trigger.value);
+                value.put(ScenarioProtocol.KEY_FIRST_ONLY, trigger.firstOnly);
                 if (!trigger.edge.isEmpty()) {
                     value.put(ScenarioProtocol.KEY_EDGE, trigger.edge);
                 }
