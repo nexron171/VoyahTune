@@ -11,6 +11,7 @@ public final class LauncherModule implements ModuleRuntime.Module {
     private final HookRegistry hooks;
     private final LauncherPlatform platform;
     private final LauncherDockModule dock;
+    private final PassengerDockModule passenger;
     private LauncherAllAppsModule applications;
 
     public LauncherModule(MethodAccess methods, HookRegistry hooks, LauncherPlatform platform) {
@@ -18,20 +19,35 @@ public final class LauncherModule implements ModuleRuntime.Module {
         this.hooks = hooks;
         this.platform = platform;
         dock = new LauncherDockModule(methods, hooks, platform);
+        passenger = new PassengerDockModule(methods, hooks, platform);
     }
 
-    @Override public void prepare(Map<String, String> configuration) throws Exception {
+    @Override
+    public void prepare(Map<String, String> configuration) throws Exception {
         dock.prepare(configuration);
-        if (applications == null) applications = new LauncherAllAppsModule(methods, hooks, platform, dock.shared());
+        if (applications == null) {
+            applications = new LauncherAllAppsModule(methods, hooks, platform, dock.shared());
+        }
         applications.prepare(configuration);
+        passenger.prepare(configuration);
     }
-    @Override public void install(ModuleScope scope, Map<String, String> configuration) throws Exception {
+
+    @Override
+    public void install(ModuleScope scope, Map<String, String> configuration) throws Exception {
         dock.install(scope, configuration);
         applications.install(scope, configuration);
+        passenger.install(scope, configuration);
     }
-    @Override public void configure(ModuleScope scope, Map<String, String> configuration) throws Exception {
+
+    @Override
+    public void configure(ModuleScope scope, Map<String, String> configuration) throws Exception {
         dock.configure(scope, configuration);
         applications.configure(scope, configuration);
+        passenger.configure(scope, configuration);
     }
-    @Override public boolean ready() { return dock.ready() && applications != null && applications.ready(); }
+
+    @Override
+    public boolean ready() {
+        return dock.ready() && applications != null && applications.ready();
+    }
 }

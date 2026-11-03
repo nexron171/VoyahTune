@@ -83,6 +83,7 @@ def check_candidate(stage, configured_gson=None):
                  "ru.voyahtune.contracts.LauncherVisibilityTest",
                  "ru.voyahtune.contracts.ViewOwnershipTest",
                  "ru.voyahtune.contracts.LauncherDockModuleTest",
+                 "ru.voyahtune.contracts.PassengerDockModuleTest",
                  "ru.voyahtune.contracts.LauncherAllAppsModuleTest"):
         subprocess.run([
             str(java / "bin/java"), "-classpath",
