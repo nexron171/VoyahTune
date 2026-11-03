@@ -18,12 +18,14 @@ pub struct Device {
     pub model: Option<String>,
     pub product: Option<String>,
 }
+
 #[derive(Debug)]
 pub struct Output {
     pub code: i32,
     pub stdout: String,
     pub stderr: String,
 }
+
 impl Output {
     pub fn checked(self, message: &str) -> Result<Self> {
         if self.code == 0 {
@@ -37,6 +39,7 @@ impl Output {
         }
     }
 }
+
 #[derive(Clone)]
 pub struct Adb {
     path: PathBuf,
@@ -44,19 +47,9 @@ pub struct Adb {
     pub events: Events,
     pub step: Option<String>,
 }
+
 impl Adb {
     pub(crate) fn restore_turn_sound(&self) -> Result<()> {
-        use release_core::vehicle_model::{VehicleModel, PROPERTIES_COMMAND};
-        let properties = self.read(PROPERTIES_COMMAND)?;
-        if properties.trim().is_empty() {
-            return Err(Error::new(
-                "TURN_SOUND_MODEL",
-                "Не удалось определить модель автомобиля",
-            ));
-        }
-        if VehicleModel::detect(&properties) == VehicleModel::Other {
-            return Ok(());
-        }
         let serial = self
             .serial
             .as_deref()
@@ -109,6 +102,7 @@ impl Adb {
             step: None,
         })
     }
+
     pub fn with_device(mut self, serial: &str) -> Result<Self> {
         if serial.is_empty()
             || serial.len() > 200
@@ -122,6 +116,7 @@ impl Adb {
         self.serial = Some(serial.into());
         Ok(self)
     }
+
     pub fn run(&self, args: &[&str], input: Option<&[u8]>, timeout: Duration) -> Result<Output> {
         let mut command = Command::new(&self.path);
         if let Some(serial) = &self.serial {
@@ -235,6 +230,7 @@ impl Adb {
         )?;
         Ok(output)
     }
+
     pub fn shell(&self, script: &str, timeout: Duration) -> Result<String> {
         let output = self.run(&["shell", "sh", "-s"], Some(script.as_bytes()), timeout)?;
         let output = output
@@ -250,9 +246,11 @@ impl Adb {
             })?;
         Ok(output.stdout.trim().to_owned())
     }
+
     pub fn read(&self, script: &str) -> Result<String> {
         self.shell(script, Duration::from_secs(20))
     }
+
     pub fn package_paths(&self, package: &str) -> Result<Vec<String>> {
         let script = format!("pm path {}\n", quote(package));
         let output = self.run(
@@ -270,6 +268,7 @@ impl Adb {
             error
         })
     }
+
     pub fn ensure_root(&self) -> Result<()> {
         self.require_single()?;
         self.run(&["root"], None, Duration::from_secs(20))?
@@ -297,6 +296,7 @@ impl Adb {
             thread::sleep(Duration::from_secs(1));
         }
     }
+
     pub fn devices(&self) -> Result<Vec<Device>> {
         let mut global = self.clone();
         global.serial = None;
@@ -305,6 +305,7 @@ impl Adb {
             .checked("Не удалось получить список устройств")?;
         parse_devices(&output.stdout)
     }
+
     pub fn require_single(&self) -> Result<Device> {
         let devices = self.devices()?;
         if devices.is_empty() {
@@ -344,6 +345,7 @@ impl Adb {
         }
         Ok(device)
     }
+
     pub fn push(&self, local: &Path, remote: &str) -> Result<()> {
         self.run(
             &[
@@ -359,6 +361,7 @@ impl Adb {
         .checked("Не удалось передать файл на автомобиль")?;
         Ok(())
     }
+
     pub fn pull(&self, remote: &str, local: &Path) -> Result<()> {
         self.run(
             &[
@@ -375,9 +378,11 @@ impl Adb {
         Ok(())
     }
 }
+
 pub fn quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
+
 pub fn parse_devices(output: &str) -> Result<Vec<Device>> {
     if !output
         .lines()
@@ -417,6 +422,7 @@ pub fn parse_devices(output: &str) -> Result<Vec<Device>> {
     }
     Ok(devices)
 }
+
 fn classify_error(message: &str, detail: &str, code: i32) -> Error {
     let (kind, text) = if detail.contains("unauthorized") {
         (
@@ -444,6 +450,7 @@ fn classify_error(message: &str, detail: &str, code: i32) -> Error {
             "Устраните указанную причину и повторите операцию; состояние будет проверено заново.",
         )
 }
+
 // Every error path must reap the local process, including journal I/O failures.
 struct ChildGuard(std::process::Child);
 impl std::ops::Deref for ChildGuard {
@@ -452,11 +459,13 @@ impl std::ops::Deref for ChildGuard {
         &self.0
     }
 }
+
 impl std::ops::DerefMut for ChildGuard {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
+
 impl Drop for ChildGuard {
     fn drop(&mut self) {
         if self.0.try_wait().ok().flatten().is_none() {
@@ -469,6 +478,7 @@ impl Drop for ChildGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn includes_offline_and_unauthorized() {
         let d = parse_devices("List of devices attached\ncar device product:p model:Voyah_Free\nphone unauthorized\nemulator-5554 offline\n").unwrap();
@@ -476,6 +486,28 @@ mod tests {
         assert_eq!(d[1].state, "unauthorized");
         assert!(parse_devices("daemon failed").is_err());
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn turn_sound_restore_propagates_qnx_failure_for_other_vehicles() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("adb");
+        std::fs::write(
+            &path,
+            "#!/bin/sh\ncase \"$*\" in *'shell sh -s'*) cat >/dev/null; printf 'H97C\\n';; esac\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut adb = Adb::new(&path, Events::quiet()).unwrap();
+        adb.serial = Some("test-vehicle".into());
+
+        let error = adb.restore_turn_sound().unwrap_err();
+
+        assert_eq!(error.code, "QNX_TRANSPORT");
+    }
+
     #[test]
     fn quotes_shell_input() {
         assert_eq!(quote("a'b;$(x)"), "'a'\\''b;$(x)'");
@@ -514,9 +546,11 @@ fn parse_package_paths(output: Output) -> Result<Vec<String>> {
         })
         .collect()
 }
+
 #[cfg(test)]
 mod package_query_tests {
     use super::*;
+
     #[test]
     fn missing_package_is_not_a_command_failure() {
         for code in [0, 1] {

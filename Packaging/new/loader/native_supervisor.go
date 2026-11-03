@@ -40,7 +40,6 @@ type nativeSupervisor struct {
 	wanted                 map[string]bool
 	apolloPath             string
 	readSetting            func(context.Context, string) string
-	readProduct            func(context.Context, string) string
 	restartLauncherProcess func(agentwire.Target) error
 	updateBlock            string
 	migrationBoot          string
@@ -85,15 +84,6 @@ func (manager *nativeSupervisor) enabled(ctx context.Context, agent nativeAgentC
 		return false, nil
 	}
 	switch agent.Condition {
-	case "oem-media-od":
-		readProduct := manager.readProduct
-		if readProduct == nil {
-			readProduct = func(ctx context.Context, name string) string {
-				return androidCommand(ctx, "getprop", name)
-			}
-		}
-		return oemMediaProduct(readProduct(ctx, "ro.build.product")) ||
-			oemMediaProduct(readProduct(ctx, "ro.build.product_3rdparty")), nil
 	case "apollo":
 		data, err := os.ReadFile(manager.apolloPath)
 		return err == nil && apolloEnabled(string(data), manager.boot), nil
@@ -103,10 +93,6 @@ func (manager *nativeSupervisor) enabled(ctx context.Context, agent nativeAgentC
 	default:
 		return true, nil
 	}
-}
-
-func oemMediaProduct(product string) bool {
-	return product == "f6811" || product == "f6805h"
 }
 
 func (manager *nativeSupervisor) selection(ctx context.Context, definitions []nativeAgentConfig, identity processIdentity) (moduleplan.TargetGroup, map[string]string, error) {

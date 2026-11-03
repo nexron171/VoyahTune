@@ -5,38 +5,34 @@ import (
 	"testing"
 )
 
-func TestOemMediaSelectionLeavesOtherVehiclesUntouched(t *testing.T) {
-	for _, test := range []struct {
-		name, product, thirdParty string
-		enabled                   bool
-	}{
-		{"sport-plus", "f6811", "", true},
-		{"sport-edition", "f6805h", "", true},
-		{"third-party-product", "generic", "f6811", true},
-		{"parallel-import", "f6802h", "", false},
-		{"unknown", "", "", false},
-		{"similar-name", "f6811-other", "", false},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			manager := nativeSupervisor{
-				wanted: map[string]bool{"cluster-media": true},
-				readProduct: func(_ context.Context, name string) string {
-					if name == "ro.build.product" {
-						return test.product
+func TestOemMediaSelectionDoesNotRequireVehicleIdentity(t *testing.T) {
+	for _, identifier := range []string{"cluster-media", "launcher-media", "island-media"} {
+		t.Run(identifier, func(t *testing.T) {
+			var definition nativeAgentConfig
+			for _, agent := range compiledAgents() {
+				if agent.ID == identifier {
+					definition = agent
+					break
+				}
+			}
+			if definition.ID == "" {
+				t.Fatal("Missing compiled media agent")
+			}
+			manager := nativeSupervisor{wanted: map[string]bool{identifier: true}}
+			for _, enabled := range []bool{true, false} {
+				manager.wanted[identifier] = enabled
+				group, _, err := manager.selection(
+					context.Background(), []nativeAgentConfig{definition}, processIdentity{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if enabled {
+					if len(group.Modules) != 1 || group.Modules[0] != "oem-media" {
+						t.Fatalf("Media module was not selected: %+v", group)
 					}
-					return test.thirdParty
-				},
-			}
-			agent := nativeAgentConfig{ID: "cluster-media", Target: "com.qinggan.instrumentcard",
-				Condition: "oem-media-od", Modules: []string{"oem-media"}}
-			group, _, err := manager.selection(context.Background(), []nativeAgentConfig{agent}, processIdentity{})
-			if err != nil || (len(group.Modules) == 1) != test.enabled {
-				t.Fatalf("modules=%v enabled=%v error=%v", group.Modules, test.enabled, err)
-			}
-			manager.wanted[agent.ID] = false
-			group, _, err = manager.selection(context.Background(), []nativeAgentConfig{agent}, processIdentity{})
-			if err != nil || len(group.Modules) != 0 {
-				t.Fatalf("disabled module was selected: %+v, %v", group, err)
+				} else if len(group.Modules) != 0 {
+					t.Fatalf("Disabled media module was selected: %+v", group)
+				}
 			}
 		})
 	}

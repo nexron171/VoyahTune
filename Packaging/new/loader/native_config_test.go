@@ -44,7 +44,6 @@ func TestCompiledRuntimeStartsWithoutExternalManifests(t *testing.T) {
 		targets["launcher"].Target != "com.qinggan.app.launcher" ||
 		targets["acc"].MaxAttempts != 4 || targets["cluster"].TimeoutSeconds != 45 ||
 		targets["keyboard-ru"].Condition != "keyboard-ru" || len(targets["rds"].Modules) != 2 ||
-		targets["cluster-media"].Condition != "oem-media-od" ||
 		targets["cluster-media"].Target != "com.qinggan.instrumentcard" {
 		t.Fatal(config)
 	}

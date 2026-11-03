@@ -104,7 +104,6 @@ func compiledAgents() []nativeAgentConfig {
 		{
 			ID:             "cluster-media",
 			Target:         "com.qinggan.instrumentcard",
-			Condition:      "oem-media-od",
 			MaxAttempts:    1,
 			TimeoutSeconds: 35,
 			CrashLimit:     2,
@@ -113,7 +112,6 @@ func compiledAgents() []nativeAgentConfig {
 		{
 			ID:             "launcher-media",
 			Target:         "com.qinggan.app.launcher",
-			Condition:      "oem-media-od",
 			MaxAttempts:    1,
 			TimeoutSeconds: 35,
 			CrashLimit:     2,
@@ -122,7 +120,6 @@ func compiledAgents() []nativeAgentConfig {
 		{
 			ID:             "island-media",
 			Target:         "com.qinggan.app.islandapp",
-			Condition:      "oem-media-od",
 			MaxAttempts:    1,
 			TimeoutSeconds: 35,
 			CrashLimit:     2,
