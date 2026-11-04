@@ -31,8 +31,8 @@ final class WidgetSurfaceDrawable extends Drawable {
         this.settings = settings;
         this.blurredWallpaper = blurredWallpaper;
         float density = tile.getResources().getDisplayMetrics().density;
-        radius = 20 * density;
-        stroke = density;
+        radius = settings.cornerRadiusDp * density;
+        stroke = settings.borderDp * density;
     }
 
     @Override
@@ -61,12 +61,14 @@ final class WidgetSurfaceDrawable extends Drawable {
         paint.setColor(settings.backgroundColor);
         paint.setAlpha(surfaceAlpha);
         canvas.drawRoundRect(rectangle, radius, radius, paint);
-        paint.setStyle(Paint.Style.STROKE);
-        paint.setStrokeWidth(stroke);
-        paint.setColor(0xff373f4a);
-        paint.setAlpha(surfaceAlpha);
-        canvas.drawRoundRect(rectangle, radius, radius, paint);
-        paint.setStyle(Paint.Style.FILL);
+        if (stroke > 0) {
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(stroke);
+            paint.setColor(0xff373f4a);
+            paint.setAlpha(surfaceAlpha);
+            canvas.drawRoundRect(rectangle, radius, radius, paint);
+            paint.setStyle(Paint.Style.FILL);
+        }
     }
 
     @Override

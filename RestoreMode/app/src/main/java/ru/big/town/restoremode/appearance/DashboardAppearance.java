@@ -59,7 +59,9 @@ public final class DashboardAppearance implements AutoCloseable {
                     || AppearanceSettings.TRANSPARENCY_PERCENT.equals(key)
                     || AppearanceSettings.BACKGROUND_COLOR.equals(key)
                     || AppearanceSettings.BLUR_ENABLED.equals(key)
-                    || AppearanceSettings.BLUR_AMOUNT.equals(key)) {
+                    || AppearanceSettings.BLUR_AMOUNT.equals(key)
+                    || AppearanceSettings.TILE_BORDER.equals(key)
+                    || AppearanceSettings.TILE_CORNER_RADIUS.equals(key)) {
                 wallpaperView.post(() -> {
                     if (!closed && tiles != null) {
                         apply(tiles);
@@ -77,7 +79,9 @@ public final class DashboardAppearance implements AutoCloseable {
                 || settings.transparencyEnabled != updated.transparencyEnabled
                 || settings.transparencyPercent != updated.transparencyPercent
                 || settings.blurEnabled != updated.blurEnabled
-                || settings.blurAmount != updated.blurAmount;
+                || settings.blurAmount != updated.blurAmount
+                || settings.borderDp != updated.borderDp
+                || settings.cornerRadiusDp != updated.cornerRadiusDp;
         this.tiles = tiles;
         settings = updated;
         int blurAmount = settings.blursWallpaper() ? settings.blurAmount : 0;
@@ -195,7 +199,7 @@ public final class DashboardAppearance implements AutoCloseable {
         int bottom = tile.getPaddingBottom();
         GradientDrawable mask = new GradientDrawable();
         mask.setColor(0xffffffff);
-        mask.setCornerRadius(20 * tile.getResources().getDisplayMetrics().density);
+        mask.setCornerRadius(settings.cornerRadiusDp * tile.getResources().getDisplayMetrics().density);
         tile.setBackground(new RippleDrawable(ColorStateList.valueOf(0x40ffffff),
                 new WidgetSurfaceDrawable(tile, wallpaperView, settings, blurredLayer), mask));
         tile.setPadding(left, top, right, bottom);

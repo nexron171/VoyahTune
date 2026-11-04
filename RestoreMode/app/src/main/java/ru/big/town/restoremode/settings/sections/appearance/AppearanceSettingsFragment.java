@@ -88,6 +88,12 @@ public final class AppearanceSettingsFragment extends SettingsSectionFragment {
             grid.addView(spacingCard());
             return styled(grid);
         }));
+        rows.add(new SettingsList.Row("appearance:tileOutline", parent -> {
+            SettingsGrid grid = new SettingsGrid(requireContext(), null);
+            grid.addView(tileBorderCard());
+            grid.addView(tileCornerRadiusCard());
+            return styled(grid);
+        }));
         rows.add(new SettingsList.Row("appearance:surfaces", parent -> {
             SettingsGrid grid = new SettingsGrid(requireContext(), null);
             grid.addView(colorCard());
@@ -141,6 +147,25 @@ public final class AppearanceSettingsFragment extends SettingsSectionFragment {
                 slider("Отступ", AppearanceSettings.spacingDp(preferences),
                         AppearanceSettings.MAX_SPACING_DP, " dp", true,
                         value -> saveInt(AppearanceSettings.TILE_SPACING, value)));
+    }
+
+    private View tileBorderCard() {
+        return components.card(
+                components.text("Толщина рамок плиток", 22, 0xfff3f5fa),
+                detail("Обводка плиток главного экрана. 0 отключает рамку, по умолчанию 1 dp."),
+                slider("Толщина", AppearanceSettings.load(preferences).borderDp,
+                        AppearanceSettings.MAX_BORDER_DP, " dp", true,
+                        value -> saveInt(AppearanceSettings.TILE_BORDER, value)));
+    }
+
+    private View tileCornerRadiusCard() {
+        return components.card(
+                components.text("Скругление углов плиток", 22, 0xfff3f5fa),
+                detail("Радиус углов плиток главного экрана. 0 делает углы прямыми,"
+                        + " по умолчанию 20 dp."),
+                slider("Скругление", AppearanceSettings.load(preferences).cornerRadiusDp,
+                        AppearanceSettings.MAX_CORNER_RADIUS_DP, " dp", true,
+                        value -> saveInt(AppearanceSettings.TILE_CORNER_RADIUS, value)));
     }
 
     private View blurCard() {
