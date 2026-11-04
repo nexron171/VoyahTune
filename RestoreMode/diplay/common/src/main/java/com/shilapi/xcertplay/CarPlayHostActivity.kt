@@ -721,6 +721,7 @@ class CarPlayHostActivity : ComponentActivity() {
                     return
                 val retry = pendingReconnect ?: return
                 if (!reconnectScheduled || !reconnectWaitsForBluetooth) return
+                if (!CarPlayBackgroundSession.reconnectTimeout.check()) return
                 appendLog("Bluetooth turned on; retrying now")
                 mainHandler.removeCallbacks(retry)
                 mainHandler.post(retry)
@@ -1366,6 +1367,7 @@ class CarPlayHostActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (!CarPlayBackgroundSession.reconnectTimeout.check()) return
         if (!CarPlaySettingsAccess.isEnabled(this)) {
             finish()
             return
@@ -2553,6 +2555,7 @@ class CarPlayHostActivity : ComponentActivity() {
                     )
                         return@setOnClickListener
                     startupRetryBudget.manualRetry()
+                    CarPlayBackgroundSession.reconnectTimeout.reset()
                     startupRetryStopped = false
                     reconnectAttempts = 0
                     visibility = View.GONE
@@ -6712,9 +6715,18 @@ class CarPlayHostActivity : ComponentActivity() {
 
             override fun onSessionActive(session: AirPlaySession) {
                 runOnUiThread {
-                    if (controllerGeneration != restartGeneration) {
+                    if (
+                        controllerGeneration != restartGeneration || shuttingDown.get() ||
+                            !CarPlayBackgroundSession.isOwner(this@CarPlayHostActivity)
+                    ) {
                         return@runOnUiThread
                     }
+                    if (!CarPlayBackgroundSession.reconnectTimeout.check()) return@runOnUiThread
+                    CarPlayBackgroundSession.reconnectTimeout.reset()
+                    pendingReconnect?.let(mainHandler::removeCallbacks)
+                    pendingReconnect = null
+                    reconnectScheduled = false
+                    reconnectWaitsForBluetooth = false
                     activeAirPlaySession = session
                     val pending = pendingIphoneCornerMask
                     if (pending?.first === session) {
@@ -6795,8 +6807,12 @@ class CarPlayHostActivity : ComponentActivity() {
                         appendLog("Non-active AirPlay connection ended; keeping the live session")
                         return@runOnUiThread
                     }
-                    if (controllerGeneration != restartGeneration || startupRetryStopped)
+                    if (
+                        controllerGeneration != restartGeneration || startupRetryStopped ||
+                            !CarPlayBackgroundSession.isOwner(this@CarPlayHostActivity)
+                    )
                         return@runOnUiThread
+                    if (!CarPlayBackgroundSession.reconnectTimeout.begin()) return@runOnUiThread
                     startupRetryBudget.disconnected()
                     activeAirPlaySession = null
                     clearIphoneCornerMask()
@@ -6817,8 +6833,12 @@ class CarPlayHostActivity : ComponentActivity() {
 
             override fun onTransportError(message: String) {
                 runOnUiThread {
-                    if (controllerGeneration != restartGeneration || startupRetryStopped)
+                    if (
+                        controllerGeneration != restartGeneration || startupRetryStopped ||
+                            !CarPlayBackgroundSession.isOwner(this@CarPlayHostActivity)
+                    )
                         return@runOnUiThread
+                    if (!CarPlayBackgroundSession.reconnectTimeout.begin()) return@runOnUiThread
                     callPopupSessionReady = false
                     updateCallPopupGuard()
                     startupRetryBudget.disconnected()
@@ -6865,6 +6885,10 @@ class CarPlayHostActivity : ComponentActivity() {
         controllerGeneration: Int,
     ): (CarPlayStatus) -> Unit = report@{ status ->
         if (controllerGeneration != restartGeneration) return@report
+        if (status is CarPlayStatus.Failed) {
+            if (shuttingDown.get() || !CarPlayBackgroundSession.isOwner(this)) return@report
+            if (!CarPlayBackgroundSession.reconnectTimeout.begin()) return@report
+        }
         if (status is CarPlayStatus.RunningControl || status is CarPlayStatus.RunningWireless) {
             controlRunningCount++
             lossSinceControlRunning = false
@@ -7613,6 +7637,7 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun maybeStartCarPlay() {
         if (shuttingDown.get() || isFinishing || isDestroyed) return
+        if (!CarPlayBackgroundSession.reconnectTimeout.check()) return
         if (CarPlayBackgroundSession.hasSession() && !CarPlayBackgroundSession.isOwner(this)) {
             if (!adoptBackgroundSession()) mainHandler.postDelayed({ maybeStartCarPlay() }, 500)
             return
@@ -7671,6 +7696,7 @@ class CarPlayHostActivity : ComponentActivity() {
         englishReason: String = reason,
     ) {
         if (!CarPlayBackgroundSession.isOwner(this)) return
+        if (!CarPlayBackgroundSession.reconnectTimeout.begin()) return
         // Also when a retry is already pending and this loss is dropped: that retry must not skip.
         lossSinceControlRunning = true
         if (menuOpen) recoveryPendingAfterMenu = true
@@ -7755,6 +7781,7 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun restartCarPlay(reason: String) {
         if (!CarPlayBackgroundSession.isOwner(this)) return
         if (shuttingDown.get() || menuOpen || handshakeResetInProgress) return
+        if (!CarPlayBackgroundSession.reconnectTimeout.check()) return
         val size = activeDisplaySize ?: return
         startupRetryBudget.disconnected()
         startupRetryButton?.visibility = View.GONE
@@ -7978,6 +8005,7 @@ class CarPlayHostActivity : ComponentActivity() {
         recoveryPendingAfterMenu = false
         if (reconnect) {
             startupRetryBudget.manualRetry()
+            CarPlayBackgroundSession.reconnectTimeout.reset()
             startupRetryStopped = false
         }
         if (failure?.startupFailure != null && !reconnect) {
@@ -8026,6 +8054,10 @@ class CarPlayHostActivity : ComponentActivity() {
         resetSidePanel()
         releaseSidePanelEffects()
         startupRetryBudget.disconnected()
+        pendingReconnect?.let(mainHandler::removeCallbacks)
+        pendingReconnect = null
+        reconnectScheduled = false
+        reconnectWaitsForBluetooth = false
         restartGeneration += 1
         VoyahCarPlayIntegration.audioFocus(-1)
         mainHandler.removeCallbacks(applyDisplaySize)
@@ -8940,6 +8972,10 @@ internal fun statusBarHiddenByAnotherWindow(
 
 /** Process-local hand-off for keeping the CarPlay session alive while no Activity is visible. */
 internal object CarPlayBackgroundSession {
+    val reconnectTimeout = CarPlayReconnectTimeout {
+        Log.i("xcertplay-usb", "CarPlay reconnect timed out after five minutes; disconnecting")
+        CarPlaySessionHosts.disconnect()
+    }
     @Volatile var active = false
     @Volatile var callPopupReady = false
     /** The running session's hotspot: a host that adopts the session never saw its HotspotReady. */
@@ -9051,6 +9087,7 @@ internal object CarPlayBackgroundSession {
         controller = null
         sink = null
         if (!keepOwner) {
+            reconnectTimeout.reset()
             stopAction = null
             owner = null
         }
