@@ -46,6 +46,8 @@ public class AppearanceTest {
         assertFalse(settings.blurEnabled);
         assertEquals(AppearanceSettings.Wallpaper.BLACK, settings.wallpaper);
         assertEquals(4, AppearanceSettings.spacingDp(preferences));
+        assertEquals(AppearanceSettings.DEFAULT_BORDER_DP, settings.borderDp);
+        assertEquals(AppearanceSettings.DEFAULT_CORNER_RADIUS_DP, settings.cornerRadiusDp);
     }
 
     @Test
@@ -58,6 +60,8 @@ public class AppearanceTest {
                 .putInt(AppearanceSettings.BLUR_AMOUNT, 65)
                 .putString(AppearanceSettings.WALLPAPER, "blue")
                 .putInt(AppearanceSettings.TILE_SPACING, 12)
+                .putInt(AppearanceSettings.TILE_BORDER, 6)
+                .putInt(AppearanceSettings.TILE_CORNER_RADIUS, 32)
                 .commit();
         AppearanceSettings settings = AppearanceSettings.load(preferences);
         assertEquals(51, settings.surfaceAlpha());
@@ -66,11 +70,15 @@ public class AppearanceTest {
         assertEquals(65, settings.blurAmount);
         assertEquals(AppearanceSettings.Wallpaper.BLUE, settings.wallpaper);
         assertEquals(12, AppearanceSettings.spacingDp(preferences));
+        assertEquals(6, settings.borderDp);
+        assertEquals(32, settings.cornerRadiusDp);
 
         preferences.edit()
                 .putInt(AppearanceSettings.TRANSPARENCY_PERCENT, 200)
                 .putInt(AppearanceSettings.BLUR_AMOUNT, -10)
                 .putInt(AppearanceSettings.TILE_SPACING, 99)
+                .putInt(AppearanceSettings.TILE_BORDER, 99)
+                .putInt(AppearanceSettings.TILE_CORNER_RADIUS, 99)
                 .putString(AppearanceSettings.WALLPAPER, "missing-wallpaper")
                 .commit();
         settings = AppearanceSettings.load(preferences);
@@ -78,7 +86,17 @@ public class AppearanceTest {
         assertEquals(0, settings.blurAmount);
         assertFalse(settings.blursWallpaper());
         assertEquals(24, AppearanceSettings.spacingDp(preferences));
+        assertEquals(AppearanceSettings.MAX_BORDER_DP, settings.borderDp);
+        assertEquals(AppearanceSettings.MAX_CORNER_RADIUS_DP, settings.cornerRadiusDp);
         assertEquals(AppearanceSettings.Wallpaper.BLACK, settings.wallpaper);
+
+        preferences.edit()
+                .putInt(AppearanceSettings.TILE_BORDER, -3)
+                .putInt(AppearanceSettings.TILE_CORNER_RADIUS, -3)
+                .commit();
+        settings = AppearanceSettings.load(preferences);
+        assertEquals(0, settings.borderDp);
+        assertEquals(0, settings.cornerRadiusDp);
     }
 
     @Test
@@ -111,6 +129,53 @@ public class AppearanceTest {
         transparent.draw(new Canvas(result));
         assertEquals(0, Color.alpha(result.getPixel(50, 50)));
         assertEquals(0, Color.alpha(result.getPixel(50, 1)));
+    }
+
+    @Test
+    public void tileBorderThicknessFollowsAppearanceSetting() {
+        preferences.edit().putInt(AppearanceSettings.TILE_BORDER, 8).commit();
+        View wallpaper = new View(RuntimeEnvironment.getApplication());
+        View tile = new View(wallpaper.getContext());
+        WidgetSurfaceDrawable thickBorder = new WidgetSurfaceDrawable(tile, wallpaper,
+                AppearanceSettings.load(preferences), null);
+        thickBorder.setBounds(0, 0, 100, 100);
+        Bitmap result = Bitmap.createBitmap(100, 100, Bitmap.Config.ARGB_8888);
+        thickBorder.draw(new Canvas(result));
+        assertEquals(0xff373f4a, result.getPixel(5, 50));
+
+        preferences.edit().putInt(AppearanceSettings.TILE_BORDER, 0).commit();
+        WidgetSurfaceDrawable withoutBorder = new WidgetSurfaceDrawable(tile, wallpaper,
+                AppearanceSettings.load(preferences), null);
+        withoutBorder.setBounds(0, 0, 100, 100);
+        result.eraseColor(Color.TRANSPARENT);
+        withoutBorder.draw(new Canvas(result));
+        assertEquals(AppearanceSettings.DEFAULT_BACKGROUND_COLOR, result.getPixel(5, 50));
+    }
+
+    @Test
+    public void tileCornerRadiusShapesTheSurfaceOutline() {
+        preferences.edit()
+                .putInt(AppearanceSettings.TILE_CORNER_RADIUS, 0)
+                .putInt(AppearanceSettings.TILE_BORDER, 0)
+                .commit();
+        View wallpaper = new View(RuntimeEnvironment.getApplication());
+        View tile = new View(wallpaper.getContext());
+        Bitmap result = Bitmap.createBitmap(100, 100, Bitmap.Config.ARGB_8888);
+
+        WidgetSurfaceDrawable square = new WidgetSurfaceDrawable(tile, wallpaper,
+                AppearanceSettings.load(preferences), null);
+        square.setBounds(0, 0, 100, 100);
+        square.draw(new Canvas(result));
+        assertEquals(Color.alpha(AppearanceSettings.DEFAULT_BACKGROUND_COLOR), Color.alpha(result.getPixel(1, 1)));
+
+        preferences.edit().putInt(AppearanceSettings.TILE_CORNER_RADIUS, 30).commit();
+        WidgetSurfaceDrawable rounded = new WidgetSurfaceDrawable(tile, wallpaper,
+                AppearanceSettings.load(preferences), null);
+        rounded.setBounds(0, 0, 100, 100);
+        result.eraseColor(Color.TRANSPARENT);
+        rounded.draw(new Canvas(result));
+        assertEquals(0, Color.alpha(result.getPixel(1, 1)));
+        assertEquals(Color.alpha(AppearanceSettings.DEFAULT_BACKGROUND_COLOR), Color.alpha(result.getPixel(50, 50)));
     }
 
     @Test

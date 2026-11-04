@@ -12,14 +12,22 @@ public final class AppearanceSettings {
     public static final String BLUR_AMOUNT = "widgetBlurAmount";
     public static final String WALLPAPER = "dashboardWallpaper";
     public static final String TILE_SPACING = "tileSpacingDp";
+    public static final String TILE_BORDER = "tileBorderDp";
+    public static final String TILE_CORNER_RADIUS = "tileCornerRadiusDp";
     public static final int DEFAULT_BACKGROUND_COLOR = 0xff22252f;
     public static final int MAX_SPACING_DP = 24;
+    public static final int MAX_BORDER_DP = 10;
+    public static final int DEFAULT_BORDER_DP = 1;
+    public static final int MAX_CORNER_RADIUS_DP = 40;
+    public static final int DEFAULT_CORNER_RADIUS_DP = 20;
 
     public final boolean transparencyEnabled;
     public final int transparencyPercent;
     public final int backgroundColor;
     public final boolean blurEnabled;
     public final int blurAmount;
+    public final int borderDp;
+    public final int cornerRadiusDp;
     public final Wallpaper wallpaper;
 
     public static final class Wallpaper {
@@ -76,6 +84,9 @@ public final class AppearanceSettings {
         backgroundColor = preferences.getInt(BACKGROUND_COLOR, DEFAULT_BACKGROUND_COLOR) | 0xff000000;
         blurEnabled = preferences.getBoolean(BLUR_ENABLED, false);
         blurAmount = bounded(preferences.getInt(BLUR_AMOUNT, 30), 100);
+        borderDp = bounded(preferences.getInt(TILE_BORDER, DEFAULT_BORDER_DP), MAX_BORDER_DP);
+        cornerRadiusDp = bounded(
+                preferences.getInt(TILE_CORNER_RADIUS, DEFAULT_CORNER_RADIUS_DP), MAX_CORNER_RADIUS_DP);
         Wallpaper selected = WallpaperStore.find(preferences, preferences.getString(WALLPAPER, Wallpaper.BLACK.key));
         wallpaper = selected != null ? selected : Wallpaper.BLACK;
     }
