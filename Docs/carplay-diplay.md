@@ -1586,7 +1586,9 @@ MediaSession или обработку звонков DiPlay. Их нельзя 
 
 Для обычного запуска на ГУ добавлены одинаковые адаптеры `installNavigationSource`
 в OD `app_client.js` и PI `clusternavi.js`. Загрузчики подключаются только к уже
-работающим основным процессам `ru.yandex.yandexnavi` и `ru.dublgis.dgismobile`,
+работающим основным процессам навигационных приложений, перечисленных в
+[agent_registry.go](../Packaging/new/loader/agent_registry.go): `ru.yandex.yandexnavi`,
+`ru.yandex.yandexmaps`, `com.yango.maps.android` и `ru.dublgis.dgismobile`,
 независимо от полноэкранного режима/DPI. В PI используются существующий агент и
 `injects.json`; ожидание отсутствующего процесса больше не расходует попытки
 подключения, новый процесс получает свой лимит. Формат payload не меняется.
@@ -1598,6 +1600,10 @@ MediaSession или обработку звонков DiPlay. Их нельзя 
   Аннотация сопоставляется с точкой следующего манёвра. Объект обнаруживается через
   конструктор/обычные getter-вызовы, без обхода heap. Слушатель ведения отслеживает
   завершение и свежесть; вне маршрута и при потере совпадения подсказка очищается.
+  Тот же модуль подключается к Яндекс Картам (`ru.yandex.yandexmaps`) и Yango Maps
+  (`com.yango.maps.android`); их версии NavKit локально не сверялись, поэтому
+  отсутствие `GuidanceBinding` или методов слушателя оставляет приложение
+  без подсказок, но не мешает его работе.
 - **2ГИС 7.30.0.633.26 (282010633)**: `IntegrationApplicationStateDispatcher`, тот же
   источник, который использует экспортируемая `DashboardInformationService` API 2.
   Наблюдаются `setNavigationState` и `setActiveNavigationMode`; принимается только
@@ -1612,16 +1618,21 @@ MediaSession или обработку звонков DiPlay. Их нельзя 
 APK навигаторов не перепаковываются. Будущие версии с изменёнными внутренними
 классами потребуют повторной проверки; отсутствие API оставляет штатную работу приложения.
 
-`ClusterNavigationProvider.call("maneuver")` принимает только два точных пакета;
-`getCallingPackage()` проверяется Android по Binder UID. Source нельзя задать в extras.
+`ClusterNavigationProvider.call("maneuver")` принимает только четыре точных пакета:
+`ru.yandex.yandexnavi`, `ru.yandex.yandexmaps`, `com.yango.maps.android` и
+`ru.dublgis.dgismobile`; `getCallingPackage()` проверяется Android по Binder UID.
+Source нельзя задать в extras.
 Native как системный APK объявляет `forceQueryable`, чтобы provider был доступен
 приложениям без изменений их `<queries>`; это не снимает проверок прав других компонентов.
 Назначение атрибута описано в [Android manifest reference](https://developer.android.com/guide/topics/manifest/application-element#forceQueryable).
 
 `ClusterNavigationSources` выбирает свежий CarPlay, иначе последний начавший/возобновивший
-ведение обычный источник. Периодические сообщения не меняют приоритет. Остановка
-одного источника не очищает другой; при пропаже процесса его lease истекает через
-5 секунд и допускается переход только к свежему источнику. Все источники используют
+ведение обычный источник. Обычные источники — Яндекс Навигатор, Яндекс Карты,
+Yango Maps и 2ГИС — хранятся раздельно: очистка одного не сбрасывает подсказку
+другого. Периодические сообщения не меняют приоритет; приоритет получает источник,
+который начал ведение последним. Остановка одного источника не очищает другой;
+при пропаже процесса его lease истекает через 5 секунд и допускается переход
+только к свежему источнику. Все источники используют
 один `ClusterNavigationController` на процесс Native и один OEM writer.
 Локальные проверки адаптеров — `Packaging/new/tests/navigation-source-lifecycle.test.js`;
 декомпиляция и mocks не заменяют испытание на ГУ/приборке.
