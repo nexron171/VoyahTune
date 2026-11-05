@@ -17,8 +17,15 @@ import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.integration.media.NowPlayingClient;
 import ru.big.town.restoremode.widgets.energy.EnergyWidgetStyle;
 
-/** Self-drawn current-player card with source selection, album art and transport zones. */
-final class MediaWidgetView extends View {
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+/**
+ * Self-drawn current-player card: full-bleed album art, transport controls under it and an in-place
+ * source picker behind the source icon in the bottom left corner.
+ */
+public final class MediaWidgetView extends View {
     enum Command {
         PREVIOUS,
         PLAY_PAUSE,
@@ -30,7 +37,15 @@ final class MediaWidgetView extends View {
 
         void onOpenPlayer();
 
-        void onChooseSource();
+        void onSourceChosen(String packageName);
+
+        void onSourceChooserOpened();
+    }
+
+    private enum Mode {
+        COMPACT,
+        STACKED,
+        SIDE
     }
 
     private static final int ZONE_NONE = 0;
@@ -38,16 +53,29 @@ final class MediaWidgetView extends View {
     private static final int ZONE_PLAY = 2;
     private static final int ZONE_NEXT = 3;
     private static final int ZONE_OPEN = 4;
-    private static final int ZONE_SOURCES = 5;
+    private static final int ZONE_SOURCE_BADGE = 5;
+    private static final int ZONE_CHOOSER = 6;
+    private static final int ZONE_SOURCE_OPTION_BASE = 100;
 
     private static final int ACCENT = 0xff79b5f1;
     private static final int CONTROL_BACKGROUND = 0x332f4c6a;
     private static final int PLACEHOLDER = 0xff263646;
-    // Source picker stays neutral so it does not compete with the transport accent color.
-    private static final int SOURCE_BACKGROUND = 0xff3c4249;
-    private static final int SOURCE_BACKGROUND_PRESSED = 0xff4a515a;
-    private static final int SOURCE_BORDER = 0xff626a74;
-    private static final int SOURCE_TEXT = 0xffe7e9ec;
+    private static final int BADGE_BACKGROUND = 0xcc1b1f25;
+    private static final int BADGE_BACKGROUND_ACTIVE = 0xcc2f4c6a;
+    private static final int BADGE_BORDER = 0xff5a636e;
+    private static final int CHOOSER_SCRIM = 0xe60d1014;
+    private static final int OPTION_BACKGROUND = 0xff2b313a;
+    private static final int OPTION_BACKGROUND_PRESSED = 0xff3a465a;
+    private static final int OPTION_BORDER = 0xff626a74;
+    private static final int MUTED_TEXT = EnergyWidgetStyle.MUTED;
+
+    private static final float TEXT_PADDING = 12f;
+    private static final float BADGE_MARGIN = 8f;
+    private static final float PROGRESS_HEIGHT = 3f;
+    private static final float COMPACT_WIDTH_DP = 160f;
+    private static final float MIN_SIDE_TEXT_DP = 90f;
+    private static final float DEFAULT_BORDER_DP = 1f;
+    private static final float DEFAULT_CORNER_RADIUS_DP = 20f;
 
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path path = new Path();
@@ -55,8 +83,11 @@ final class MediaWidgetView extends View {
     private final RectF previousRect = new RectF();
     private final RectF playRect = new RectF();
     private final RectF nextRect = new RectF();
-    private final RectF emptySourceRect = new RectF();
-    private final RectF sourceRect = new RectF();
+    private final RectF sourceBadgeRect = new RectF();
+    private final RectF chooserRect = new RectF();
+    private final RectF scratchRect = new RectF();
+    private final float[] artRadii = new float[8];
+    private final List<MediaSourceGrid.Cell> sourceCells = new ArrayList<>();
     private final Drawable placeholder;
     private final Listener listener;
     private final float density;
@@ -64,9 +95,17 @@ final class MediaWidgetView extends View {
     private final float touchSlop;
 
     private NowPlayingClient.NowPlaying nowPlaying = new NowPlayingClient.NowPlaying();
+    private List<MediaSource> sources = Collections.emptyList();
+    private boolean sourcesLoaded;
     private Bitmap art;
+    private Bitmap sourceIcon;
+    private boolean chooserOpen;
+    private boolean sourceCellsDirty = true;
+
     private float widthDp;
     private float heightDp;
+    private float borderDp = DEFAULT_BORDER_DP;
+    private float cornerRadiusDp = DEFAULT_CORNER_RADIUS_DP;
     private float textLeft;
     private float textRight;
     private float titleBaseline;
@@ -74,10 +113,11 @@ final class MediaWidgetView extends View {
     private float titleSize;
     private float subtitleSize;
     private float progressY;
-    private boolean compact;
-    private boolean tall;
-    private boolean poster;
-    private int pressedZone;
+    private float progressLeft;
+    private float progressRight;
+    private boolean showTiming;
+    private Mode mode = Mode.STACKED;
+    private int pressedZone = ZONE_NONE;
     private float downX;
     private float downY;
 
@@ -101,17 +141,44 @@ final class MediaWidgetView extends View {
         setLongClickable(true);
     }
 
+    /** Border and corner radius of the dashboard tile so the art follows its rounded frame. */
+    public void setTileFrame(int tileBorderDp, int tileCornerRadiusDp) {
+        borderDp = Math.max(0, tileBorderDp);
+        cornerRadiusDp = Math.max(0, tileCornerRadiusDp);
+        sourceCellsDirty = true;
+        layoutContent();
+        invalidate();
+    }
+
     void update(NowPlayingClient.NowPlaying snapshot, Bitmap albumArt) {
-        nowPlaying = snapshot == null ? new NowPlayingClient.NowPlaying() : snapshot;
+        NowPlayingClient.NowPlaying next =
+                snapshot == null ? new NowPlayingClient.NowPlaying() : snapshot;
+        if (!nowPlaying.packageName.equals(next.packageName)) {
+            chooserOpen = false;
+            sourceCellsDirty = true;
+        }
+        nowPlaying = next;
         art = albumArt;
         updateContentDescription();
         invalidate();
     }
 
+    /** {@code null} keeps the "still loading" state; an empty list means no media applications. */
+    void setSources(List<MediaSource> loaded) {
+        sources = loaded == null ? Collections.emptyList() : loaded;
+        sourcesLoaded = loaded != null;
+        sourceCellsDirty = true;
+        invalidate();
+    }
+
+    void setSourceIcon(Bitmap icon) {
+        sourceIcon = icon;
+        invalidate();
+    }
+
     private void updateContentDescription() {
         if (nowPlaying.isEmpty()) {
-            setContentDescription(
-                    "Управление музыкой: ничего не играет. Выбрать источник.");
+            setContentDescription("Управление музыкой: источник не выбран. Список источников.");
             return;
         }
         String state = nowPlaying.isPlaying() ? "воспроизведение" : "пауза";
@@ -122,7 +189,8 @@ final class MediaWidgetView extends View {
                         + (subtitle.isEmpty() ? "" : ", " + subtitle)
                         + ". Состояние: "
                         + state
-                        + ". Кнопки управления музыкой и выбор источника.");
+                        + ". Нажмите на обложку, чтобы открыть плеер. Кнопки управления музыкой"
+                        + " и выбора источника.");
     }
 
     @Override
@@ -138,126 +206,199 @@ final class MediaWidgetView extends View {
         previousRect.setEmpty();
         playRect.setEmpty();
         nextRect.setEmpty();
-        emptySourceRect.setEmpty();
-        sourceRect.setEmpty();
+        sourceBadgeRect.setEmpty();
+        chooserRect.setEmpty();
+        sourceCellsDirty = true;
         if (widthDp <= 0 || heightDp <= 0) {
             return;
         }
-        float padding = 8f;
-        compact = widthDp < 200f;
-        tall = heightDp >= 170f;
-        poster = !compact && heightDp >= 300f;
-
-        float buttonWidth = Math.min(widthDp - padding * 2, compact ? 140f : 260f);
-        float buttonHeight = compact ? 44f : 56f;
-        emptySourceRect.set(
-                (widthDp - buttonWidth) / 2,
-                (heightDp - buttonHeight) / 2,
-                (widthDp + buttonWidth) / 2,
-                (heightDp + buttonHeight) / 2);
-
-        if (compact) {
-            float size = Math.min(widthDp, heightDp) - padding * 2;
-            artRect.set(
-                    (widthDp - size) / 2,
-                    (heightDp - size) / 2,
-                    (widthDp + size) / 2,
-                    (heightDp + size) / 2);
-            float radius = Math.min(widthDp, heightDp) * .2f;
-            playRect.set(
-                    widthDp / 2 - radius,
-                    heightDp / 2 - radius,
-                    widthDp / 2 + radius,
-                    heightDp / 2 + radius);
-            progressY = heightDp - padding;
-            return;
+        chooserRect.set(0f, 0f, widthDp, heightDp);
+        if (widthDp < COMPACT_WIDTH_DP) {
+            mode = Mode.COMPACT;
+        } else if (stackedFits()) {
+            mode = Mode.STACKED;
+        } else {
+            mode = sideFits() ? Mode.SIDE : Mode.COMPACT;
         }
-
-        if (poster) {
-            layoutPoster();
-            return;
+        if (mode == Mode.COMPACT) {
+            layoutCompact();
+        } else if (mode == Mode.STACKED) {
+            layoutStacked();
+        } else {
+            layoutSide();
         }
-
-        float artSize = Math.min(heightDp - padding * 2, widthDp * .42f);
-        artSize = Math.min(artSize, tall ? 220f : 94f);
-        float artTop = tall ? (heightDp - artSize) / 2 : padding;
-        artRect.set(padding, artTop, padding + artSize, artTop + artSize);
-        textLeft = artRect.right + 14f;
-        textRight = widthDp - padding;
-
-        titleSize = tall ? 28f : widthDp < 360f ? 20f : 24f;
-        subtitleSize = tall ? 20f : widthDp < 360f ? 16f : 18f;
-        float textTop = tall ? artTop : padding;
-        titleBaseline = textTop + titleSize;
-        subtitleBaseline = titleBaseline + subtitleSize + (tall ? 8f : 4f);
-
-        float controlRadius = tall ? 26f : 18f;
-        float gap = tall ? 14f : 8f;
-        float total = controlRadius * 6 + gap * 2;
-        float left = textLeft + Math.max(0, (textRight - textLeft - total) / 2);
-        float centerY =
-                tall
-                        ? (subtitleBaseline + heightDp - padding - 28f) / 2
-                        : heightDp - padding - controlRadius - 4f;
-        previousRect.set(
-                left,
-                centerY - controlRadius,
-                left + controlRadius * 2,
-                centerY + controlRadius);
-        playRect.set(
-                previousRect.right + gap,
-                centerY - controlRadius,
-                previousRect.right + gap + controlRadius * 2,
-                centerY + controlRadius);
-        nextRect.set(
-                playRect.right + gap,
-                centerY - controlRadius,
-                playRect.right + gap + controlRadius * 2,
-                centerY + controlRadius);
-        progressY = tall ? heightDp - padding - 14f : heightDp - padding;
     }
 
-    private void layoutPoster() {
-        float padding = 14f;
-        float sourceHeight = 44f;
-        sourceRect.set(padding, padding, widthDp - padding, padding + sourceHeight);
+    private boolean stackedFits() {
+        return heightDp - stackedBlockHeight() >= widthDp * .45f;
+    }
 
-        float controlRadius = Math.min(26f, Math.max(18f, widthDp * .07f));
-        float gap = Math.max(14f, controlRadius * .55f);
-        float controlsCenterY = heightDp - padding - controlRadius;
-        float total = controlRadius * 6 + gap * 2;
-        float left = (widthDp - total) / 2f;
-        previousRect.set(
-                left,
-                controlsCenterY - controlRadius,
-                left + controlRadius * 2,
-                controlsCenterY + controlRadius);
+    private float stackedBlockHeight() {
+        float title = titleSizeFor(widthDp);
+        float subtitle = subtitleSizeFor(title);
+        float radius = controlRadiusFor(widthDp);
+        return 40f + title * .8f + subtitle * 1.3f + radius * 2f;
+    }
+
+    private boolean sideFits() {
+        float artSize = Math.min(heightDp - borderDp * 2f, widthDp * .55f);
+        return widthDp - borderDp - artSize - 14f - TEXT_PADDING >= MIN_SIDE_TEXT_DP;
+    }
+
+    private static float titleSizeFor(float width) {
+        return clamp(width * .055f, 18f, 26f);
+    }
+
+    private static float subtitleSizeFor(float title) {
+        return clamp(title * .72f, 13f, 19f);
+    }
+
+    private static float controlRadiusFor(float width) {
+        return clamp(width * .06f, 16f, 28f);
+    }
+
+    private void layoutCompact() {
+        artRect.set(borderDp, borderDp, widthDp - borderDp, heightDp - borderDp);
+        setArtRadii(true);
+        float radius = Math.min(widthDp, heightDp) * .18f;
+        playRect.set(
+                widthDp / 2f - radius,
+                heightDp / 2f - radius,
+                widthDp / 2f + radius,
+                heightDp / 2f + radius);
+        progressY = heightDp - 10f;
+        progressLeft = 10f;
+        progressRight = widthDp - 10f;
+        showTiming = false;
+    }
+
+    private void layoutStacked() {
+        float radius = controlRadiusFor(widthDp);
+        float artBottom = Math.max(borderDp + 40f, heightDp - stackedBlockHeight());
+        artRect.set(borderDp, borderDp, widthDp - borderDp, artBottom);
+        setArtRadii(false);
+
+        titleSize = titleSizeFor(widthDp);
+        subtitleSize = subtitleSizeFor(titleSize);
+        textLeft = TEXT_PADDING;
+        textRight = widthDp - TEXT_PADDING;
+
+        float controlsCenterY = heightDp - 10f - radius;
+        progressY = controlsCenterY - radius - 12f;
+        progressLeft = textLeft;
+        progressRight = textRight;
+        subtitleBaseline = progressY - 10f;
+        titleBaseline = subtitleBaseline - subtitleSize * 1.3f;
+        showTiming = heightDp >= 200f;
+
+        layoutSourceBadge();
+        layoutControls(controlsCenterY, radius);
+        nudgeControlsPastBadge();
+    }
+
+    private void layoutSide() {
+        float artSize = Math.min(heightDp - borderDp * 2f, widthDp * .55f);
+        artRect.set(borderDp, borderDp, borderDp + artSize, heightDp - borderDp);
+        setArtRadii(false);
+
+        textLeft = artRect.right + 14f;
+        textRight = widthDp - TEXT_PADDING;
+        float availableWidth = Math.max(1f, textRight - textLeft);
+        float radius = clamp(Math.min(availableWidth / 8f, heightDp * .18f), 12f, 24f);
+        titleSize = clamp(Math.min(availableWidth * .12f, heightDp * .22f), 14f, 26f);
+        subtitleSize = clamp(titleSize * .75f, 12f, 18f);
+
+        float blockHeight =
+                titleSize * .8f + subtitleSize * 1.3f + 19f + radius * 2f;
+        float blockTop = Math.max(6f, (heightDp - blockHeight) / 2f);
+        titleBaseline = blockTop + titleSize * .8f;
+        subtitleBaseline = titleBaseline + subtitleSize * 1.3f;
+        progressY = subtitleBaseline + 7f;
+        progressLeft = textLeft;
+        progressRight = textRight;
+        float controlsCenterY = progressY + 9f + radius;
+        showTiming = false;
+
+        layoutControls(controlsCenterY, radius);
+        layoutSourceBadge();
+    }
+
+    private void layoutControls(float centerY, float radius) {
+        float gap = Math.max(6f, radius * .4f);
+        float total = radius * 6f + gap * 2f;
+        float start = textLeft + Math.max(0f, (textRight - textLeft - total) / 2f);
+        previousRect.set(start, centerY - radius, start + radius * 2f, centerY + radius);
         playRect.set(
                 previousRect.right + gap,
-                controlsCenterY - controlRadius,
-                previousRect.right + gap + controlRadius * 2,
-                controlsCenterY + controlRadius);
+                centerY - radius,
+                previousRect.right + gap + radius * 2f,
+                centerY + radius);
         nextRect.set(
                 playRect.right + gap,
-                controlsCenterY - controlRadius,
-                playRect.right + gap + controlRadius * 2,
-                controlsCenterY + controlRadius);
+                centerY - radius,
+                playRect.right + gap + radius * 2f,
+                centerY + radius);
+    }
 
-        float artTop = sourceRect.bottom + 12f;
-        float artMaxHeight = controlsCenterY - controlRadius - artTop - 120f;
-        float artSize = Math.min(widthDp - padding * 2, Math.max(70f, artMaxHeight));
-        float artCap = heightDp >= 440f ? 340f : 230f;
-        artSize = Math.min(artSize, artCap);
-        float artLeft = (widthDp - artSize) / 2f;
-        artRect.set(artLeft, artTop, artLeft + artSize, artTop + artSize);
+    /** Narrow tiles keep the transport row clear of the source icon instead of overlapping it. */
+    private void nudgeControlsPastBadge() {
+        if (previousRect.isEmpty() || sourceBadgeRect.isEmpty()) {
+            return;
+        }
+        float overlap = sourceBadgeRect.right + 4f - previousRect.left;
+        float room = textRight - nextRect.right;
+        float shift = Math.min(overlap, room);
+        if (shift <= 0f) {
+            return;
+        }
+        previousRect.offset(shift, 0f);
+        playRect.offset(shift, 0f);
+        nextRect.offset(shift, 0f);
+    }
 
-        textLeft = padding;
-        textRight = widthDp - padding;
-        titleSize = 26f;
-        subtitleSize = 18f;
-        titleBaseline = artRect.bottom + 26f;
-        subtitleBaseline = titleBaseline + 22f;
-        progressY = Math.min(subtitleBaseline + 26f, controlsCenterY - controlRadius - 20f);
+    private void layoutSourceBadge() {
+        float diameter = clamp(widthDp * .085f, 24f, 34f);
+        float left = BADGE_MARGIN;
+        float top = heightDp - BADGE_MARGIN - diameter;
+        sourceBadgeRect.set(left, top, left + diameter, top + diameter);
+    }
+
+    /** The art follows the tile frame: rounded where it touches the tile corner. */
+    private void setArtRadii(boolean allCorners) {
+        float top = Math.max(0f, cornerRadiusDp - borderDp);
+        float bottom = allCorners ? top : 0f;
+        artRadii[0] = top;
+        artRadii[1] = top;
+        artRadii[2] = top;
+        artRadii[3] = top;
+        artRadii[4] = bottom;
+        artRadii[5] = bottom;
+        artRadii[6] = bottom;
+        artRadii[7] = bottom;
+    }
+
+    private boolean chooserVisible() {
+        return mode != Mode.COMPACT && (chooserOpen || nowPlaying.isEmpty());
+    }
+
+    private List<MediaSourceGrid.Cell> sourceCells() {
+        if (!sourceCellsDirty) {
+            return sourceCells;
+        }
+        sourceCellsDirty = false;
+        sourceCells.clear();
+        if (!chooserVisible() || widthDp <= 0f) {
+            return sourceCells;
+        }
+        float padding = 14f;
+        sourceCells.addAll(
+                MediaSourceGrid.arrange(
+                        sources.size(),
+                        padding,
+                        padding,
+                        Math.max(0f, widthDp - padding * 2f),
+                        Math.max(0f, heightDp - padding * 2f)));
+        return sourceCells;
     }
 
     @Override
@@ -268,149 +409,88 @@ final class MediaWidgetView extends View {
         }
         canvas.save();
         canvas.scale(density, density);
-
         if (nowPlaying.isEmpty()) {
-            drawEmpty(canvas);
-            canvas.restore();
-            return;
-        }
-        drawArt(canvas);
-        if (poster) {
-            drawSourceButton(canvas);
-            drawPosterTrackText(canvas);
-            drawProgress(canvas);
-            drawControls(canvas);
-        } else if (compact) {
-            drawCompactProgress(canvas);
-            drawControls(canvas);
+            if (mode == Mode.COMPACT) {
+                drawArt(canvas);
+            } else {
+                drawSourceChooser(canvas, false);
+            }
         } else {
-            drawTrackText(canvas);
-            drawProgress(canvas);
-            drawControls(canvas);
+            drawArt(canvas);
+            if (mode == Mode.COMPACT) {
+                drawCompactProgress(canvas);
+                drawControls(canvas);
+            } else {
+                drawTrackText(canvas);
+                drawProgress(canvas);
+                drawControls(canvas);
+                if (chooserOpen) {
+                    drawSourceChooser(canvas, true);
+                }
+                drawSourceBadge(canvas);
+            }
         }
         canvas.restore();
     }
 
     private void drawArt(Canvas canvas) {
-        float radius = compact ? 12f : 10f;
         path.reset();
-        path.addRoundRect(artRect, radius, radius, Path.Direction.CW);
+        path.addRoundRect(artRect, artRadii, Path.Direction.CW);
         canvas.save();
         canvas.clipPath(path);
         if (art == null) {
             paint.setStyle(Paint.Style.FILL);
             paint.setColor(PLACEHOLDER);
             canvas.drawRect(artRect, paint);
-            if (placeholder != null) {
-                float inset = artRect.width() * .27f;
-                placeholder.setBounds(
-                        Math.round(artRect.left + inset),
-                        Math.round(artRect.top + inset),
-                        Math.round(artRect.right - inset),
-                        Math.round(artRect.bottom - inset));
-                placeholder.setAlpha(200);
-                placeholder.draw(canvas);
-            }
+            drawPlaceholder(canvas, artRect, .27f);
         } else {
-            Rect source = new Rect();
-            float scale =
-                    Math.max(artRect.width() / art.getWidth(), artRect.height() / art.getHeight());
-            float cropWidth = artRect.width() / scale;
-            float cropHeight = artRect.height() / scale;
-            source.set(
-                    Math.round((art.getWidth() - cropWidth) / 2),
-                    Math.round((art.getHeight() - cropHeight) / 2),
-                    Math.round((art.getWidth() + cropWidth) / 2),
-                    Math.round((art.getHeight() + cropHeight) / 2));
-            paint.setFilterBitmap(true);
-            canvas.drawBitmap(art, source, artRect, paint);
-            paint.setFilterBitmap(false);
+            drawCropped(canvas, art, artRect);
         }
         canvas.restore();
     }
 
-    private void drawEmpty(Canvas canvas) {
-        drawActionButton(
-                canvas,
-                emptySourceRect,
-                ZONE_SOURCES,
-                compact ? "Источник" : "Выбрать источник",
-                false);
-    }
-
-    private void drawSourceButton(Canvas canvas) {
-        drawActionButton(canvas, sourceRect, ZONE_SOURCES, "Источник", true);
-    }
-
-    private void drawActionButton(
-            Canvas canvas, RectF rect, int zone, String label, boolean chevron) {
-        if (rect.isEmpty()) {
+    private void drawPlaceholder(Canvas canvas, RectF target, float insetShare) {
+        if (placeholder == null) {
             return;
         }
-        float radius = rect.height() / 2f;
-        paint.setStyle(Paint.Style.FILL);
-        paint.setColor(pressedZone == zone ? SOURCE_BACKGROUND_PRESSED : SOURCE_BACKGROUND);
-        canvas.drawRoundRect(rect, radius, radius, paint);
-        paint.setStyle(Paint.Style.STROKE);
-        paint.setStrokeWidth(1f);
-        paint.setColor(SOURCE_BORDER);
-        canvas.drawRoundRect(rect, radius, radius, paint);
-        paint.setStyle(Paint.Style.FILL);
-        paint.setStrokeWidth(0f);
-        paint.setColor(SOURCE_TEXT);
-        paint.setTextAlign(Paint.Align.CENTER);
-        paint.setTypeface(Typeface.SANS_SERIF);
-        float textSize = Math.min(18f, rect.height() * .38f);
-        paint.setTextSize(textSize * fontScale);
-        float baseline = rect.centerY() - (paint.descent() + paint.ascent()) / 2f;
-        canvas.drawText(
-                label,
-                rect.centerX() - (chevron ? 10f : 0f),
-                baseline,
-                paint);
-        if (chevron) {
-            float centerX = rect.right - 22f;
-            float centerY = rect.centerY();
-            paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeWidth(2f);
-            paint.setStrokeCap(Paint.Cap.ROUND);
-            paint.setColor(SOURCE_TEXT);
-            canvas.drawLine(centerX - 5f, centerY - 2f, centerX, centerY + 3f, paint);
-            canvas.drawLine(centerX, centerY + 3f, centerX + 5f, centerY - 2f, paint);
-            paint.setStrokeCap(Paint.Cap.BUTT);
+        float inset = Math.min(target.width(), target.height()) * insetShare;
+        placeholder.setBounds(
+                Math.round(target.left + inset),
+                Math.round(target.top + inset),
+                Math.round(target.right - inset),
+                Math.round(target.bottom - inset));
+        placeholder.setAlpha(200);
+        placeholder.draw(canvas);
+    }
+
+    private void drawCropped(Canvas canvas, Bitmap bitmap, RectF target) {
+        if (bitmap.getWidth() <= 0 || bitmap.getHeight() <= 0) {
+            return;
         }
+        Rect source = new Rect();
+        float scale =
+                Math.max(target.width() / bitmap.getWidth(), target.height() / bitmap.getHeight());
+        float cropWidth = target.width() / scale;
+        float cropHeight = target.height() / scale;
+        source.set(
+                Math.round((bitmap.getWidth() - cropWidth) / 2f),
+                Math.round((bitmap.getHeight() - cropHeight) / 2f),
+                Math.round((bitmap.getWidth() + cropWidth) / 2f),
+                Math.round((bitmap.getHeight() + cropHeight) / 2f));
+        paint.setFilterBitmap(true);
+        canvas.drawBitmap(bitmap, source, target, paint);
+        paint.setFilterBitmap(false);
     }
 
     private void drawTrackText(Canvas canvas) {
-        String title = fitText(nowPlaying.title, textRight - textLeft, titleSize);
         String subtitle = !nowPlaying.artist.isEmpty() ? nowPlaying.artist : nowPlaying.appLabel;
         if (subtitle.isEmpty()) {
             subtitle = nowPlaying.packageName;
         }
+        String title = fitText(nowPlaying.title, textRight - textLeft, titleSize);
         subtitle = fitText(subtitle, textRight - textLeft, subtitleSize);
         text(canvas, title, textLeft, titleBaseline, titleSize, EnergyWidgetStyle.WHITE);
-        text(canvas, subtitle, textLeft, subtitleBaseline, subtitleSize, EnergyWidgetStyle.MUTED);
-    }
-
-    private void drawPosterTrackText(Canvas canvas) {
-        String title = fitText(nowPlaying.title, textRight - textLeft, titleSize);
-        String subtitle = !nowPlaying.artist.isEmpty() ? nowPlaying.artist : nowPlaying.appLabel;
-        if (subtitle.isEmpty()) {
-            subtitle = nowPlaying.packageName;
-        }
-        subtitle = fitText(subtitle, textRight - textLeft, subtitleSize);
-        centeredText(canvas, title, widthDp / 2f, titleBaseline, titleSize);
-        centeredText(canvas, subtitle, widthDp / 2f, subtitleBaseline, subtitleSize);
-    }
-
-    private void centeredText(
-            Canvas canvas, String value, float x, float baseline, float size) {
-        paint.setStyle(Paint.Style.FILL);
-        paint.setColor(EnergyWidgetStyle.WHITE);
-        paint.setTextSize(size * fontScale);
-        paint.setTextAlign(Paint.Align.CENTER);
-        paint.setTypeface(Typeface.SANS_SERIF);
-        canvas.drawText(value, x, baseline, paint);
+        text(canvas, subtitle, textLeft, subtitleBaseline, subtitleSize, MUTED_TEXT);
     }
 
     private void drawProgress(Canvas canvas) {
@@ -419,29 +499,35 @@ final class MediaWidgetView extends View {
         paint.setStyle(Paint.Style.FILL);
         paint.setColor(EnergyWidgetStyle.BORDER);
         canvas.drawRoundRect(
-                textLeft, progressY - 2f, textRight, progressY + 2f, 2f, 2f, paint);
+                progressLeft,
+                progressY - PROGRESS_HEIGHT / 2f,
+                progressRight,
+                progressY + PROGRESS_HEIGHT / 2f,
+                PROGRESS_HEIGHT / 2f,
+                PROGRESS_HEIGHT / 2f,
+                paint);
         if (fraction > 0f) {
             paint.setColor(ACCENT);
             canvas.drawRoundRect(
-                    textLeft,
-                    progressY - 2f,
-                    textLeft + (textRight - textLeft) * fraction,
-                    progressY + 2f,
-                    2f,
-                    2f,
+                    progressLeft,
+                    progressY - PROGRESS_HEIGHT / 2f,
+                    progressLeft + (progressRight - progressLeft) * fraction,
+                    progressY + PROGRESS_HEIGHT / 2f,
+                    PROGRESS_HEIGHT / 2f,
+                    PROGRESS_HEIGHT / 2f,
                     paint);
         }
-        if (tall && nowPlaying.duration > 0L) {
+        if (showTiming && nowPlaying.duration > 0L) {
             paint.setStyle(Paint.Style.FILL);
-            paint.setColor(EnergyWidgetStyle.MUTED);
+            paint.setColor(MUTED_TEXT);
             paint.setTextAlign(Paint.Align.RIGHT);
-            paint.setTextSize(14f * fontScale);
+            paint.setTextSize(13f * fontScale);
             paint.setTypeface(Typeface.SANS_SERIF);
             String timing =
                     MediaProgress.format(position)
                             + " / "
                             + MediaProgress.format(nowPlaying.duration);
-            canvas.drawText(timing, textRight, progressY - 8f, paint);
+            canvas.drawText(timing, progressRight, progressY - 8f, paint);
         }
     }
 
@@ -452,21 +538,25 @@ final class MediaWidgetView extends View {
         }
         paint.setStyle(Paint.Style.FILL);
         paint.setColor(ACCENT);
-        canvas.drawRoundRect(8f, progressY - 2f, 8f + (widthDp - 16f) * fraction, progressY + 2f,
-                2f, 2f, paint);
+        canvas.drawRoundRect(
+                progressLeft,
+                progressY - 2f,
+                progressLeft + (progressRight - progressLeft) * fraction,
+                progressY + 2f,
+                2f,
+                2f,
+                paint);
     }
 
     private void drawControls(Canvas canvas) {
-        if (compact) {
-            drawControlBackground(canvas, playRect, ZONE_PLAY);
-            drawPlayPause(canvas, playRect);
+        drawControlBackground(canvas, playRect, ZONE_PLAY);
+        drawPlayPause(canvas, playRect);
+        if (mode == Mode.COMPACT) {
             return;
         }
         drawControlBackground(canvas, previousRect, ZONE_PREVIOUS);
-        drawControlBackground(canvas, playRect, ZONE_PLAY);
         drawControlBackground(canvas, nextRect, ZONE_NEXT);
         drawSkip(canvas, previousRect, false);
-        drawPlayPause(canvas, playRect);
         drawSkip(canvas, nextRect, true);
     }
 
@@ -476,12 +566,12 @@ final class MediaWidgetView extends View {
         }
         paint.setStyle(Paint.Style.FILL);
         paint.setColor(CONTROL_BACKGROUND);
-        float radius = Math.min(rect.width(), rect.height()) / 2;
+        float radius = Math.min(rect.width(), rect.height()) / 2f;
         canvas.drawCircle(rect.centerX(), rect.centerY(), radius, paint);
     }
 
     private void drawPlayPause(Canvas canvas, RectF rect) {
-        float radius = Math.min(rect.width(), rect.height()) / 2;
+        float radius = Math.min(rect.width(), rect.height()) / 2f;
         paint.setStyle(Paint.Style.FILL);
         paint.setColor(ACCENT);
         canvas.drawCircle(rect.centerX(), rect.centerY(), radius, paint);
@@ -491,23 +581,23 @@ final class MediaWidgetView extends View {
             float barWidth = radius * .24f;
             float barHeight = radius * .9f;
             float gap = radius * .18f;
-            float leftBar = rect.centerX() - gap / 2 - barWidth;
-            float rightBar = rect.centerX() + gap / 2;
+            float leftBar = rect.centerX() - gap / 2f - barWidth;
+            float rightBar = rect.centerX() + gap / 2f;
             canvas.drawRoundRect(
                     leftBar,
-                    rect.centerY() - barHeight / 2,
+                    rect.centerY() - barHeight / 2f,
                     leftBar + barWidth,
-                    rect.centerY() + barHeight / 2,
-                    barWidth / 2,
-                    barWidth / 2,
+                    rect.centerY() + barHeight / 2f,
+                    barWidth / 2f,
+                    barWidth / 2f,
                     paint);
             canvas.drawRoundRect(
                     rightBar,
-                    rect.centerY() - barHeight / 2,
+                    rect.centerY() - barHeight / 2f,
                     rightBar + barWidth,
-                    rect.centerY() + barHeight / 2,
-                    barWidth / 2,
-                    barWidth / 2,
+                    rect.centerY() + barHeight / 2f,
+                    barWidth / 2f,
+                    barWidth / 2f,
                     paint);
         } else {
             float size = radius * .52f;
@@ -545,6 +635,99 @@ final class MediaWidgetView extends View {
                 size * .12f,
                 paint);
         canvas.restore();
+    }
+
+    private void drawSourceBadge(Canvas canvas) {
+        if (sourceBadgeRect.isEmpty()) {
+            return;
+        }
+        float radius = sourceBadgeRect.width() / 2f;
+        float centerX = sourceBadgeRect.centerX();
+        float centerY = sourceBadgeRect.centerY();
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(chooserOpen ? BADGE_BACKGROUND_ACTIVE : BADGE_BACKGROUND);
+        canvas.drawCircle(centerX, centerY, radius, paint);
+
+        float inner = radius * .82f;
+        path.reset();
+        path.addCircle(centerX, centerY, inner, Path.Direction.CW);
+        canvas.save();
+        canvas.clipPath(path);
+        if (sourceIcon != null) {
+            float side = inner * 1.4f;
+            scratchRect.set(
+                    centerX - side / 2f,
+                    centerY - side / 2f,
+                    centerX + side / 2f,
+                    centerY + side / 2f);
+            drawCropped(canvas, sourceIcon, scratchRect);
+        } else {
+            drawPlaceholder(canvas, sourceBadgeRect, .3f);
+        }
+        canvas.restore();
+
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(chooserOpen ? 2f : 1f);
+        paint.setColor(chooserOpen ? ACCENT : BADGE_BORDER);
+        canvas.drawCircle(centerX, centerY, radius, paint);
+        paint.setStrokeWidth(0f);
+    }
+
+    private void drawSourceChooser(Canvas canvas, boolean scrim) {
+        if (scrim) {
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(CHOOSER_SCRIM);
+            canvas.drawRect(chooserRect, paint);
+        }
+        List<MediaSourceGrid.Cell> cells = sourceCells();
+        if (cells.isEmpty()) {
+            if (sourcesLoaded) {
+                paint.setStyle(Paint.Style.FILL);
+                paint.setColor(MUTED_TEXT);
+                paint.setTextAlign(Paint.Align.CENTER);
+                paint.setTextSize(15f * fontScale);
+                paint.setTypeface(Typeface.SANS_SERIF);
+                canvas.drawText("Нет источников", widthDp / 2f, heightDp / 2f, paint);
+            }
+            return;
+        }
+        for (int index = 0; index < cells.size(); index++) {
+            drawSourceOption(canvas, cells.get(index), index);
+        }
+    }
+
+    private void drawSourceOption(Canvas canvas, MediaSourceGrid.Cell cell, int index) {
+        float radius = (cell.right - cell.left) / 2f;
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(
+                pressedZone == ZONE_SOURCE_OPTION_BASE + index
+                        ? OPTION_BACKGROUND_PRESSED
+                        : OPTION_BACKGROUND);
+        canvas.drawCircle(cell.centerX(), cell.centerY(), radius, paint);
+
+        Bitmap icon = index < sources.size() ? sources.get(index).icon : null;
+        float inset = radius * .14f;
+        scratchRect.set(
+                cell.left + inset,
+                cell.top + inset,
+                cell.right - inset,
+                cell.bottom - inset);
+        if (icon != null) {
+            drawCropped(canvas, icon, scratchRect);
+        } else {
+            scratchRect.set(
+                    cell.left + radius * .5f,
+                    cell.top + radius * .5f,
+                    cell.right - radius * .5f,
+                    cell.bottom - radius * .5f);
+            drawPlaceholder(canvas, scratchRect, 0f);
+        }
+
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(1f);
+        paint.setColor(OPTION_BORDER);
+        canvas.drawCircle(cell.centerX(), cell.centerY(), radius, paint);
+        paint.setStrokeWidth(0f);
     }
 
     private void text(Canvas canvas, String value, float x, float baseline, float size, int color) {
@@ -630,12 +813,32 @@ final class MediaWidgetView extends View {
     }
 
     private void activate(int zone) {
-        if (zone == ZONE_SOURCES) {
+        if (zone == ZONE_CHOOSER) {
             performClick();
-            listener.onChooseSource();
+            closeChooser();
             return;
         }
-        if (nowPlaying.isEmpty()) {
+        if (zone >= ZONE_SOURCE_OPTION_BASE) {
+            int index = zone - ZONE_SOURCE_OPTION_BASE;
+            if (index >= sources.size()) {
+                return;
+            }
+            performClick();
+            closeChooser();
+            listener.onSourceChosen(sources.get(index).packageName);
+            return;
+        }
+        if (zone == ZONE_SOURCE_BADGE) {
+            performClick();
+            chooserOpen = !chooserOpen;
+            sourceCellsDirty = true;
+            invalidate();
+            if (chooserOpen) {
+                listener.onSourceChooserOpened();
+            }
+            return;
+        }
+        if (nowPlaying.isEmpty() || zone == ZONE_NONE) {
             return;
         }
         performClick();
@@ -650,20 +853,38 @@ final class MediaWidgetView extends View {
         }
     }
 
+    private void closeChooser() {
+        chooserOpen = false;
+        sourceCellsDirty = true;
+        invalidate();
+    }
+
     private int zoneAt(float x, float y) {
-        if (nowPlaying.isEmpty()) {
-            return hit(emptySourceRect, x, y) ? ZONE_SOURCES : ZONE_NONE;
+        if (chooserVisible()) {
+            if (chooserOpen && hit(sourceBadgeRect, x, y)) {
+                return ZONE_SOURCE_BADGE;
+            }
+            List<MediaSourceGrid.Cell> cells = sourceCells();
+            for (int index = 0; index < cells.size(); index++) {
+                if (cells.get(index).contains(x, y, 4f)) {
+                    return ZONE_SOURCE_OPTION_BASE + index;
+                }
+            }
+            return ZONE_CHOOSER;
         }
-        if (poster && hit(sourceRect, x, y)) {
-            return ZONE_SOURCES;
+        if (mode == Mode.COMPACT) {
+            return hit(playRect, x, y) ? ZONE_PLAY : ZONE_OPEN;
+        }
+        if (hit(sourceBadgeRect, x, y)) {
+            return ZONE_SOURCE_BADGE;
         }
         if (hit(playRect, x, y)) {
             return ZONE_PLAY;
         }
-        if (!compact && hit(previousRect, x, y)) {
+        if (hit(previousRect, x, y)) {
             return ZONE_PREVIOUS;
         }
-        if (!compact && hit(nextRect, x, y)) {
+        if (hit(nextRect, x, y)) {
             return ZONE_NEXT;
         }
         return ZONE_OPEN;
@@ -675,6 +896,10 @@ final class MediaWidgetView extends View {
                 && x <= rect.right + margin
                 && y >= rect.top - margin
                 && y <= rect.bottom + margin;
+    }
+
+    private static float clamp(float value, float minimum, float maximum) {
+        return Math.max(minimum, Math.min(maximum, value));
     }
 
     @Override

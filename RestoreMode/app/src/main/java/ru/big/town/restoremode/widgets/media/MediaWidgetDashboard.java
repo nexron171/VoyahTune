@@ -13,13 +13,16 @@ import ru.big.town.restoremode.dashboard.DashboardProfile;
 import ru.big.town.restoremode.integration.media.NowPlayingClient;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.function.Consumer;
 
-/** Owns the “now playing” snapshot and shares it with every visible media card. */
+/** Owns the “now playing” snapshot and the media source catalog shared by every media card. */
 public final class MediaWidgetDashboard {
     private static final long TICK_MS = 1000L;
     private static final String ACTION_SET_MEDIA_AUTOSTART_PLAYER =
@@ -31,17 +34,18 @@ public final class MediaWidgetDashboard {
     private final Consumer<String> notify;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final List<MediaWidgetView> views = new ArrayList<>();
-    private final ExecutorService artExecutor =
-            Executors.newSingleThreadExecutor(
-                    runnable -> {
-                        Thread thread = new Thread(runnable, "VoyahTune-media-art");
-                        thread.setDaemon(true);
-                        return thread;
-                    });
+    private final Map<String, Bitmap> iconCache = new ConcurrentHashMap<>();
+    private final ExecutorService artExecutor = newExecutor("VoyahTune-media-art");
+    private final ExecutorService sourceExecutor = newExecutor("VoyahTune-media-sources");
 
     private NowPlayingClient.NowPlaying snapshot = new NowPlayingClient.NowPlaying();
+    private List<MediaSource> sources = Collections.emptyList();
+    private boolean sourcesLoaded;
+    private boolean sourcesLoading;
     private Bitmap art;
     private String requestedArtKey = "";
+    private Bitmap sourceIcon;
+    private String sourceIconPackage = "";
     private boolean running;
     private boolean destroyed;
 
@@ -76,6 +80,8 @@ public final class MediaWidgetDashboard {
     public View create() {
         MediaWidgetView view = new MediaWidgetView(context, new ViewListener());
         views.add(view);
+        view.setSources(sourcesLoaded ? sources : null);
+        view.setSourceIcon(sourceIcon);
         view.update(snapshot, art);
         return view;
     }
@@ -98,6 +104,7 @@ public final class MediaWidgetDashboard {
         registerReceiver();
         NowPlayingClient.requestRefresh(context);
         applySnapshot(NowPlayingClient.query(context));
+        loadSources();
         handler.post(tick);
     }
 
@@ -131,6 +138,7 @@ public final class MediaWidgetDashboard {
                 loadArt(artKey);
             }
         }
+        loadSourceIcon();
         redraw();
     }
 
@@ -150,6 +158,100 @@ public final class MediaWidgetDashboard {
                     });
         } catch (RejectedExecutionException ignored) {
         }
+    }
+
+    private void loadSources() {
+        if (sourcesLoading || destroyed) {
+            return;
+        }
+        sourcesLoading = true;
+        try {
+            sourceExecutor.execute(
+                    () -> {
+                        List<MediaSource> loaded = MediaSourceCatalog.load(context, iconCache);
+                        handler.post(
+                                () -> {
+                                    sourcesLoading = false;
+                                    if (destroyed) {
+                                        return;
+                                    }
+                                    sources = loaded;
+                                    sourcesLoaded = true;
+                                    for (MediaWidgetView view : views) {
+                                        view.setSources(loaded);
+                                    }
+                                    applyCatalogIcon();
+                                });
+                    });
+        } catch (RejectedExecutionException ignored) {
+            sourcesLoading = false;
+        }
+    }
+
+    private void loadSourceIcon() {
+        String packageName = snapshot.isEmpty() ? "" : snapshot.packageName;
+        if (packageName.equals(sourceIconPackage)) {
+            return;
+        }
+        sourceIconPackage = packageName;
+        if (packageName.isEmpty()) {
+            updateSourceIcon(null);
+            return;
+        }
+        MediaSource known = findSource(packageName);
+        if (known != null) {
+            updateSourceIcon(known.icon);
+            return;
+        }
+        Bitmap cached = iconCache.get(packageName);
+        if (cached != null) {
+            updateSourceIcon(cached);
+            return;
+        }
+        updateSourceIcon(null);
+        try {
+            sourceExecutor.execute(
+                    () -> {
+                        Bitmap icon =
+                                MediaSourceCatalog.icon(
+                                        context.getPackageManager(), packageName, iconCache);
+                        handler.post(
+                                () -> {
+                                    if (destroyed || !packageName.equals(sourceIconPackage)) {
+                                        return;
+                                    }
+                                    updateSourceIcon(icon);
+                                });
+                    });
+        } catch (RejectedExecutionException ignored) {
+        }
+    }
+
+    private void applyCatalogIcon() {
+        String packageName = sourceIconPackage;
+        if (packageName.isEmpty()) {
+            return;
+        }
+        MediaSource known = findSource(packageName);
+        if (known != null && known.icon != null && known.icon != sourceIcon) {
+            updateSourceIcon(known.icon);
+        }
+    }
+
+    private void updateSourceIcon(Bitmap icon) {
+        sourceIcon = icon;
+        for (MediaWidgetView view : views) {
+            view.setSourceIcon(icon);
+        }
+    }
+
+    private MediaSource findSource(String packageName) {
+        for (MediaSource source : sources) {
+            if (source.packageName.equals(packageName)) {
+                return source;
+            }
+        }
+        return null;
     }
 
     private void redraw() {
@@ -188,23 +290,31 @@ public final class MediaWidgetDashboard {
         }
     }
 
-    private void chooseSource() {
-        MediaPlayerPicker.show(
-                context,
-                packageName -> {
-                    Intent request =
-                            new Intent(ACTION_SET_MEDIA_AUTOSTART_PLAYER)
-                                    .setClassName(
-                                            "ru.big.town.anative",
-                                            "ru.big.town.anative.SetModesReceiverDynamic")
-                                    .putExtra("pkg", packageName)
-                                    .putExtra("display", DashboardProfile.displayId(context));
-                    try {
-                        context.sendBroadcast(request, BIND_SET_MODES_PERMISSION);
-                        notify.accept("Запускаем выбранный источник");
-                    } catch (RuntimeException error) {
-                        notify.accept("Не удалось запустить источник");
-                    }
+    private void chooseSource(String packageName) {
+        if (packageName == null || packageName.isEmpty()) {
+            return;
+        }
+        Intent request =
+                new Intent(ACTION_SET_MEDIA_AUTOSTART_PLAYER)
+                        .setClassName(
+                                "ru.big.town.anative",
+                                "ru.big.town.anative.SetModesReceiverDynamic")
+                        .putExtra("pkg", packageName)
+                        .putExtra("display", DashboardProfile.displayId(context));
+        try {
+            context.sendBroadcast(request, BIND_SET_MODES_PERMISSION);
+            notify.accept("Запускаем выбранный источник");
+        } catch (RuntimeException error) {
+            notify.accept("Не удалось запустить источник");
+        }
+    }
+
+    private static ExecutorService newExecutor(String name) {
+        return Executors.newSingleThreadExecutor(
+                runnable -> {
+                    Thread thread = new Thread(runnable, name);
+                    thread.setDaemon(true);
+                    return thread;
                 });
     }
 
@@ -227,8 +337,13 @@ public final class MediaWidgetDashboard {
         handler.removeCallbacksAndMessages(null);
         unregisterReceiver();
         artExecutor.shutdownNow();
+        sourceExecutor.shutdownNow();
         views.clear();
+        iconCache.clear();
         art = null;
+        sourceIcon = null;
+        sources = Collections.emptyList();
+        sourcesLoaded = false;
     }
 
     private final class ViewListener implements MediaWidgetView.Listener {
@@ -243,8 +358,13 @@ public final class MediaWidgetDashboard {
         }
 
         @Override
-        public void onChooseSource() {
-            chooseSource();
+        public void onSourceChosen(String packageName) {
+            chooseSource(packageName);
+        }
+
+        @Override
+        public void onSourceChooserOpened() {
+            loadSources();
         }
     }
 }
