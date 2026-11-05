@@ -11,7 +11,9 @@ public final class HeadlightWidgetLayout {
         COMPACT_HORIZONTAL(3, 1),
         WIDE_HORIZONTAL(4, 1),
         COMPACT_VERTICAL(1, 3),
-        TALL_VERTICAL(1, 4);
+        TALL_VERTICAL(1, 4),
+        FOG_HORIZONTAL(5, 1),
+        FOG_VERTICAL(1, 5);
 
         public final int width;
         public final int height;
@@ -30,17 +32,21 @@ public final class HeadlightWidgetLayout {
     private HeadlightWidgetLayout() {}
 
     public static int width(int value) {
-        return Math.max(1, Math.min(4, value));
+        return Math.max(1, Math.min(5, value));
     }
 
     public static Size size(int columns, int rows) {
         switch (width(columns)) {
             case 1:
-                return rows <= 3 ? Size.COMPACT_VERTICAL : Size.TALL_VERTICAL;
+                return rows >= 5
+                        ? Size.FOG_VERTICAL
+                        : rows <= 3 ? Size.COMPACT_VERTICAL : Size.TALL_VERTICAL;
             case 2:
                 return Size.SQUARE;
             case 3:
                 return Size.COMPACT_HORIZONTAL;
+            case 5:
+                return Size.FOG_HORIZONTAL;
             default:
                 return Size.WIDE_HORIZONTAL;
         }

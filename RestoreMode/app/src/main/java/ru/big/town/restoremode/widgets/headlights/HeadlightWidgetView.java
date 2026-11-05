@@ -20,21 +20,33 @@ import ru.big.town.restoremode.appearance.AppearanceSettings;
 
 import java.util.function.IntConsumer;
 
-/** Four accessible buttons remain directly available in every supported tile size. */
+/** Extended layouts add rear fog independently of the headlight selection. */
 public final class HeadlightWidgetView extends FrameLayout {
-    private static final String[] LABELS = {"Выкл", "Габариты", "Ближний", "Авто"};
+    private static final String[] LABELS = {
+        "Выкл", "Габариты", "Ближний", "Авто", "Задняя противотуманка"
+    };
     private final TextView heading;
-    private final LinearLayout[] buttons = new LinearLayout[4];
-    private final View[] symbols = new View[4];
+    private final LinearLayout[] buttons;
+    private final View[] symbols;
     private final int columns;
     private int surfaceAlpha;
 
     public HeadlightWidgetView(Context context, int width, IntConsumer selection) {
+        this(context, width, width == 1 ? 3 : 1, selection);
+    }
+
+    public HeadlightWidgetView(Context context, int width, int height, IntConsumer selection) {
         super(context);
-        surfaceAlpha = AppearanceSettings.load(context.getSharedPreferences("DrivePreferences", Context.MODE_PRIVATE))
-                .surfaceAlpha();
+        surfaceAlpha =
+                AppearanceSettings.load(
+                                context.getSharedPreferences(
+                                        "DrivePreferences", Context.MODE_PRIVATE))
+                        .surfaceAlpha();
         int tileWidth = HeadlightWidgetLayout.width(width);
-        columns = tileWidth <= 2 ? tileWidth : 4;
+        int buttonCount = tileWidth == 5 || (tileWidth == 1 && height == 5) ? 5 : 4;
+        buttons = new LinearLayout[buttonCount];
+        symbols = new View[buttonCount];
+        columns = tileWidth <= 2 ? tileWidth : buttonCount;
         setBackgroundResource(R.drawable.card_dark_ripple);
         heading = new TextView(context);
         heading.setTextSize(15);
@@ -72,7 +84,9 @@ public final class HeadlightWidgetView extends FrameLayout {
                 icon.setImageResource(
                         mode == HeadlightWidgetProtocol.PARKING
                                 ? R.drawable.headlight_parking
-                                : R.drawable.headlight_low_beam);
+                                : mode == HeadlightWidgetProtocol.REAR_FOG
+                                        ? R.drawable.headlight_rear_fog
+                                        : R.drawable.headlight_low_beam);
                 symbol = icon;
             }
             symbol.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
@@ -89,29 +103,40 @@ public final class HeadlightWidgetView extends FrameLayout {
         int pending = state.getInt(HeadlightWidgetProtocol.PENDING, -1);
         boolean available = state.getBoolean(HeadlightWidgetProtocol.AVAILABLE, false);
         String message = state.getString(HeadlightWidgetProtocol.MESSAGE, "Ожидание Native");
+        String fogMessage = state.getString(HeadlightWidgetProtocol.FOG_MESSAGE, "");
+        if (buttons.length == 5 && !fogMessage.isEmpty()) message = fogMessage;
         heading.setText(message.isEmpty() ? "Фары" : "Фары · " + message);
         heading.setContentDescription(heading.getText());
         for (int mode = 0; mode < buttons.length; mode++) {
-            boolean active = mode == selected;
+            boolean isFog = mode == HeadlightWidgetProtocol.REAR_FOG;
+            int observed = isFog ? state.getInt(HeadlightWidgetProtocol.FOG_STATE, -1) : selected;
+            boolean active = isFog ? observed == 1 : mode == selected;
+            boolean waiting =
+                    isFog
+                            ? state.getInt(HeadlightWidgetProtocol.FOG_PENDING, -1) >= 0
+                            : mode == pending;
             LinearLayout button = buttons[mode];
-            button.setEnabled(available && pending < 0);
+            button.setEnabled(
+                    isFog
+                            ? state.getBoolean(HeadlightWidgetProtocol.FOG_AVAILABLE, false)
+                            : available && pending < 0);
             button.setSelected(active);
-            button.setActivated(mode == pending);
+            button.setActivated(waiting);
             button.setContentDescription(
                     "Фары: "
                             + LABELS[mode]
                             + (active ? ", выбран" : "")
-                            + (mode == pending ? ", ожидается" : ""));
+                            + (waiting ? ", ожидается" : ""));
             GradientDrawable background = new GradientDrawable();
             background.setCornerRadius(dp(8));
             background.setColor(active ? 0xff2e80c9 : 0xff354154);
-            if (mode == pending) {
+            if (waiting) {
                 background.setStroke(dp(2), 0xff91c8f5);
             }
             background.setAlpha(surfaceAlpha);
             button.setBackground(
                     new RippleDrawable(ColorStateList.valueOf(0x40ffffff), background, null));
-            symbols[mode].setAlpha(selected < 0 ? 0.45f : 1f);
+            symbols[mode].setAlpha(observed < 0 ? 0.45f : 1f);
         }
     }
 
@@ -132,7 +157,7 @@ public final class HeadlightWidgetView extends FrameLayout {
         int padding = dp(10);
         int gap = dp(6);
         int headingHeight = dp(20);
-        int rows = 4 / columns;
+        int rows = buttons.length / columns;
         int buttonWidth = Math.max(0, (width - padding * 2 - gap * (columns - 1)) / columns);
         int buttonHeight = Math.max(0, (height - padding * 2 - headingHeight - gap * rows) / rows);
         heading.measure(exact(Math.max(0, width - padding * 2)), exact(headingHeight));

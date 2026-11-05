@@ -13,6 +13,17 @@ import java.util.concurrent.Executor;
 
 public class CanBusEventRouterTest {
     @Test
+    public void rearFogChangesAreDeliveredWhenOtherLightsStayUnchanged() {
+        CanBusEventRouter router = new CanBusEventRouter();
+        List<CanBusEvent> lights = new ArrayList<>();
+        router.subscribe(CanBusEventRouter.INTEREST_LIGHT_STATUS, null, Runnable::run, lights::add);
+        router.dispatch(CanBusEvent.light(CanBusEvent.Origin.LIVE, 1, 1, 100, 0, 1, 0, 0));
+        router.dispatch(CanBusEvent.light(CanBusEvent.Origin.LIVE, 1, 2, 200, 0, 1, 0, 1));
+        assertEquals(2, lights.size());
+        assertEquals(1, lights.get(1).rearFog);
+    }
+
+    @Test
     public void climateSnapshotsRefreshAndStaySeparateFromAmbientTemperature() {
         CanBusEventRouter router = new CanBusEventRouter();
         List<CanBusEvent> climate = new ArrayList<>(), ambient = new ArrayList<>();

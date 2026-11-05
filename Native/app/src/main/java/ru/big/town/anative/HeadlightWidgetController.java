@@ -27,6 +27,7 @@ final class HeadlightWidgetController {
     private final SharedPreferences.OnSharedPreferenceChangeListener preferenceListener =
             this::onPreferenceChanged;
     private VehiclePort.Subscription subscription;
+    private final RearFogWidgetState fog = new RearFogWidgetState();
     private int switchPosition = -1;
     private long generation;
     private boolean commandInFlight;
@@ -36,6 +37,13 @@ final class HeadlightWidgetController {
             () -> {
                 refresh();
                 state.timeout();
+                publish();
+            };
+
+    private final Runnable fogTimeout =
+            () -> {
+                refreshFog();
+                fog.timeout();
                 publish();
             };
 
@@ -83,7 +91,8 @@ final class HeadlightWidgetController {
                             subscription =
                                     vehicle.subscribe(
                                             CanBusEventRouter.INTEREST_CONNECTION
-                                                    | CanBusEventRouter.INTEREST_VEHICLE_STATE,
+                                                    | CanBusEventRouter.INTEREST_VEHICLE_STATE
+                                                    | CanBusEventRouter.INTEREST_LIGHT_STATUS,
                                             new int[] {SWITCH_POSITION.stableId},
                                             worker,
                                             this::onEvent);
@@ -91,7 +100,8 @@ final class HeadlightWidgetController {
                         refresh();
                         publish();
                     } else if (what == HeadlightWidgetProtocol.SELECT && current) {
-                        select(mode);
+                        if (mode == HeadlightWidgetProtocol.REAR_FOG) toggleFog();
+                        else select(mode);
                     }
                 });
     }
@@ -103,9 +113,14 @@ final class HeadlightWidgetController {
         if (event.kind == CanBusEvent.Kind.CONNECTION_LOST) {
             switchPosition = -1;
             state.reset("Нет связи с автомобилем");
+            fog.observed(null);
+            worker.removeCallbacks(fogTimeout);
             worker.removeCallbacks(timeout);
         } else if (event.kind == CanBusEvent.Kind.CONNECTION) {
             refresh();
+        } else if (event.kind == CanBusEvent.Kind.LIGHT_STATUS) {
+            fog.observed(event.rearFog);
+            if (fog.pending < 0) worker.removeCallbacks(fogTimeout);
         } else if (event.kind == CanBusEvent.Kind.VEHICLE_STATE
                 && event.first == SWITCH_POSITION.stableId) {
             observePosition(event.second);
@@ -119,6 +134,25 @@ final class HeadlightWidgetController {
                         Collections.singletonList(SWITCH_POSITION),
                         session -> session.readVehicleState(SWITCH_POSITION));
         observePosition(position == null ? -1 : position);
+        refreshFog();
+    }
+
+    private void refreshFog() {
+        fog.observed(vehicle.session(Collections.emptyList(), session -> session.readRearFog()));
+        if (fog.pending < 0) worker.removeCallbacks(fogTimeout);
+    }
+
+    private void toggleFog() {
+        if (!fog.toggle()) {
+            publish();
+            return;
+        }
+        publish();
+        String error = RearFogController.execute(context, "rear_fog:toggle");
+        refreshFog();
+        fog.sent(error);
+        if (fog.pending >= 0) worker.postDelayed(fogTimeout, CONFIRMATION_TIMEOUT_MS);
+        publish();
     }
 
     private void observePosition(int position) {
@@ -173,6 +207,10 @@ final class HeadlightWidgetController {
         data.putInt(
                 HeadlightWidgetProtocol.MODE,
                 automatic && state.mode >= 0 ? HeadlightWidgetProtocol.AUTO : state.mode);
+        data.putInt(HeadlightWidgetProtocol.FOG_STATE, fog.value);
+        data.putInt(HeadlightWidgetProtocol.FOG_PENDING, fog.pending);
+        data.putBoolean(HeadlightWidgetProtocol.FOG_AVAILABLE, fog.available());
+        data.putString(HeadlightWidgetProtocol.FOG_MESSAGE, fog.message);
         data.putInt(HeadlightWidgetProtocol.PENDING, state.pending);
         data.putBoolean(HeadlightWidgetProtocol.AVAILABLE, state.available() && !commandInFlight);
         data.putString(
@@ -185,6 +223,7 @@ final class HeadlightWidgetController {
 
     private void stopWatching() {
         ++generation;
+        worker.removeCallbacks(fogTimeout);
         worker.removeCallbacks(timeout);
         preferences.unregisterOnSharedPreferenceChangeListener(preferenceListener);
         if (subscription != null) {
@@ -193,6 +232,7 @@ final class HeadlightWidgetController {
         }
         clients.clear();
         switchPosition = -1;
+        fog.observed(null);
         state.reset("Нет данных фар");
     }
 

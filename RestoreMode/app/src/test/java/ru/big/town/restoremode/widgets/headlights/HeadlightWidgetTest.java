@@ -41,9 +41,12 @@ public class HeadlightWidgetTest {
     public void buttonBackgroundsFollowWidgetTransparencyWithoutBlurringTheirContent() {
         Context context = RuntimeEnvironment.getApplication();
         SharedPreferences preferences = context.getSharedPreferences("DrivePreferences", 0);
-        preferences.edit().putBoolean(AppearanceSettings.TRANSPARENCY_ENABLED, true)
+        preferences
+                .edit()
+                .putBoolean(AppearanceSettings.TRANSPARENCY_ENABLED, true)
                 .putInt(AppearanceSettings.TRANSPARENCY_PERCENT, 50)
-                .putBoolean(AppearanceSettings.BLUR_ENABLED, true).commit();
+                .putBoolean(AppearanceSettings.BLUR_ENABLED, true)
+                .commit();
         HeadlightWidgetView widget = new HeadlightWidgetView(context, 4, mode -> {});
         widget.update(state(HeadlightWidgetProtocol.OFF, -1));
         for (int mode = 0; mode < 4; mode++) {
@@ -59,20 +62,23 @@ public class HeadlightWidgetTest {
 
     @Test
     @GraphicsMode(GraphicsMode.Mode.NATIVE)
-    public void allLayoutsExposeFourSeparateButtonsAndPreserveTheirOrder() throws Exception {
+    public void allLayoutsExposeSeparateButtonsAndPreserveTheirOrder() throws Exception {
         Context context = RuntimeEnvironment.getApplication();
         float density = context.getResources().getDisplayMetrics().density;
         for (HeadlightWidgetLayout.Size size : HeadlightWidgetLayout.Size.values()) {
             List<Integer> selected = new ArrayList<>();
             HeadlightWidgetView widget =
-                    new HeadlightWidgetView(context, size.width, selected::add);
+                    new HeadlightWidgetView(context, size.width, size.height, selected::add);
+            int buttonCount = size.width == 5 || size.height == 5 ? 5 : 4;
             Bundle state = state(HeadlightWidgetProtocol.OFF, -1);
+            state.putInt(HeadlightWidgetProtocol.FOG_STATE, 0);
+            state.putBoolean(HeadlightWidgetProtocol.FOG_AVAILABLE, true);
             widget.update(state);
             int width = Math.round(size.width * 105 * density);
             int height = Math.round(size.height * 110 * density);
             widget.measure(exact(width), exact(height));
             widget.layout(0, 0, width, height);
-            for (int mode = 0; mode < 4; mode++) {
+            for (int mode = 0; mode < buttonCount; mode++) {
                 View button = widget.getChildAt(mode + 1);
                 LinearLayout cell = (LinearLayout) button;
                 View symbol = cell.getChildAt(0);
@@ -103,10 +109,12 @@ public class HeadlightWidgetTest {
                 assertEquals(mode == HeadlightWidgetProtocol.OFF, button.isSelected());
                 button.performClick();
             }
-            assertEquals(Arrays.asList(0, 1, 2, 3), selected);
+            assertEquals(
+                    buttonCount == 5 ? Arrays.asList(0, 1, 2, 3, 4) : Arrays.asList(0, 1, 2, 3),
+                    selected);
             Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
             widget.draw(new Canvas(bitmap));
-            for (int mode = 0; mode < 4; mode++) {
+            for (int mode = 0; mode < buttonCount; mode++) {
                 LinearLayout button = (LinearLayout) widget.getChildAt(mode + 1);
                 View symbol = button.getChildAt(0);
                 int whitePixels = 0;
@@ -244,8 +252,30 @@ public class HeadlightWidgetTest {
                 TileSizeStore.dimensions(preferences, HeadlightWidgetLayout.ID, 4, 1));
         TileSizeStore.setHeight(preferences, HeadlightWidgetLayout.ID, 5);
         assertArrayEquals(
-                new int[] {1, 4},
+                new int[] {1, 5},
                 TileSizeStore.dimensions(preferences, HeadlightWidgetLayout.ID, 4, 1));
+    }
+
+    @Test
+    public void rearFogSelectionAndAvailabilityAreIndependentOfHeadlightMode() {
+        HeadlightWidgetView widget =
+                new HeadlightWidgetView(RuntimeEnvironment.getApplication(), 1, 5, mode -> {});
+        Bundle state = state(HeadlightWidgetProtocol.LOW_BEAM, -1);
+        state.putInt(HeadlightWidgetProtocol.FOG_STATE, 1);
+        state.putBoolean(HeadlightWidgetProtocol.FOG_AVAILABLE, true);
+        widget.update(state);
+        assertTrue(widget.getChildAt(3).isSelected());
+        assertTrue(widget.getChildAt(5).isSelected());
+        state.putInt(HeadlightWidgetProtocol.FOG_PENDING, 0);
+        state.putBoolean(HeadlightWidgetProtocol.FOG_AVAILABLE, false);
+        widget.update(state);
+        assertTrue(widget.getChildAt(5).isSelected());
+        assertFalse(widget.getChildAt(5).isEnabled());
+        assertTrue(widget.getChildAt(5).isActivated());
+        assertTrue(widget.getChildAt(3).isEnabled());
+        widget.update(new Bundle());
+        assertFalse(widget.getChildAt(5).isEnabled());
+        assertFalse(widget.getChildAt(5).isSelected());
     }
 
     private static int exact(int size) {

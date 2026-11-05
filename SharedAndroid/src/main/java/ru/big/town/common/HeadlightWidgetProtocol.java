@@ -12,6 +12,12 @@ public final class HeadlightWidgetProtocol {
     public static final int PARKING = 1;
     public static final int LOW_BEAM = 2;
     public static final int AUTO = 3;
+    public static final int REAR_FOG = 4;
+
+    public static final String FOG_STATE = "fogState";
+    public static final String FOG_PENDING = "fogPending";
+    public static final String FOG_AVAILABLE = "fogAvailable";
+    public static final String FOG_MESSAGE = "fogMessage";
 
     public static final String MODE = "mode";
     public static final String PENDING = "pending";

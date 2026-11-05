@@ -44,6 +44,7 @@ final class CanBusEvent {
     final int first;
     final int second;
     final int third;
+    final int rearFog;
     final EnergyTelemetrySample telemetry;
     final OemClimateState climate;
 
@@ -93,6 +94,33 @@ final class CanBusEvent {
             int third,
             EnergyTelemetrySample telemetry,
             OemClimateState climate) {
+        this(
+                kind,
+                origin,
+                connectionEpoch,
+                sequence,
+                elapsedRealtime,
+                first,
+                second,
+                third,
+                telemetry,
+                climate,
+                -1);
+    }
+
+    private CanBusEvent(
+            Kind kind,
+            Origin origin,
+            long connectionEpoch,
+            long sequence,
+            long elapsedRealtime,
+            int first,
+            int second,
+            int third,
+            EnergyTelemetrySample telemetry,
+            OemClimateState climate,
+            int rearFog) {
+        this.rearFog = rearFog;
         this.telemetry = telemetry;
         this.climate = climate;
         this.kind = kind;
@@ -148,6 +176,18 @@ final class CanBusEvent {
             int autoLamp,
             int dippedBeam,
             int headLight) {
+        return light(origin, epoch, sequence, elapsed, autoLamp, dippedBeam, headLight, -1);
+    }
+
+    static CanBusEvent light(
+            Origin origin,
+            long epoch,
+            long sequence,
+            long elapsed,
+            int autoLamp,
+            int dippedBeam,
+            int headLight,
+            int rearFog) {
         return new CanBusEvent(
                 Kind.LIGHT_STATUS,
                 origin,
@@ -156,7 +196,10 @@ final class CanBusEvent {
                 elapsed,
                 autoLamp,
                 dippedBeam,
-                headLight);
+                headLight,
+                null,
+                null,
+                rearFog);
     }
 
     static CanBusEvent vehicleState(
@@ -204,6 +247,7 @@ final class CanBusEvent {
                 && connectionEpoch == other.connectionEpoch
                 && first == other.first
                 && second == other.second
-                && third == other.third;
+                && third == other.third
+                && rearFog == other.rearFog;
     }
 }

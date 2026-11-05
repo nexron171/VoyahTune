@@ -27,21 +27,35 @@ public final class HeadlightWidgetDashboard {
         this.context = context;
     }
 
-    public HeadlightWidgetView create(int width) {
+    public HeadlightWidgetView create(int width, int height) {
         view =
                 new HeadlightWidgetView(
                         context,
                         width,
+                        height,
                         mode -> {
                             if (!watching
                                     || !state.getBoolean(
-                                            HeadlightWidgetProtocol.AVAILABLE, false)) {
+                                            mode == HeadlightWidgetProtocol.REAR_FOG
+                                                    ? HeadlightWidgetProtocol.FOG_AVAILABLE
+                                                    : HeadlightWidgetProtocol.AVAILABLE,
+                                            false)) {
                                 return;
                             }
                             if (send(HeadlightWidgetProtocol.SELECT, mode)) {
-                                state.putBoolean(HeadlightWidgetProtocol.AVAILABLE, false);
-                                state.putInt(HeadlightWidgetProtocol.PENDING, mode);
-                                state.putString(HeadlightWidgetProtocol.MESSAGE, "Отправка…");
+                                if (mode == HeadlightWidgetProtocol.REAR_FOG) {
+                                    state.putBoolean(HeadlightWidgetProtocol.FOG_AVAILABLE, false);
+                                    state.putInt(
+                                            HeadlightWidgetProtocol.FOG_PENDING,
+                                            1 - state.getInt(HeadlightWidgetProtocol.FOG_STATE, 0));
+                                    state.putString(
+                                            HeadlightWidgetProtocol.FOG_MESSAGE,
+                                            "Противотуманка: отправка…");
+                                } else {
+                                    state.putBoolean(HeadlightWidgetProtocol.AVAILABLE, false);
+                                    state.putInt(HeadlightWidgetProtocol.PENDING, mode);
+                                    state.putString(HeadlightWidgetProtocol.MESSAGE, "Отправка…");
+                                }
                                 view.update(state);
                             } else {
                                 disconnected();

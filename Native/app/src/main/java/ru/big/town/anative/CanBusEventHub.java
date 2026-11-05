@@ -51,6 +51,7 @@ final class CanBusEventHub {
     private static final int CB_VEHICLE_STATE = 36;
 
     private static final int LIGHT_FIELD_COUNT = 17;
+    private static final int LIGHT_REAR_FOG_INDEX = 3;
     private static final int LIGHT_DIPPED_BEAM_INDEX = 7;
     private static final int LIGHT_HEAD_LIGHT_INDEX = 13;
     private static final int LIGHT_AUTO_LAMP_INDEX = 16;
@@ -933,7 +934,7 @@ final class CanBusEventHub {
         }
     }
 
-    private void routeLight(long epoch, int autoLamp, int dippedBeam, int headLight) {
+    private void routeLight(long epoch, int autoLamp, int dippedBeam, int headLight, int rearFog) {
         synchronized (eventLock) {
             if (epoch != activeEpoch) return;
             routeLocked(
@@ -944,7 +945,8 @@ final class CanBusEventHub {
                             SystemClock.elapsedRealtime(),
                             autoLamp,
                             dippedBeam,
-                            headLight));
+                            headLight,
+                            rearFog));
         }
     }
 
@@ -1115,15 +1117,17 @@ final class CanBusEventHub {
                             int autoLamp = -1;
                             int dippedBeam = -1;
                             int headLight = -1;
+                            int rearFog = -1;
                             if (data.readInt() != 0) {
                                 for (int index = 0; index < LIGHT_FIELD_COUNT; index++) {
                                     int value = data.readInt();
-                                    if (index == LIGHT_DIPPED_BEAM_INDEX) dippedBeam = value;
+                                    if (index == LIGHT_REAR_FOG_INDEX) rearFog = value;
+                                    else if (index == LIGHT_DIPPED_BEAM_INDEX) dippedBeam = value;
                                     else if (index == LIGHT_HEAD_LIGHT_INDEX) headLight = value;
                                     else if (index == LIGHT_AUTO_LAMP_INDEX) autoLamp = value;
                                 }
                             }
-                            routeLight(epoch, autoLamp, dippedBeam, headLight);
+                            routeLight(epoch, autoLamp, dippedBeam, headLight, rearFog);
                             return true;
                         }
                     case 16:

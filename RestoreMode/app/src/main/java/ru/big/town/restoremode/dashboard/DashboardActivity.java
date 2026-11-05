@@ -2327,7 +2327,10 @@ public class DashboardActivity extends AppCompatActivity {
                         widgetView = brightnessWidget.create();
                         break;
                     case HeadlightWidgetLayout.ID:
-                        widgetView = headlightWidget.create(getWidgetDimensions(tile.id)[0]);
+                        widgetView =
+                                headlightWidget.create(
+                                        getWidgetDimensions(tile.id)[0],
+                                        getWidgetDimensions(tile.id)[1]);
                         break;
                     case "suspensionWidget":
                         suspensionWidgetView =
