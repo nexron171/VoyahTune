@@ -1684,8 +1684,9 @@ Bridge отправляет snapshot раз в секунду сообщение
 
 `ClusterNavigationController`:
 
-- явная служба `com.qinggan.cluster/.service.InstrumentClusterService`, action
-  `com.qinggan.cluster.InstrumentClusterService`;
+- служба `com.qinggan.cluster` с action `com.qinggan.cluster.InstrumentClusterService`;
+  поиск идёт по action через `PackageManager`, явный класс
+  `.service.InstrumentClusterService` используется только если intent-filter не разрешился;
 - проверка системного пакета и descriptor
   `com.qinggan.cluster.IInstrumentClusterManagerService`;
 - OEM ClassLoader через createPackageContext(INCLUDE_CODE | IGNORE_SECURITY),
@@ -1700,10 +1701,28 @@ Bridge отправляет snapshot раз в секунду сообщение
   controller живёт в процессе Native, после очистки последней подсказки отсоединяется
   от OEM службы. Закрытие CarPlay освобождает его источник, сохраняя обычную навигацию.
 
+Диагностика в logcat с тегом `ClusterNavigation`: строка `platform=<Build.PRODUCT>
+presentation=<ro.qg.presentation>` при старте, выбранный способ bind, `Cluster returned
+a null binder`, `Cluster bind unavailable`, `Cluster write failed` с текстом исключения,
+`Maneuver sent icon=N` / `MAN_STOP sent` и изменение состояния связи с IPK
+(`Cluster link with the IPK is up` / `No IPK link reported`), которое берётся из
+`getClusterConnect()` установленной службы.
+
+Декомпиляция `com.qinggan.cluster` 1.2.0 (7) подтверждает общий путь для H97C/H97D:
+`Util.Voyah` задаёт проекты `f6802h` (H97C) и `f6808` (H97D), `InstrumentClusterFactory`
+возвращает для них `VoyahInstrumentCluster`, descriptor и transaction `updateNaviInfo`
+совпадают с H97X/H97Y. Тот же код публикует binder службы только при
+`ro.qg.presentation == "VirtualDisplay"`; при другом значении `onBind` возвращает `null`,
+поэтому отсутствие строки `Binding cluster service` вместе с `Cluster returned a null
+binder` указывает на настройку прошивки, а не на разбор `NaviInfo`. Распознавание H97D
+добавлено в `VehiclePlatform` по `f6808` из `Build.PRODUCT` или
+`ro.build.product_3rdparty`; для H97D проверок `isH97XY` нет.
+
 Нужны оба APK с этим контрактом. На машине ещё требуется подтвердить права вызова,
 видимость/значения OEM-иконок и расстояний. После force-stop Native MAN_STOP не
 гарантирован. Поле приборки общее со штатной навигацией; арбитраж с OEM-навигаторами
 не реализован. Это стрелка/расстояние/дорога, не полный видеопоток карты на приборку.
+Проверка на H97C/H97D не выполнялась: подтверждать нужно по логам выше.
 
 ## 9. Аудио, видео, defaults и отключённые OEM-функции
 
