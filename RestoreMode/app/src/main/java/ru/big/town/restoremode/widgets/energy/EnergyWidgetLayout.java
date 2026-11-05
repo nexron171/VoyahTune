@@ -15,7 +15,7 @@ public final class EnergyWidgetLayout {
     public static int minWidth(String id) {
         return "energyWidget".equals(id) || "energyTripWidget".equals(id)
                 ? 3
-                : "energyConsumptionWidget".equals(id) ? 1 : 2;
+                : "energyConsumptionWidget".equals(id) || "tirePressureWidget".equals(id) ? 1 : 2;
     }
 
     public static int maxWidth(String id) {
@@ -47,6 +47,9 @@ public final class EnergyWidgetLayout {
     }
 
     public static int minHeight(String id, int columns) {
+        if ("tirePressureWidget".equals(id) && width(id, columns) == 1) {
+            return 1;
+        }
         if ("energyWidget".equals(id)) {
             return columns <= 3 ? 4 : columns <= 6 ? 5 : 4;
         }
@@ -60,7 +63,8 @@ public final class EnergyWidgetLayout {
     }
 
     public static int maxHeight(String id, int columns) {
-        if ("energyConsumptionWidget".equals(id) && width(id, columns) == 1) {
+        if (("energyConsumptionWidget".equals(id) || "tirePressureWidget".equals(id))
+                && width(id, columns) == 1) {
             return 1;
         }
         if ("energyWidget".equals(id) && width(id, columns) == 3) {

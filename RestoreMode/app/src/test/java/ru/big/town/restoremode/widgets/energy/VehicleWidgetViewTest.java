@@ -69,17 +69,33 @@ public class VehicleWidgetViewTest {
                     assertEquals(classes[index], widget.getClass());
                     widget.update(telemetry());
                     List<String> text = render(widget);
-                    assertTrue(widgetId + " " + columns + "×" + rows, text.contains(titles[index]));
+                    String title = VehicleWidgets.TIRES.equals(widgetId) && columns == 1
+                            ? "Дав-е, bar" : titles[index];
+                    assertTrue(widgetId + " " + columns + "×" + rows, text.contains(title));
                     for (int other = 0; other < titles.length; other++) {
                         if (other != index) {
                             assertFalse(text.contains(titles[other]));
                         }
                     }
                     widget.update(null);
-                    assertTrue(render(widget).contains(titles[index]));
+                    assertTrue(render(widget).contains(title));
                 }
             }
         }
+    }
+
+    @Test
+    public void compactTiresShowOnlyTitleAndReadingsAndHideDisconnectedValues() {
+        TirePressureWidgetView widget = new TirePressureWidgetView(context, "white", 1, 1);
+        Bundle data = telemetry();
+        widget.update(data);
+        assertEquals(
+                java.util.Arrays.asList("Дав-е, bar", "2,6", "2,7", "2,8", "2,9"),
+                render(widget));
+        data.putBoolean(EnergyWidgetProtocol.CONNECTED, false);
+        widget.update(data);
+        assertEquals(
+                java.util.Arrays.asList("Дав-е, bar", "—", "—", "—", "—"), render(widget));
     }
 
     @Test

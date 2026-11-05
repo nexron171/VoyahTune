@@ -140,6 +140,27 @@ public class EnergyWidgetTest {
     }
 
     @Test
+    public void compactTireSizePersistsAndRestoresSupportedLargeHeight() {
+        Map<String, Object> saved = new HashMap<>();
+        SharedPreferences preferences = prefs(saved);
+        TileSizeStore.setHeight(preferences, "tirePressureWidget", 4);
+        TileSizeStore.setWidth(preferences, "tirePressureWidget", 1);
+        assertArrayEquals(
+                new int[] {1, 1},
+                TileSizeStore.dimensions(prefs(saved), "tirePressureWidget", 2, 4));
+        TileSizeStore.setHeight(preferences, "tirePressureWidget", 4);
+        assertEquals(1, TileSizeStore.height(prefs(saved), "tirePressureWidget", 4));
+        TileSizeStore.setWidth(preferences, "tirePressureWidget", 2);
+        assertArrayEquals(
+                new int[] {2, 3},
+                TileSizeStore.dimensions(prefs(saved), "tirePressureWidget", 2, 4));
+        TileSizeStore.setHeight(preferences, "tirePressureWidget", 4);
+        assertArrayEquals(
+                new int[] {2, 4},
+                TileSizeStore.dimensions(prefs(saved), "tirePressureWidget", 2, 4));
+    }
+
+    @Test
     public void narrowEnergyRulesDoNotChangeTireOrOdometerSizes() {
         Map<String, Object> saved = new HashMap<>();
         SharedPreferences prefs = prefs(saved);

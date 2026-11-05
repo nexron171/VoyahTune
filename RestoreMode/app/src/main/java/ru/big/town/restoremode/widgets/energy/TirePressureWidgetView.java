@@ -23,6 +23,9 @@ public final class TirePressureWidgetView extends VehicleWidgetView {
     public TirePressureWidgetView(Context context, String color, int columns, int rows) {
         super(context, VehicleWidgets.TIRES, columns, rows);
         this.color = CarAppearance.normalizeColor(color);
+        if (this.columns == 1) {
+            return;
+        }
         car = CACHE.get(this.color);
         if (car == null) {
             IMAGES.execute(
@@ -67,6 +70,10 @@ public final class TirePressureWidgetView extends VehicleWidgetView {
 
     @Override
     protected void drawWidget(Canvas canvas) {
+        if (columns == 1) {
+            drawCompactWidget(canvas);
+            return;
+        }
         boolean shorter = rows == 3;
         float padding = 16;
         float titleSize = 20;
@@ -117,4 +124,25 @@ public final class TirePressureWidgetView extends VehicleWidgetView {
                     false);
         }
     }
+
+    private void drawCompactWidget(Canvas canvas) {
+        drawText(canvas, "Дав-е, bar", 12, 25, 17, MUTED, false);
+        float centerX = contentWidth / 2;
+        float centerY = 75;
+        float halfGridWidth = 40;
+        drawLine(canvas, centerX, 39, centerX, 110, BORDER, 1);
+        drawLine(
+                canvas, centerX - halfGridWidth, centerY,
+                centerX + halfGridWidth, centerY, BORDER, 1);
+        float pressureSize = 20;
+        for (int wheelIndex = 0; wheelIndex < 4; wheelIndex++) {
+            String pressure = formatNumber(currentValue(EnergyWidgetProtocol.TIRES, wheelIndex));
+            float valueCenterX = centerX + (wheelIndex % 2 == 0 ? -21 : 21);
+            float baseline = wheelIndex < 2 ? 65 : 101;
+            drawText(
+                    canvas, pressure, valueCenterX - measureText(pressure, pressureSize) / 2,
+                    baseline, pressureSize, WHITE, false);
+        }
+    }
+
 }
