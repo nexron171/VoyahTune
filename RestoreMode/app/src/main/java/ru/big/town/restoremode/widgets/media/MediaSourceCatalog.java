@@ -19,9 +19,13 @@ final class MediaSourceCatalog {
     private static final String LEGACY_MUSIC_PLAYER = "android.intent.action.MUSIC_PLAYER";
     private static final int ICON_SIZE_PX = 128;
 
-    private static final List<String> SERVICE_PACKAGES = List.of(
+    private static final List<String> INFRASTRUCTURE_PACKAGES = List.of(
             "ru.big.town.anative",
-            "ru.big.town.updater");
+            "ru.big.town.updater",
+            "com.android.systemui");
+
+    /** Applications that advertise a media surface but are not players. */
+    private static final List<String> EXCLUDED_PACKAGES = List.of("com.huawei.hidisk.fa");
     private static final List<String> SYSTEM_PREFIXES = List.of(
             "com.qinggan",
             "com.android",
@@ -92,8 +96,8 @@ final class MediaSourceCatalog {
 
     static boolean isHidden(String packageName, String ownPackage) {
         return packageName.equals(ownPackage)
-                || packageName.equals("com.android.systemui")
-                || SERVICE_PACKAGES.contains(packageName);
+                || INFRASTRUCTURE_PACKAGES.contains(packageName)
+                || EXCLUDED_PACKAGES.contains(packageName);
     }
 
     private static String labelOf(String packageName, Map<String, String> labels) {

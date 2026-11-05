@@ -62,11 +62,9 @@ public final class MediaWidgetView extends View {
     private static final int PLACEHOLDER = 0xff263646;
     private static final int BADGE_BACKGROUND = 0xcc1b1f25;
     private static final int BADGE_BACKGROUND_ACTIVE = 0xcc2f4c6a;
-    private static final int BADGE_BORDER = 0xff5a636e;
     private static final int CHOOSER_SCRIM = 0xe60d1014;
     private static final int OPTION_BACKGROUND = 0xff2b313a;
     private static final int OPTION_BACKGROUND_PRESSED = 0xff3a465a;
-    private static final int OPTION_BORDER = 0xff626a74;
     private static final int MUTED_TEXT = EnergyWidgetStyle.MUTED;
 
     private static final float TEXT_PADDING = 12f;
@@ -259,7 +257,7 @@ public final class MediaWidgetView extends View {
 
     private void layoutCompact() {
         artRect.set(borderDp, borderDp, widthDp - borderDp, heightDp - borderDp);
-        setArtRadii(true);
+        setArtRadii();
         float radius = Math.min(widthDp, heightDp) * .18f;
         playRect.set(
                 widthDp / 2f - radius,
@@ -276,7 +274,7 @@ public final class MediaWidgetView extends View {
         float radius = controlRadiusFor(widthDp);
         float artBottom = Math.max(borderDp + 40f, heightDp - stackedBlockHeight());
         artRect.set(borderDp, borderDp, widthDp - borderDp, artBottom);
-        setArtRadii(false);
+        setArtRadii();
 
         titleSize = titleSizeFor(widthDp);
         subtitleSize = subtitleSizeFor(titleSize);
@@ -298,8 +296,9 @@ public final class MediaWidgetView extends View {
 
     private void layoutSide() {
         float artSize = Math.min(heightDp - borderDp * 2f, widthDp * .55f);
-        artRect.set(borderDp, borderDp, borderDp + artSize, heightDp - borderDp);
-        setArtRadii(false);
+        float artTop = (heightDp - artSize) / 2f;
+        artRect.set(borderDp, artTop, borderDp + artSize, artTop + artSize);
+        setArtRadii();
 
         textLeft = artRect.right + 14f;
         textRight = widthDp - TEXT_PADDING;
@@ -363,18 +362,25 @@ public final class MediaWidgetView extends View {
         sourceBadgeRect.set(left, top, left + diameter, top + diameter);
     }
 
-    /** The art follows the tile frame: rounded where it touches the tile corner. */
-    private void setArtRadii(boolean allCorners) {
-        float top = Math.max(0f, cornerRadiusDp - borderDp);
-        float bottom = allCorners ? top : 0f;
-        artRadii[0] = top;
-        artRadii[1] = top;
-        artRadii[2] = top;
-        artRadii[3] = top;
-        artRadii[4] = bottom;
-        artRadii[5] = bottom;
-        artRadii[6] = bottom;
-        artRadii[7] = bottom;
+    /** The art follows the tile frame: rounded only where it touches a tile corner. */
+    private void setArtRadii() {
+        float radius = Math.max(0f, cornerRadiusDp - borderDp);
+        boolean touchesTop = artRect.top <= borderDp + .5f;
+        boolean touchesBottom = artRect.bottom >= heightDp - borderDp - .5f;
+        boolean touchesLeft = artRect.left <= borderDp + .5f;
+        boolean touchesRight = artRect.right >= widthDp - borderDp - .5f;
+        float topLeft = touchesTop && touchesLeft ? radius : 0f;
+        float topRight = touchesTop && touchesRight ? radius : 0f;
+        float bottomRight = touchesBottom && touchesRight ? radius : 0f;
+        float bottomLeft = touchesBottom && touchesLeft ? radius : 0f;
+        artRadii[0] = topLeft;
+        artRadii[1] = topLeft;
+        artRadii[2] = topRight;
+        artRadii[3] = topRight;
+        artRadii[4] = bottomRight;
+        artRadii[5] = bottomRight;
+        artRadii[6] = bottomLeft;
+        artRadii[7] = bottomLeft;
     }
 
     private boolean chooserVisible() {
@@ -665,12 +671,6 @@ public final class MediaWidgetView extends View {
             drawPlaceholder(canvas, sourceBadgeRect, .3f);
         }
         canvas.restore();
-
-        paint.setStyle(Paint.Style.STROKE);
-        paint.setStrokeWidth(chooserOpen ? 2f : 1f);
-        paint.setColor(chooserOpen ? ACCENT : BADGE_BORDER);
-        canvas.drawCircle(centerX, centerY, radius, paint);
-        paint.setStrokeWidth(0f);
     }
 
     private void drawSourceChooser(Canvas canvas, boolean scrim) {
@@ -722,12 +722,6 @@ public final class MediaWidgetView extends View {
                     cell.bottom - radius * .5f);
             drawPlaceholder(canvas, scratchRect, 0f);
         }
-
-        paint.setStyle(Paint.Style.STROKE);
-        paint.setStrokeWidth(1f);
-        paint.setColor(OPTION_BORDER);
-        canvas.drawCircle(cell.centerX(), cell.centerY(), radius, paint);
-        paint.setStrokeWidth(0f);
     }
 
     private void text(Canvas canvas, String value, float x, float baseline, float size, int color) {

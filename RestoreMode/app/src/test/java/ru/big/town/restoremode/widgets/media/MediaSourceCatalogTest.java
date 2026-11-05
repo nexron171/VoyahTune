@@ -76,6 +76,11 @@ public class MediaSourceCatalogTest {
     }
 
     @Test
+    public void cloudSpaceIsNotOfferedAsAMediaSource() {
+        assertTrue(MediaSourceCatalog.isHidden("com.huawei.hidisk.fa", "ru.big.town.restoremode"));
+    }
+
+    @Test
     public void oemVendorPackagesCountAsSystem() {
         assertTrue(MediaSourceCatalog.isSystemPackage("com.qinggan.media"));
         assertTrue(MediaSourceCatalog.isSystemPackage("com.android.music"));
