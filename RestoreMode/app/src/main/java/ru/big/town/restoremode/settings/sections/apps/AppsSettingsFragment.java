@@ -697,7 +697,16 @@ public final class AppsSettingsFragment extends SettingsSectionFragment {
         switch (kind) {
             case APPLICATION_STARTUP:
                 new ApplicationStartupEditor(
-                                requireContext(), preferences, this::refreshSettingsRows)
+                                requireContext(),
+                                preferences,
+                                this::refreshSettingsRows,
+                                ru.big.town.common.ApplicationStartupSettings.Screen.MAIN)
+                        .addRows(rows);
+                new ApplicationStartupEditor(
+                                requireContext(),
+                                preferences,
+                                this::refreshSettingsRows,
+                                ru.big.town.common.ApplicationStartupSettings.Screen.PASSENGER)
                         .addRows(rows);
                 break;
             case FULLSCREEN_APPS:

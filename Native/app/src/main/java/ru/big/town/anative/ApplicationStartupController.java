@@ -7,6 +7,7 @@ import android.os.Looper;
 import android.util.Log;
 
 import ru.big.town.common.ApplicationStartupSettings;
+import ru.big.town.common.ApplicationStartupSettings.Screen;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -16,25 +17,39 @@ final class ApplicationStartupController {
     private final SetModesService service;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ApplicationStartupSequence sequence;
+    private final ApplicationStartupSequence passengerSequence;
     private volatile boolean closed;
 
     ApplicationStartupController(SetModesService service) {
         this.service = service;
         sequence =
                 new ApplicationStartupSequence(
-                        this::launch, (action, delay) -> handler.postDelayed(action, delay));
+                        (action, completion) -> launch(action, Screen.MAIN, completion),
+                        (action, delay) -> handler.postDelayed(action, delay));
+        passengerSequence =
+                new ApplicationStartupSequence(
+                        (action, completion) -> launch(action, Screen.PASSENGER, completion),
+                        (action, delay) -> handler.postDelayed(action, delay));
     }
 
-    void start(Runnable onConfigured) {
-        new Thread(() -> readConfiguration(onConfigured), "application-startup").start();
+    void start(Runnable onConfigured, Runnable onPassengerConfigured) {
+        new Thread(
+                        () -> {
+                            readConfiguration(Screen.MAIN, sequence, onConfigured);
+                            readConfiguration(
+                                    Screen.PASSENGER, passengerSequence, onPassengerConfigured);
+                        },
+                        "application-startup")
+                .start();
     }
 
-    private void readConfiguration(Runnable onConfigured) {
+    private void readConfiguration(
+            Screen screen, ApplicationStartupSequence startupSequence, Runnable onConfigured) {
         List<String> actions = new ArrayList<>();
         long delayMillis;
         try (Cursor cursor =
                 service.getContentResolver()
-                        .query(Uri.parse(ApplicationStartupSettings.URI), null, null, null, null)) {
+                        .query(Uri.parse(screen.uri()), null, null, null, null)) {
             if (cursor == null
                     || !cursor.moveToFirst()
                     || cursor.getInt(cursor.getColumnIndexOrThrow("enabled")) == 0) return;
@@ -48,7 +63,9 @@ final class ApplicationStartupController {
                                                     cursor.getColumnIndexOrThrow("delaySeconds"))));
             do {
                 String action = cursor.getString(cursor.getColumnIndexOrThrow("action"));
-                if (action != null && (action.startsWith("app:") || action.startsWith("split:")))
+                if (action != null
+                        && (action.startsWith("app:")
+                                || (screen == Screen.MAIN && action.startsWith("split:"))))
                     actions.add(action);
             } while (cursor.moveToNext());
         } catch (RuntimeException exception) {
@@ -59,11 +76,11 @@ final class ApplicationStartupController {
                 () -> {
                     if (closed || actions.isEmpty()) return;
                     onConfigured.run();
-                    sequence.start(actions, delayMillis);
+                    startupSequence.start(actions, delayMillis);
                 });
     }
 
-    private void launch(String action, Runnable completion) {
+    private void launch(String action, Screen screen, Runnable completion) {
         if (closed) return;
         Log.i(TAG, "Starting " + action);
         if (action.startsWith("split:")) {
@@ -72,7 +89,7 @@ final class ApplicationStartupController {
         }
         String packageName = action.substring(4);
         ClusterMediaHostActivity.closeForPackage(packageName);
-        SplitHostActivity.closeActiveHost();
+        if (screen == Screen.MAIN) SplitHostActivity.closeActiveHost();
         boolean fullscreen =
                 FullscreenPackagePolicy.contains(
                         android.provider.Settings.Global.getString(
@@ -81,7 +98,7 @@ final class ApplicationStartupController {
         AppDisplayLauncher.launch(
                 service,
                 packageName,
-                0,
+                screen.displayId,
                 fullscreen,
                 () -> !closed,
                 () -> {
@@ -94,6 +111,7 @@ final class ApplicationStartupController {
     void close() {
         closed = true;
         sequence.cancel();
+        passengerSequence.cancel();
         handler.removeCallbacksAndMessages(null);
     }
 }

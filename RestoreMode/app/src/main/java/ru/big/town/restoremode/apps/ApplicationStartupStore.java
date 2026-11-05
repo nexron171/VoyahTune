@@ -8,6 +8,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import ru.big.town.common.ApplicationStartupSettings;
+import ru.big.town.common.ApplicationStartupSettings.Screen;
 import ru.big.town.restoremode.apps.split.SplitStore;
 import ru.big.town.restoremode.integration.config.SplitConfigSync;
 
@@ -28,16 +29,21 @@ public final class ApplicationStartupStore {
     private ApplicationStartupStore() {}
 
     public static List<Entry> load(SharedPreferences preferences) {
+        return load(preferences, Screen.MAIN);
+    }
+
+    public static List<Entry> load(SharedPreferences preferences, Screen screen) {
         List<Entry> entries = new ArrayList<>();
         try {
-            JSONArray saved =
-                    new JSONArray(preferences.getString(ApplicationStartupSettings.ENTRIES, "[]"));
+            JSONArray saved = new JSONArray(preferences.getString(screen.entriesKey, "[]"));
             for (int index = 0; index < saved.length(); index++) {
                 JSONObject item = saved.optJSONObject(index);
                 if (item == null) continue;
                 String target = item.optString("target", "");
                 if ((target.startsWith("app:") && target.length() > 4)
-                        || (target.startsWith("split:") && target.length() > 6)) {
+                        || (screen == Screen.MAIN
+                                && target.startsWith("split:")
+                                && target.length() > 6)) {
                     entries.add(new Entry(target, item.optString("label", target)));
                 }
             }
@@ -48,6 +54,10 @@ public final class ApplicationStartupStore {
     }
 
     public static void save(SharedPreferences preferences, List<Entry> entries) {
+        save(preferences, entries, Screen.MAIN);
+    }
+
+    public static void save(SharedPreferences preferences, List<Entry> entries, Screen screen) {
         JSONArray saved = new JSONArray();
         try {
             for (Entry entry : entries) {
@@ -56,16 +66,20 @@ public final class ApplicationStartupStore {
         } catch (JSONException exception) {
             throw new IllegalArgumentException("Cannot serialize application startup", exception);
         }
-        preferences.edit().putString(ApplicationStartupSettings.ENTRIES, saved.toString()).apply();
+        preferences.edit().putString(screen.entriesKey, saved.toString()).apply();
     }
 
     public static int delaySeconds(SharedPreferences preferences) {
+        return delaySeconds(preferences, Screen.MAIN);
+    }
+
+    public static int delaySeconds(SharedPreferences preferences, Screen screen) {
         return Math.max(
                 0,
                 Math.min(
                         ApplicationStartupSettings.MAX_DELAY_SECONDS,
                         preferences.getInt(
-                                ApplicationStartupSettings.DELAY,
+                                screen.delayKey,
                                 ApplicationStartupSettings.DEFAULT_DELAY_SECONDS)));
     }
 
@@ -82,10 +96,14 @@ public final class ApplicationStartupStore {
     }
 
     public static MatrixCursor query(SharedPreferences preferences) {
+        return query(preferences, Screen.MAIN);
+    }
+
+    public static MatrixCursor query(SharedPreferences preferences, Screen screen) {
         MatrixCursor cursor = new MatrixCursor(new String[] {"enabled", "delaySeconds", "action"});
-        int enabled = preferences.getBoolean(ApplicationStartupSettings.ENABLED, false) ? 1 : 0;
-        int delay = delaySeconds(preferences);
-        for (Entry entry : load(preferences)) {
+        int enabled = preferences.getBoolean(screen.enabledKey, false) ? 1 : 0;
+        int delay = delaySeconds(preferences, screen);
+        for (Entry entry : load(preferences, screen)) {
             String action = resolve(entry, preferences);
             if (!action.isEmpty()) cursor.addRow(new Object[] {enabled, delay, action});
         }

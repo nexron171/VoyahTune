@@ -12,13 +12,13 @@ import android.os.Binder;
 import android.os.Bundle;
 import android.util.Log;
 
-import ru.big.town.common.ScreenBrightnessSettings;
 import ru.big.town.common.DriveSelectionPolicy;
+import ru.big.town.common.ScreenBrightnessSettings;
 import ru.big.town.common.SmartSaveSettings;
 import ru.big.town.common.WallpaperProtocol;
+import ru.big.town.restoremode.BuildConfig;
 import ru.big.town.restoremode.appearance.AppearanceSettings;
 import ru.big.town.restoremode.appearance.WallpaperStore;
-import ru.big.town.restoremode.BuildConfig;
 import ru.big.town.restoremode.diagnostics.runtime.RuntimeStatusContract;
 import ru.big.town.restoremode.integration.hooks.HookStatusContract;
 import ru.big.town.restoremode.trips.location.TripLocationPermission;
@@ -137,31 +137,52 @@ public class SettingsContentProvider extends ContentProvider {
     public Bundle call(String method, String arg, Bundle extras) {
         if (ScreenBrightnessSettings.MANUAL_METHOD.equals(method)) {
             int uid = Binder.getCallingUid();
-            if (uid != 0 && uid != android.os.Process.SYSTEM_UID && uid != android.os.Process.myUid()) {
+            if (uid != 0
+                    && uid != android.os.Process.SYSTEM_UID
+                    && uid != android.os.Process.myUid()) {
                 throw new SecurityException("OEM brightness caller required");
             }
             if (extras != null) {
                 int percent = extras.getInt("percent", -1);
                 int screen = extras.getInt("screen", -1);
-                if (percent >= 1 && percent <= 100 && (screen == 1 || screen == 2 || screen == 16)) {
-                    getContext().sendBroadcast(new Intent(ScreenBrightnessSettings.MANUAL)
-                            .setClassName("ru.big.town.anative", "ru.big.town.anative.ScreenBrightnessConfigReceiver")
-                            .putExtra("percent", percent).putExtra("screen", screen));
+                if (percent >= 1
+                        && percent <= 100
+                        && (screen == 1 || screen == 2 || screen == 16)) {
+                    getContext()
+                            .sendBroadcast(
+                                    new Intent(ScreenBrightnessSettings.MANUAL)
+                                            .setClassName(
+                                                    "ru.big.town.anative",
+                                                    "ru.big.town.anative.ScreenBrightnessConfigReceiver")
+                                            .putExtra("percent", percent)
+                                            .putExtra("screen", screen));
                 }
             }
             return new Bundle();
         }
         if (ScreenBrightnessSettings.LEARN_METHOD.equals(method)) {
-            getContext().enforceCallingOrSelfPermission(
-                    "ru.big.town.anative.permission.BIND_SET_MODES_SERVICE", "Brightness calibration");
-            return extras == null ? new Bundle() : BrightnessCalibration.learn(sharedPreferences,
-                    extras.getInt("sensor", -1), extras.getInt("percent", -1));
+            getContext()
+                    .enforceCallingOrSelfPermission(
+                            "ru.big.town.anative.permission.BIND_SET_MODES_SERVICE",
+                            "Brightness calibration");
+            return extras == null
+                    ? new Bundle()
+                    : BrightnessCalibration.learn(
+                            sharedPreferences,
+                            extras.getInt("sensor", -1),
+                            extras.getInt("percent", -1));
         }
         if (WallpaperProtocol.METHOD_SET.equals(method)) {
-            getContext().enforceCallingOrSelfPermission(WallpaperProtocol.PERMISSION, "Wallpaper change");
+            getContext()
+                    .enforceCallingOrSelfPermission(
+                            WallpaperProtocol.PERMISSION, "Wallpaper change");
             Bundle result = new Bundle();
-            boolean applied = WallpaperStore.find(sharedPreferences, arg) != null
-                    && sharedPreferences.edit().putString(AppearanceSettings.WALLPAPER, arg).commit();
+            boolean applied =
+                    WallpaperStore.find(sharedPreferences, arg) != null
+                            && sharedPreferences
+                                    .edit()
+                                    .putString(AppearanceSettings.WALLPAPER, arg)
+                                    .commit();
             result.putBoolean(WallpaperProtocol.RESULT_APPLIED, applied);
             return result;
         }
@@ -335,6 +356,12 @@ public class SettingsContentProvider extends ContentProvider {
             String selection,
             String[] selectionArgs,
             String sortOrder) {
+        if (ru.big.town.common.ApplicationStartupSettings.Screen.PASSENGER.path.equals(
+                uri.getLastPathSegment())) {
+            return ru.big.town.restoremode.apps.ApplicationStartupStore.query(
+                    sharedPreferences,
+                    ru.big.town.common.ApplicationStartupSettings.Screen.PASSENGER);
+        }
         if (ru.big.town.common.ApplicationStartupSettings.PATH.equals(uri.getLastPathSegment())) {
             return ru.big.town.restoremode.apps.ApplicationStartupStore.query(sharedPreferences);
         }

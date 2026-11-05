@@ -11,6 +11,7 @@ import android.widget.TextView;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 
 import ru.big.town.common.ApplicationStartupSettings;
+import ru.big.town.common.ApplicationStartupSettings.Screen;
 import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.apps.ApplicationStartupStore;
 import ru.big.town.restoremode.apps.ApplicationStartupStore.Entry;
@@ -28,25 +29,30 @@ final class ApplicationStartupEditor {
     private final Context context;
     private final SharedPreferences preferences;
     private final Runnable refresh;
+    private final Screen screen;
 
-    ApplicationStartupEditor(Context context, SharedPreferences preferences, Runnable refresh) {
+    ApplicationStartupEditor(
+            Context context, SharedPreferences preferences, Runnable refresh, Screen screen) {
         this.context = context;
         this.preferences = preferences;
         this.refresh = refresh;
+        this.screen = screen;
     }
 
     void addRows(List<SettingsList.Row> rows) {
-        rows.add(new SettingsList.Row("startup:section", parent -> section()));
+        rows.add(new SettingsList.Row("startup:section:" + screen.name(), parent -> section()));
     }
 
     private View section() {
         LinearLayout panel = controls();
-        List<Entry> entries = ApplicationStartupStore.load(preferences);
+        List<Entry> entries = ApplicationStartupStore.load(preferences, screen);
         for (int position = 0; position < entries.size(); position++) {
             addElement(panel, entryRow(entries, position));
         }
         addElement(panel, button("＋ Добавить приложение", () -> pickApp(-1)));
-        addElement(panel, button("＋ Добавить сплит", () -> pickSplit(-1)));
+        if (screen == Screen.MAIN) {
+            addElement(panel, button("＋ Добавить сплит", () -> pickSplit(-1)));
+        }
         SettingsDesign.styleTree(panel);
         return panel;
     }
@@ -54,22 +60,27 @@ final class ApplicationStartupEditor {
     private LinearLayout controls() {
         LinearLayout panel = panel();
         TextView title = new TextView(context);
-        title.setText("Автозапуск приложений");
+        title.setText(title());
         title.setTextSize(27);
         addElement(panel, title);
         addElement(panel, enabledChoices());
         TextView description = new TextView(context);
         description.setText(
-                "Запуск по порядку после инициализации Native. Первый — сразу, остальные — с"
-                    + " выбранной паузой. Сплиты настраиваются ниже. При включении этот список"
-                    + " заменяет запуск главного экрана и последнего плеера при старте Native.");
+                screen == Screen.PASSENGER
+                        ? "Запуск приложений по порядку на экране пассажира после инициализации"
+                              + " Native. Этот список заменяет автозапуск пассажирской сетки при"
+                              + " старте Native."
+                        : "Запуск по порядку после инициализации Native. Первый — сразу, остальные"
+                              + " — с выбранной паузой. Сплиты настраиваются ниже. При включении"
+                              + " этот список заменяет запуск главного экрана и последнего плеера"
+                              + " при старте Native.");
         description.setTextSize(17);
         addElement(panel, description);
         addElement(
                 panel,
                 button(
                         "Пауза между запусками: "
-                                + ApplicationStartupStore.delaySeconds(preferences)
+                                + ApplicationStartupStore.delaySeconds(preferences, screen)
                                 + " с",
                         this::pickDelay));
         return panel;
@@ -77,7 +88,7 @@ final class ApplicationStartupEditor {
 
     private View enabledChoices() {
         SettingsChoiceGroup choices = new SettingsChoiceGroup(context, null);
-        choices.setContentDescription("Автозапуск приложений");
+        choices.setContentDescription(title());
         RadioButton disabled = new RadioButton(context);
         disabled.setId(View.generateViewId());
         disabled.setText("Выключен");
@@ -87,16 +98,14 @@ final class ApplicationStartupEditor {
         choices.addView(disabled);
         choices.addView(enabled);
         choices.check(
-                preferences.getBoolean(ApplicationStartupSettings.ENABLED, false)
+                preferences.getBoolean(screen.enabledKey, false)
                         ? enabled.getId()
                         : disabled.getId());
         choices.setOnCheckedChangeListener(
                 (group, checkedId) ->
                         preferences
                                 .edit()
-                                .putBoolean(
-                                        ApplicationStartupSettings.ENABLED,
-                                        checkedId == enabled.getId())
+                                .putBoolean(screen.enabledKey, checkedId == enabled.getId())
                                 .apply());
         return choices;
     }
@@ -125,18 +134,32 @@ final class ApplicationStartupEditor {
         return button((position + 1) + ". " + label, () -> edit(position));
     }
 
+    private String title() {
+        return screen == Screen.PASSENGER
+                ? "Автозапуск на экране пассажира"
+                : "Автозапуск приложений";
+    }
+
     private void edit(int position) {
         new MaterialAlertDialogBuilder(context, R.style.SettingsDialog)
                 .setTitle("Элемент " + (position + 1))
                 .setItems(
-                        new String[] {
-                            "Выбрать приложение",
-                            "Выбрать сплит",
-                            "Переместить выше",
-                            "Переместить ниже",
-                            "Удалить"
-                        },
+                        screen == Screen.PASSENGER
+                                ? new String[] {
+                                    "Выбрать приложение",
+                                    "Переместить выше",
+                                    "Переместить ниже",
+                                    "Удалить"
+                                }
+                                : new String[] {
+                                    "Выбрать приложение",
+                                    "Выбрать сплит",
+                                    "Переместить выше",
+                                    "Переместить ниже",
+                                    "Удалить"
+                                },
                         (dialog, choice) -> {
+                            if (screen == Screen.PASSENGER && choice > 0) choice++;
                             if (choice == 0) pickApp(position);
                             else if (choice == 1) pickSplit(position);
                             else changeOrder(position, choice);
@@ -146,7 +169,7 @@ final class ApplicationStartupEditor {
     }
 
     private void changeOrder(int position, int choice) {
-        List<Entry> entries = ApplicationStartupStore.load(preferences);
+        List<Entry> entries = ApplicationStartupStore.load(preferences, screen);
         if (position >= entries.size()) return;
         if (choice == 4) entries.remove(position);
         else {
@@ -154,7 +177,7 @@ final class ApplicationStartupEditor {
             if (destination < 0 || destination >= entries.size()) return;
             Collections.swap(entries, position, destination);
         }
-        ApplicationStartupStore.save(preferences, entries);
+        ApplicationStartupStore.save(preferences, entries, screen);
         refresh.run();
     }
 
@@ -165,12 +188,9 @@ final class ApplicationStartupEditor {
                 .setTitle("Пауза между запусками")
                 .setSingleChoiceItems(
                         labels,
-                        ApplicationStartupStore.delaySeconds(preferences),
+                        ApplicationStartupStore.delaySeconds(preferences, screen),
                         (dialog, seconds) -> {
-                            preferences
-                                    .edit()
-                                    .putInt(ApplicationStartupSettings.DELAY, seconds)
-                                    .apply();
+                            preferences.edit().putInt(screen.delayKey, seconds).apply();
                             dialog.dismiss();
                             refresh.run();
                         })
@@ -223,10 +243,10 @@ final class ApplicationStartupEditor {
     }
 
     private void saveEntry(int position, Entry entry) {
-        List<Entry> entries = ApplicationStartupStore.load(preferences);
+        List<Entry> entries = ApplicationStartupStore.load(preferences, screen);
         if (position < 0) entries.add(entry);
         else if (position < entries.size()) entries.set(position, entry);
-        ApplicationStartupStore.save(preferences, entries);
+        ApplicationStartupStore.save(preferences, entries, screen);
         refresh.run();
     }
 

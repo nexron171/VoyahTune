@@ -36,6 +36,37 @@ public class ApplicationStartupStoreTest {
     }
 
     @Test
+    public void passengerStartupKeepsIndependentSettingsAndRejectsSplits() {
+        ApplicationStartupSettings.Screen passenger = ApplicationStartupSettings.Screen.PASSENGER;
+        ApplicationStartupStore.save(
+                preferences, Collections.singletonList(new Entry("app:driver", "Driver")));
+        ApplicationStartupStore.save(
+                preferences,
+                Arrays.asList(
+                        new Entry("app:passenger", "Passenger"),
+                        new Entry("split:driver", "Split")),
+                passenger);
+        preferences
+                .edit()
+                .putBoolean(passenger.enabledKey, true)
+                .putInt(passenger.delayKey, 12)
+                .commit();
+        assertEquals("app:driver", ApplicationStartupStore.load(preferences).get(0).target);
+        assertEquals(1, ApplicationStartupStore.load(preferences, passenger).size());
+        try (Cursor cursor = ApplicationStartupStore.query(preferences, passenger)) {
+            assertTrue(cursor.moveToFirst());
+            assertEquals(1, cursor.getInt(cursor.getColumnIndexOrThrow("enabled")));
+            assertEquals(12, cursor.getInt(cursor.getColumnIndexOrThrow("delaySeconds")));
+            assertEquals("app:passenger", cursor.getString(cursor.getColumnIndexOrThrow("action")));
+        }
+        try (Cursor cursor = ApplicationStartupStore.query(preferences)) {
+            assertTrue(cursor.moveToFirst());
+            assertEquals(0, cursor.getInt(cursor.getColumnIndexOrThrow("enabled")));
+            assertEquals(3, cursor.getInt(cursor.getColumnIndexOrThrow("delaySeconds")));
+        }
+    }
+
+    @Test
     public void persistsOrderAndPublishesEnabledDelayAndActions() {
         ApplicationStartupStore.save(
                 preferences,

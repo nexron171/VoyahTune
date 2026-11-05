@@ -2521,7 +2521,8 @@ public class SetModesService extends Service {
                     () -> {
                         mainHandler.removeCallbacks(autoLaunchRunnable);
                         mainHandler.removeCallbacks(mediaAutoLaunchRunnable);
-                    });
+                    },
+                    () -> mainHandler.removeCallbacks(passengerAutoLaunchRunnable));
             Log.i(TAG, "onStartCommand(): startup initialized");
         } else {
             Log.i(TAG, "onStartCommand(): already initialized");
