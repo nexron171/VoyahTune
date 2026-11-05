@@ -6,9 +6,16 @@ import java.util.EnumMap;
 final class ClusterNavigationSources {
     enum Source {
         CARPLAY,
-        YANDEX,
+        YANDEX_NAVIGATOR,
+        YANDEX_MAPS,
+        YANGO_MAPS,
         DGIS
     }
+
+    /** Ordinary sources in arbitration order; CarPlay is handled separately. */
+    private static final Source[] ROUTE_SOURCES = {
+        Source.YANDEX_NAVIGATOR, Source.YANDEX_MAPS, Source.YANGO_MAPS, Source.DGIS
+    };
 
     private static final class Entry {
         final ClusterNavigationLease lease = new ClusterNavigationLease();
@@ -28,13 +35,21 @@ final class ClusterNavigationSources {
     }
 
     static Source sourceForPackage(String packageName) {
-        if ("ru.yandex.yandexnavi".equals(packageName)) {
-            return Source.YANDEX;
+        if (packageName == null) {
+            return null;
         }
-        if ("ru.dublgis.dgismobile".equals(packageName)) {
-            return Source.DGIS;
+        switch (packageName) {
+            case "ru.yandex.yandexnavi":
+                return Source.YANDEX_NAVIGATOR;
+            case "ru.yandex.yandexmaps":
+                return Source.YANDEX_MAPS;
+            case "com.yango.maps.android":
+                return Source.YANGO_MAPS;
+            case "ru.dublgis.dgismobile":
+                return Source.DGIS;
+            default:
+                return null;
         }
-        return null;
     }
 
     void setEnabled(boolean enabled, long now) {
@@ -83,7 +98,7 @@ final class ClusterNavigationSources {
             return carPlay;
         }
         Entry selected = null;
-        for (Source source : new Source[] {Source.YANDEX, Source.DGIS}) {
+        for (Source source : ROUTE_SOURCES) {
             Entry entry = entries.get(source);
             if (entry.lease.current(now) != null
                     && (selected == null || entry.started > selected.started)) {

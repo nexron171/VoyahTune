@@ -1586,7 +1586,9 @@ MediaSession или обработку звонков DiPlay. Их нельзя 
 
 Для обычного запуска на ГУ добавлены одинаковые адаптеры `installNavigationSource`
 в OD `app_client.js` и PI `clusternavi.js`. Загрузчики подключаются только к уже
-работающим основным процессам `ru.yandex.yandexnavi` и `ru.dublgis.dgismobile`,
+работающим основным процессам навигационных приложений, перечисленных в
+[agent_registry.go](../Packaging/new/loader/agent_registry.go): `ru.yandex.yandexnavi`,
+`ru.yandex.yandexmaps`, `com.yango.maps.android` и `ru.dublgis.dgismobile`,
 независимо от полноэкранного режима/DPI. В PI используются существующий агент и
 `injects.json`; ожидание отсутствующего процесса больше не расходует попытки
 подключения, новый процесс получает свой лимит. Формат payload не меняется.
@@ -1598,6 +1600,10 @@ MediaSession или обработку звонков DiPlay. Их нельзя 
   Аннотация сопоставляется с точкой следующего манёвра. Объект обнаруживается через
   конструктор/обычные getter-вызовы, без обхода heap. Слушатель ведения отслеживает
   завершение и свежесть; вне маршрута и при потере совпадения подсказка очищается.
+  Тот же модуль подключается к Яндекс Картам (`ru.yandex.yandexmaps`) и Yango Maps
+  (`com.yango.maps.android`); их версии NavKit локально не сверялись, поэтому
+  отсутствие `GuidanceBinding` или методов слушателя оставляет приложение
+  без подсказок, но не мешает его работе.
 - **2ГИС 7.30.0.633.26 (282010633)**: `IntegrationApplicationStateDispatcher`, тот же
   источник, который использует экспортируемая `DashboardInformationService` API 2.
   Наблюдаются `setNavigationState` и `setActiveNavigationMode`; принимается только
@@ -1612,16 +1618,21 @@ MediaSession или обработку звонков DiPlay. Их нельзя 
 APK навигаторов не перепаковываются. Будущие версии с изменёнными внутренними
 классами потребуют повторной проверки; отсутствие API оставляет штатную работу приложения.
 
-`ClusterNavigationProvider.call("maneuver")` принимает только два точных пакета;
-`getCallingPackage()` проверяется Android по Binder UID. Source нельзя задать в extras.
+`ClusterNavigationProvider.call("maneuver")` принимает только четыре точных пакета:
+`ru.yandex.yandexnavi`, `ru.yandex.yandexmaps`, `com.yango.maps.android` и
+`ru.dublgis.dgismobile`; `getCallingPackage()` проверяется Android по Binder UID.
+Source нельзя задать в extras.
 Native как системный APK объявляет `forceQueryable`, чтобы provider был доступен
 приложениям без изменений их `<queries>`; это не снимает проверок прав других компонентов.
 Назначение атрибута описано в [Android manifest reference](https://developer.android.com/guide/topics/manifest/application-element#forceQueryable).
 
 `ClusterNavigationSources` выбирает свежий CarPlay, иначе последний начавший/возобновивший
-ведение обычный источник. Периодические сообщения не меняют приоритет. Остановка
-одного источника не очищает другой; при пропаже процесса его lease истекает через
-5 секунд и допускается переход только к свежему источнику. Все источники используют
+ведение обычный источник. Обычные источники — Яндекс Навигатор, Яндекс Карты,
+Yango Maps и 2ГИС — хранятся раздельно: очистка одного не сбрасывает подсказку
+другого. Периодические сообщения не меняют приоритет; приоритет получает источник,
+который начал ведение последним. Остановка одного источника не очищает другой;
+при пропаже процесса его lease истекает через 5 секунд и допускается переход
+только к свежему источнику. Все источники используют
 один `ClusterNavigationController` на процесс Native и один OEM writer.
 Локальные проверки адаптеров — `Packaging/new/tests/navigation-source-lifecycle.test.js`;
 декомпиляция и mocks не заменяют испытание на ГУ/приборке.
@@ -1673,8 +1684,9 @@ Bridge отправляет snapshot раз в секунду сообщение
 
 `ClusterNavigationController`:
 
-- явная служба `com.qinggan.cluster/.service.InstrumentClusterService`, action
-  `com.qinggan.cluster.InstrumentClusterService`;
+- служба `com.qinggan.cluster` с action `com.qinggan.cluster.InstrumentClusterService`;
+  поиск идёт по action через `PackageManager`, явный класс
+  `.service.InstrumentClusterService` используется только если intent-filter не разрешился;
 - проверка системного пакета и descriptor
   `com.qinggan.cluster.IInstrumentClusterManagerService`;
 - OEM ClassLoader через createPackageContext(INCLUDE_CODE | IGNORE_SECURITY),
@@ -1689,10 +1701,28 @@ Bridge отправляет snapshot раз в секунду сообщение
   controller живёт в процессе Native, после очистки последней подсказки отсоединяется
   от OEM службы. Закрытие CarPlay освобождает его источник, сохраняя обычную навигацию.
 
+Диагностика в logcat с тегом `ClusterNavigation`: строка `platform=<Build.PRODUCT>
+presentation=<ro.qg.presentation>` при старте, выбранный способ bind, `Cluster returned
+a null binder`, `Cluster bind unavailable`, `Cluster write failed` с текстом исключения,
+`Maneuver sent icon=N` / `MAN_STOP sent` и изменение состояния связи с IPK
+(`Cluster link with the IPK is up` / `No IPK link reported`), которое берётся из
+`getClusterConnect()` установленной службы.
+
+Декомпиляция `com.qinggan.cluster` 1.2.0 (7) подтверждает общий путь для H97C/H97D:
+`Util.Voyah` задаёт проекты `f6802h` (H97C) и `f6808` (H97D), `InstrumentClusterFactory`
+возвращает для них `VoyahInstrumentCluster`, descriptor и transaction `updateNaviInfo`
+совпадают с H97X/H97Y. Тот же код публикует binder службы только при
+`ro.qg.presentation == "VirtualDisplay"`; при другом значении `onBind` возвращает `null`,
+поэтому отсутствие строки `Binding cluster service` вместе с `Cluster returned a null
+binder` указывает на настройку прошивки, а не на разбор `NaviInfo`. Распознавание H97D
+добавлено в `VehiclePlatform` по `f6808` из `Build.PRODUCT` или
+`ro.build.product_3rdparty`; для H97D проверок `isH97XY` нет.
+
 Нужны оба APK с этим контрактом. На машине ещё требуется подтвердить права вызова,
 видимость/значения OEM-иконок и расстояний. После force-stop Native MAN_STOP не
 гарантирован. Поле приборки общее со штатной навигацией; арбитраж с OEM-навигаторами
 не реализован. Это стрелка/расстояние/дорога, не полный видеопоток карты на приборку.
+Проверка на H97C/H97D не выполнялась: подтверждать нужно по логам выше.
 
 ## 9. Аудио, видео, defaults и отключённые OEM-функции
 

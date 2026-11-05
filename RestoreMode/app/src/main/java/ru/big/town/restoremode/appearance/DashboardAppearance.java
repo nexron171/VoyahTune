@@ -15,6 +15,7 @@ import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.widgets.brightness.BrightnessWidgetView;
 import ru.big.town.restoremode.widgets.energy.VehicleWidgetView;
 import ru.big.town.restoremode.widgets.headlights.HeadlightWidgetView;
+import ru.big.town.restoremode.widgets.media.MediaWidgetView;
 import ru.big.town.restoremode.widgets.radio.RadioWidgetView;
 
 import java.util.concurrent.ExecutorService;
@@ -192,6 +193,9 @@ public final class DashboardAppearance implements AutoCloseable {
         }
         if (tile instanceof BrightnessWidgetView) {
             ((BrightnessWidgetView) tile).setSurfaceAlpha(settings.surfaceAlpha());
+        }
+        if (tile instanceof MediaWidgetView) {
+            ((MediaWidgetView) tile).setTileFrame(settings.borderDp, settings.cornerRadiusDp);
         }
         int left = tile.getPaddingLeft();
         int top = tile.getPaddingTop();
