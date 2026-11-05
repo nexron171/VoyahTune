@@ -132,7 +132,7 @@ public class TileOrderStore {
         } else {
             List<SplitStore.Preset> splits = SplitStore.load(content);
             for (SplitStore.Preset preset : splits) {
-                if (preset.ready()) {
+                if (preset.ready() && preset.showOnHome) {
                     tiles.add(new Tile(Tile.TYPE_SPLIT, preset.id));
                 }
             }
@@ -191,7 +191,7 @@ public class TileOrderStore {
             }
             List<SplitStore.Preset> splits = SplitStore.load(content);
             for (SplitStore.Preset preset : splits) {
-                if (preset.id.equals(tile.id) && preset.ready()) {
+                if (preset.id.equals(tile.id) && preset.ready() && preset.showOnHome) {
                     return true;
                 }
             }
@@ -283,7 +283,7 @@ public class TileOrderStore {
         if (!passenger) {
             List<SplitStore.Preset> splits = SplitStore.load(content);
             for (SplitStore.Preset preset : splits) {
-                if (preset.ready()) {
+                if (preset.ready() && preset.showOnHome) {
                     boolean found = false;
                     for (Tile tile : tiles) {
                         if (Tile.TYPE_SPLIT.equals(tile.type) && tile.id.equals(preset.id)) {

@@ -110,6 +110,14 @@
         android:layout_height="wrap_content"
         android:orientation="vertical"
         android:id="@+id/settingsSplitRatios" />
+    <Switch android:id="@+id/splitShowOnHomeSwitch"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:minHeight="48dp"
+        android:text="Ярлык на главном экране"
+        android:textColor="@color/settings_text"
+        android:textSize="18sp" />
     <Switch android:id="@+id/splitResizableSwitch"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"

@@ -517,6 +517,17 @@ public final class AppsSettingsFragment extends SettingsSectionFragment {
                     }
                 });
 
+        Switch showOnHome = row.findViewById(R.id.splitShowOnHomeSwitch);
+        showOnHome.setChecked(preset.showOnHome);
+        showOnHome.setOnCheckedChangeListener(
+                (button, checked) -> {
+                    List<SplitStore.Preset> updatedPresets = SplitStore.load(preferences);
+                    if (presetIndex < updatedPresets.size()) {
+                        updatedPresets.get(presetIndex).showOnHome = checked;
+                        saveSplitPresets(updatedPresets);
+                    }
+                });
+
         Switch resizable = row.findViewById(R.id.splitResizableSwitch);
         if (resizable != null) {
             resizable.setChecked(preset.resizable);

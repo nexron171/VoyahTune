@@ -29,6 +29,8 @@ public class SplitStore {
         /** Разрешено тянуть делитель и менять пропорцию прямо в сплите. По умолчанию выключено. */
         public boolean resizable = false;
 
+        public boolean showOnHome = false;
+
         /** Доля левого окна 0..1, выставленная рукой. 0 = не задана, берём фиксированную ratio. */
         public float split = 0f;
 
@@ -75,6 +77,7 @@ public class SplitStore {
                 ps.r = o.optString("r", "");
                 ps.rl = o.optString("rl", "");
                 ps.ratio = o.optInt("ratio", 1);
+                ps.showOnHome = o.optBoolean("showOnHome", true);
                 ps.resizable = o.optBoolean("resizable", false);
                 ps.split = (float) o.optDouble("split", 0d);
                 out.add(ps);
@@ -100,6 +103,7 @@ public class SplitStore {
                 o.put("r", ps.r);
                 o.put("rl", ps.rl);
                 o.put("ratio", ps.ratio);
+                o.put("showOnHome", ps.showOnHome);
                 o.put("resizable", ps.resizable);
                 o.put("split", ps.split);
                 a.put(o);
