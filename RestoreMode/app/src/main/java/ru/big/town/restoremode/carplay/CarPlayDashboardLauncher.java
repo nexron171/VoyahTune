@@ -1,13 +1,14 @@
 package ru.big.town.restoremode.carplay;
 
 import android.content.Context;
+import android.content.Intent;
 import android.util.Log;
 
-import ru.big.town.common.DashboardTarget;
-import ru.big.town.restoremode.MainActivity;
-import ru.big.town.restoremode.passenger.PassengerDashboardActivity;
+import com.shilapi.xcertplay.DiPlayActivity;
 
-/** Return to the dashboard task without retiring the independent CarPlay task/session. */
+import ru.big.town.common.DashboardTarget;
+
+/** Resolve the physical host and open DiPlay home without retiring the projection session. */
 public final class CarPlayDashboardLauncher {
     private static volatile int dashboardDisplayId;
     private static volatile HostDisplay hostDisplay;
@@ -55,18 +56,20 @@ public final class CarPlayDashboardLauncher {
                 : dashboardDisplayId;
     }
 
-    static Class<? extends android.app.Activity> dashboardActivityClass(int displayId) {
-        return displayId == 1 ? PassengerDashboardActivity.class : MainActivity.class;
-    }
-
     public static boolean open(Context context, int carPlayDisplayId) {
         int displayId = targetDisplayId(carPlayDisplayId);
         try {
             context.startActivity(
-                    DashboardTarget.intent(displayId), DashboardTarget.options(displayId));
+                    new Intent(context, DiPlayActivity.class)
+                            .putExtra("page", "home")
+                            .addFlags(
+                                    Intent.FLAG_ACTIVITY_NEW_TASK
+                                            | Intent.FLAG_ACTIVITY_CLEAR_TOP
+                                            | Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                    DashboardTarget.options(displayId));
             return true;
         } catch (RuntimeException unavailable) {
-            Log.w("VoyahCarPlay", "Cannot open Dashboard display=" + displayId, unavailable);
+            Log.w("VoyahCarPlay", "Cannot open DiPlay home display=" + displayId, unavailable);
             return false;
         }
     }

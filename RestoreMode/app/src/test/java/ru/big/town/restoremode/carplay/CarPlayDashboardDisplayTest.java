@@ -1,10 +1,24 @@
 package ru.big.town.restoremode.carplay;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+import static org.robolectric.Shadows.shadowOf;
+
+import android.app.ActivityOptions;
+import android.app.Application;
+import android.content.Context;
+import android.content.Intent;
+import android.os.Bundle;
 
 import org.junit.After;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.robolectric.RobolectricTestRunner;
+import org.robolectric.RuntimeEnvironment;
+import org.robolectric.annotation.Config;
 
+@RunWith(RobolectricTestRunner.class)
+@Config(sdk = 30, application = Application.class, manifest = Config.NONE)
 public class CarPlayDashboardDisplayTest {
     @After
     public void resetDisplay() {
@@ -13,13 +27,29 @@ public class CarPlayDashboardDisplayTest {
     }
 
     @Test
-    public void passengerDisplayReturnsToTheDedicatedActivity() {
-        assertEquals(
-                "ru.big.town.restoremode.passenger.PassengerDashboardActivity",
-                CarPlayDashboardLauncher.dashboardActivityClass(1).getName());
-        assertEquals(
-                "ru.big.town.restoremode.MainActivity",
-                CarPlayDashboardLauncher.dashboardActivityClass(0).getName());
+    public void carIconOpensDiPlayHomeOnThePhysicalHostDisplay() throws Exception {
+        Context context = RuntimeEnvironment.getApplication();
+        for (int physicalDisplay = 0; physicalDisplay <= 1; physicalDisplay++) {
+            CarPlayDashboardLauncher.rememberHostDisplay(42, physicalDisplay);
+            for (int sourceDisplay : new int[] {physicalDisplay, 42}) {
+                assertTrue(CarPlayDashboardLauncher.open(context, sourceDisplay));
+                org.robolectric.shadows.ShadowActivity.IntentForResult started =
+                        shadowOf(RuntimeEnvironment.getApplication())
+                                .getNextStartedActivityForResult();
+                Intent intent = started.intent;
+                assertEquals(
+                        "com.shilapi.xcertplay.DiPlayActivity",
+                        intent.getComponent().getClassName());
+                assertEquals("home", intent.getStringExtra("page"));
+                assertTrue((intent.getFlags() & Intent.FLAG_ACTIVITY_NEW_TASK) != 0);
+                ActivityOptions options =
+                        (ActivityOptions)
+                                ActivityOptions.class
+                                        .getDeclaredMethod("fromBundle", Bundle.class)
+                                        .invoke(null, started.options);
+                assertEquals(physicalDisplay, options.getLaunchDisplayId());
+            }
+        }
     }
 
     @Test
