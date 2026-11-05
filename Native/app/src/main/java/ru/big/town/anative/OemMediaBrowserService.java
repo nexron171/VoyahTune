@@ -21,8 +21,6 @@ import java.util.Collections;
 import java.util.Objects;
 import java.util.Set;
 
-import ru.big.town.common.VehiclePlatform;
-
 /** Read-only session mirror for the OD media SDK; transport commands go to the real player. */
 public final class OemMediaBrowserService extends MediaBrowserService {
     private static final String TAG = "VoyahOemMedia";
@@ -136,9 +134,15 @@ public final class OemMediaBrowserService extends MediaBrowserService {
         handler.post(refresh);
     }
 
+    // Compatibility is decided by the oem-media hook when it rewires the KW_MUSIC slot.
+    static boolean acceptsClient(String clientPackageName) {
+        return clientPackageName != null && CLIENTS.contains(clientPackageName);
+    }
+
     @Override
     public BrowserRoot onGetRoot(String clientPackageName, int clientUid, Bundle rootHints) {
-        if (!VehiclePlatform.current().isH97XY() || !CLIENTS.contains(clientPackageName)) {
+        if (!acceptsClient(clientPackageName)) {
+            Log.w(TAG, "Unsupported media browser client: " + clientPackageName);
             return null;
         }
         return new BrowserRoot("now-playing", null);
