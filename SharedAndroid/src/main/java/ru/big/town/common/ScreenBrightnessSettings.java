@@ -2,6 +2,7 @@ package ru.big.town.common;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -81,16 +82,24 @@ public final class ScreenBrightnessSettings {
     }
 
     public static Rule matchingRule(List<Rule> rules, int level) {
-        if (level < 0 || level > 7) return null;
+        if (level < 0 || level > 7) {
+            return null;
+        }
         for (Rule rule : rules) {
-            if (rule.matches(level)) return rule;
+            if (rule.matches(level)) {
+                return rule;
+            }
         }
         return null;
     }
 
     public static List<Rule> decode(String encoded) {
-        if (encoded == null) throw new IllegalArgumentException("Missing brightness rules");
-        if (encoded.isEmpty()) return Collections.emptyList();
+        if (encoded == null) {
+            throw new IllegalArgumentException("Missing brightness rules");
+        }
+        if (encoded.isEmpty()) {
+            return Collections.emptyList();
+        }
         List<Rule> rules = new ArrayList<>();
         Set<String> identifiers = new HashSet<>();
         for (String line : encoded.split("\n", -1)) {
@@ -115,7 +124,9 @@ public final class ScreenBrightnessSettings {
     public static String encode(List<Rule> rules) {
         StringBuilder result = new StringBuilder();
         for (Rule rule : rules) {
-            if (result.length() > 0) result.append('\n');
+            if (result.length() > 0) {
+                result.append('\n');
+            }
             result.append(rule.id)
                     .append(',')
                     .append(rule.operator)
@@ -123,7 +134,9 @@ public final class ScreenBrightnessSettings {
                     .append(rule.threshold)
                     .append(',')
                     .append(rule.percent);
-            if (rule.night) result.append(",night");
+            if (rule.night) {
+                result.append(",night");
+            }
         }
         String encoded = result.toString();
         decode(encoded);
@@ -133,9 +146,13 @@ public final class ScreenBrightnessSettings {
     public static List<Rule> levels(String encoded) {
         List<Rule> legacy = decode(encoded);
         List<Rule> result = new ArrayList<>();
+        int minimumPercent = 1;
         for (int level = 0; level <= 7; level++) {
             Rule matched = matchingRule(legacy, level);
-            if (matched != null) result.add(new Rule("level" + level, "eq", level, matched.percent));
+            if (matched != null) {
+                minimumPercent = Math.max(minimumPercent, matched.percent);
+                result.add(new Rule("level" + level, "eq", level, minimumPercent));
+            }
         }
         return Collections.unmodifiableList(result);
     }
@@ -145,7 +162,9 @@ public final class ScreenBrightnessSettings {
         List<Rule> rules = decode(encoded);
         for (int level = 0; level <= 7; level++) {
             Rule matched = matchingRule(rules, level);
-            if (matched != null && matched.night) threshold = level;
+            if (matched != null && matched.night) {
+                threshold = level;
+            }
         }
         return threshold < 0 ? DEFAULT_NIGHT_THRESHOLD : threshold;
     }
@@ -154,16 +173,26 @@ public final class ScreenBrightnessSettings {
         if (sensor < 0 || sensor > 7 || percent < 1 || percent > 100) {
             throw new IllegalArgumentException("Invalid brightness calibration");
         }
-        List<Rule> result = new ArrayList<>(levels(encoded));
-        result.removeIf(rule -> rule.threshold == sensor);
+        List<Rule> result = new ArrayList<>();
+        for (Rule rule : levels(encoded)) {
+            if (rule.threshold == sensor) {
+                continue;
+            }
+            int adjustedPercent = rule.threshold < sensor
+                    ? Math.min(rule.percent, percent)
+                    : Math.max(rule.percent, percent);
+            result.add(new Rule(rule.id, rule.operator, rule.threshold, adjustedPercent));
+        }
         result.add(new Rule("level" + sensor, "eq", sensor, percent));
-        result.sort(java.util.Comparator.comparingInt(rule -> rule.threshold));
+        result.sort(Comparator.comparingInt(rule -> rule.threshold));
         return encode(result);
     }
 
     private static boolean validOperator(String operator) {
         for (String candidate : OPERATORS) {
-            if (candidate.equals(operator)) return true;
+            if (candidate.equals(operator)) {
+                return true;
+            }
         }
         return false;
     }
