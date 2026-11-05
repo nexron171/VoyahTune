@@ -34,7 +34,6 @@ public enum MainSettingsCategory {
             layout(R.layout.settings_main_clock_trip),
             layout(R.layout.settings_main_energy_charge_consumption),
             layout(R.layout.settings_main_energy_trip_tire_pressure),
-            layout(R.layout.settings_main_cabin_temperature),
             layout(R.layout.settings_main_odometer),
             layout(R.layout.settings_main_cpu_ram),
             layout(R.layout.settings_main_media_radio)),

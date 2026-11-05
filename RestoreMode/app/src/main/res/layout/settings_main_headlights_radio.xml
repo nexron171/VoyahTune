@@ -12,5 +12,4 @@
     <include layout="@layout/settings_main_headlights" />
     <include layout="@layout/settings_main_radio" />
     <include layout="@layout/settings_main_brightness" />
-    <include layout="@layout/settings_main_cabin_temperature" />
 </ru.big.town.restoremode.settings.ui.layout.SettingsGrid>
