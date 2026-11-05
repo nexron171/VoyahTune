@@ -1880,7 +1880,10 @@ public class DashboardActivity extends AppCompatActivity {
                         "showTaskManagerTile", dashboardProfile.defaultVisible(true));
             case "passengerDashboardTile":
                 return sharedPreferences.getBoolean("showPassengerDashboardTile", false);
-            // Виджеты без тумблера («Настройки», настройки Android) видно всегда.
+            case "cardAndroidSettings":
+                return sharedPreferences.getBoolean(
+                        "showAndroidSettings", dashboardProfile.defaultVisible(true));
+            // The VoyahTune settings entry always remains accessible.
             default:
                 return true;
         }

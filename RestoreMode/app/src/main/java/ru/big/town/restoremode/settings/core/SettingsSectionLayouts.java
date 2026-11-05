@@ -33,6 +33,7 @@ public final class SettingsSectionLayouts {
         layout(R.layout.settings_main_system_heading),
         layout(R.layout.settings_main_cpu_ram),
         layout(R.layout.settings_main_memory_task_manager),
+        layout(R.layout.settings_main_android_settings),
         layout(R.layout.settings_main_media),
         layout(R.layout.settings_main_app_widgets_heading),
         dynamic(DynamicContent.APP_WIDGETS),

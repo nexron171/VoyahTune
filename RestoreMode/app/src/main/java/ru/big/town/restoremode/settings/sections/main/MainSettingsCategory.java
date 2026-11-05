@@ -26,6 +26,7 @@ public enum MainSettingsCategory {
             layout(R.layout.settings_main_forced_ev_suspension_maintenance),
             layout(R.layout.settings_main_vehicle_controls),
             layout(R.layout.settings_main_memory_task_manager),
+            layout(R.layout.settings_main_android_settings),
             layout(R.layout.settings_main_brightness_row)),
     INFORMATION(
             "Информационные виджеты",

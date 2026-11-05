@@ -1297,6 +1297,7 @@ public class MainSettingsFragment extends SettingsSectionFragment {
         bindTripHistory();
         bindMainGrid();
         bindShowSwitch(R.id.switchShowTaskManagerTile, "showTaskManagerTile", true);
+        bindShowSwitch(R.id.switchShowAndroidSettings, "showAndroidSettings", true);
         bindClick(R.id.buttonAddLinkShortcut, view -> editLinkShortcut(null));
         bindClick(R.id.buttonAddDialWidget, view -> addDialWidget());
         bindClick(R.id.buttonAddAppShortcut, this::onAddAppShortcut);
