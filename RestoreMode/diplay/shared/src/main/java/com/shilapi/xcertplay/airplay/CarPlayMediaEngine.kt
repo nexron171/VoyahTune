@@ -172,12 +172,13 @@ class CarPlayMediaEngine(
 
     override fun onScreen(session: AirPlaySession, type: Int, stream: Map<String, Any?>): Int? {
         val key = outputKey(session, stream) ?: return null
+        val peer = session.remoteAddress ?: return null
         val streamKey = StreamKey(session, type)
         Log.i(
             TAG,
             "airplay screen key connectionID=${unsignedPlistDecimal(stream["streamConnectionID"])}",
         )
-        val screen = ScreenStream(key, session::logDebug)
+        val screen = ScreenStream(key, peer, session::logDebug)
         sink.setVideoDiagnosticHandler(type) {
             if (it == "first frame rendered") session.videoFrameRendered()
             session.logDebug("Video: $it")
@@ -217,7 +218,7 @@ class CarPlayMediaEngine(
                         }
                         session.close()
                     }
-                },
+                }
             )
         streams.put(streamKey, screen)?.close()
         sink.onScreenStreamActive(type, true)
@@ -266,17 +267,17 @@ class CarPlayMediaEngine(
                     "microphone=${if (microphone != null) "on" else "off"} keys=${stream.keys.sorted().joinToString(",")}" +
                     // An app call (WeChat, #718) carried vocoderInfo; the report showed only its
                     // name.
-                    (stream["vocoderInfo"]?.let { " vocoderInfo=${it.toString().take(200)}" }
-                        ?: ""),
+                    (stream["vocoderInfo"]?.let { " vocoderInfo=${it.toString().take(200)}" } ?: "")
             )
         }
 
         val capture = audioCaptureDirectory?.let { AudioPacketCapture(it, type) }
         if (capture != null) audioCaptures[streamKey] = capture
         val clockProbe = RtpClockProbe()
-        val microphoneStart = microphone?.let { config ->
-            MicrophoneStart { sink.onMicrophoneStarted(streamId, config) }
-        }
+        val microphoneStart =
+            microphone?.let { config ->
+                MicrophoneStart { sink.onMicrophoneStarted(streamId, config) }
+            }
         val audio =
             AudioStream(
                 key,
@@ -306,7 +307,7 @@ class CarPlayMediaEngine(
                             session.logDebug(
                                 "Audio: rtp clock type=$type audioType=$audioType " +
                                     "audioFormat=0x${java.lang.Long.toHexString((stream["audioFormat"] as? Number)?.toLong() ?: 0L)} " +
-                                    "measuredHz=$hz microphoneClockHz=${microphone?.rtpClockRate ?: "none"}",
+                                    "measuredHz=$hz microphoneClockHz=${microphone?.rtpClockRate ?: "none"}"
                             )
                         }
                         sink.onAudioRtp(streamId, format, rtp, sample)
@@ -320,7 +321,7 @@ class CarPlayMediaEngine(
                     ) {
                         capture?.record(wire, rtp, sample, error)
                     }
-                },
+                }
             )
         streams[streamKey] = audio
         audioMeta[streamKey] = meta
@@ -339,7 +340,7 @@ class CarPlayMediaEngine(
                 if (started) {
                     session.logDebug(
                         "Audio: microphone started without downlink audio type=$type audioType=$audioType " +
-                            "afterMs=${MicrophoneStart.SILENT_START_MILLIS}",
+                            "afterMs=${MicrophoneStart.SILENT_START_MILLIS}"
                     )
                 }
             }
@@ -509,9 +510,10 @@ class CarPlayMediaEngine(
         if (uuid != IAP_DATASTREAM_UUID) return null
         val shared = session.sharedSecret ?: return null
         val seed = unsignedPlistDecimal(stream["seed"]) ?: return null
+        val peer = session.remoteAddress ?: return null
         session.logDebug(
             "AirPlay iAP SETUP uuid=$uuid seed=$seed " +
-                "streamConnectionID=${unsignedPlistDecimal(stream["streamConnectionID"]) ?: "none"}",
+                "streamConnectionID=${unsignedPlistDecimal(stream["streamConnectionID"]) ?: "none"}"
         )
         val key =
             AirPlayCrypto.hkdfSha512(
@@ -523,6 +525,7 @@ class CarPlayMediaEngine(
         val tunnel =
             IapTunnel(
                 readKey = key,
+                expectedPeer = peer,
                 bindAddress =
                     session.localAddress
                         ?: when (session.remoteAddress) {
@@ -539,7 +542,7 @@ class CarPlayMediaEngine(
                     val boundPort = bridge.listen()
                     session.logDebug(
                         "AirPlay iAP tunnel listening address=" +
-                            "${session.localAddress?.hostAddress ?: "wildcard"} port=$boundPort",
+                            "${session.localAddress?.hostAddress ?: "wildcard"} port=$boundPort"
                     )
                     replacePendingIapTunnel(session, PendingIapTunnel(bridge, handler))
                     boundPort
@@ -555,7 +558,7 @@ class CarPlayMediaEngine(
                                 )
                                 session.close()
                             }
-                        },
+                        }
                     )
                 }
             } catch (error: Throwable) {
@@ -596,6 +599,7 @@ class CarPlayMediaEngine(
         if (uuid != VideoInCar.SETTINGS_CHANNEL_UUID) return null
         val shared = session.sharedSecret ?: return null
         val seed = unsignedPlistDecimal(stream["seed"]) ?: return null
+        val peer = session.remoteAddress ?: return null
         fun key(label: String) =
             AirPlayCrypto.hkdfSha512(
                 shared,
@@ -604,7 +608,7 @@ class CarPlayMediaEngine(
                 32,
             )
         val channel =
-            VideoSettingsChannel(key(DATASTREAM_OUTPUT_KEY), key(DATASTREAM_INPUT_KEY)) {
+            VideoSettingsChannel(key(DATASTREAM_OUTPUT_KEY), key(DATASTREAM_INPUT_KEY), peer) {
                 session.logDebug(it)
             }
         val port = channel.listen(session.localAddress ?: InetAddress.getByName("::"))
@@ -651,19 +655,13 @@ class CarPlayMediaEngine(
                 // 20 s, in a call whose far end the driver could not understand (#473).
                 val clockRate = meta.format.rtpClockRate
                 val entry =
-                    linkedMapOf<String, Any?>(
-                        "type" to meta.type,
-                        "sampleRate" to clockRate,
-                    )
+                    linkedMapOf<String, Any?>("type" to meta.type, "sampleRate" to clockRate)
                 val firstSample = meta.firstSample
                 val originNs = meta.originNs
                 if (firstSample != null && originNs != null) {
                     val nowNs = System.nanoTime()
                     val elapsedSec =
-                        Math.max(
-                            0.0,
-                            (nowNs - originNs) / 1e9 - meta.playoutLatencyMs / 1000.0,
-                        )
+                        Math.max(0.0, (nowNs - originNs) / 1e9 - meta.playoutLatencyMs / 1000.0)
                     val firstUnsigned = firstSample.toLong() and 0xffff_ffffL
                     val sampleTime =
                         (firstUnsigned + Math.round(elapsedSec * clockRate)) and 0xffff_ffffL
@@ -678,7 +676,7 @@ class CarPlayMediaEngine(
                 entry
             } +
                 listOfNotNull(
-                    buffered?.let { it.stream.feedback(session.syncedNtp(), it.connectionId) },
+                    buffered?.let { it.stream.feedback(session.syncedNtp(), it.connectionId) }
                 )
         return linkedMapOf("streams" to streams)
     }
@@ -824,7 +822,7 @@ class CarPlayMediaEngine(
             } else if (framesPerPacket > 0) {
                 Math.round(framesPerPacket * 1000.0 / format.sampleRate).toInt().coerceIn(5, 60)
             } else {
-                20
+                MicrophoneConfig.pcmFrameMillis(format.sampleRate, format.channels)
             }
         val opusBitrate =
             when {

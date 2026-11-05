@@ -34,11 +34,11 @@ class CarPlayVpnConsentTest {
     private lateinit var activity: CarPlayHostActivity
     private var launches = 0
 
-    @Before fun setUp() {
+    @Before
+    fun setUp() {
         VpnConsentTestShadow.failure = null
-        VpnConsentTestShadow.consent = Intent().setClassName(
-            "com.android.vpndialogs", "com.android.vpndialogs.ConfirmDialog",
-        )
+        VpnConsentTestShadow.consent =
+            Intent().setClassName("com.android.vpndialogs", "com.android.vpndialogs.ConfirmDialog")
         CarPlayBackgroundSession.clear()
         activity = Robolectric.buildActivity(CarPlayHostActivity::class.java).get()
         ReflectionHelpers.setField(activity, "stageStatusView", TextView(activity))
@@ -46,15 +46,19 @@ class CarPlayVpnConsentTest {
         replaceLauncher { launches += 1 }
     }
 
-    @After fun tearDown() {
+    @After
+    fun tearDown() {
         ReflectionHelpers.getField<AtomicBoolean>(activity, "shuttingDown").set(true)
-        ReflectionHelpers.getField<Handler>(activity, "mainHandler").removeCallbacksAndMessages(null)
+        ReflectionHelpers.getField<Handler>(activity, "mainHandler")
+            .removeCallbacksAndMessages(null)
         ReflectionHelpers.getField<ExecutorService>(activity, "teardownExecutor").shutdownNow()
-        ReflectionHelpers.getField<ExecutorService>(activity, "airPlayCommandExecutor").shutdownNow()
+        ReflectionHelpers.getField<ExecutorService>(activity, "airPlayCommandExecutor")
+            .shutdownNow()
         CarPlayBackgroundSession.clear()
     }
 
-    @Test fun missingConsentDialogDoesNotCrashOrLeaveAuthorizationPending() {
+    @Test
+    fun missingConsentDialogDoesNotCrashOrLeaveAuthorizationPending() {
         ReflectionHelpers.setField(activity, "vpnReady", true)
         replaceLauncher { throw ActivityNotFoundException("Missing OEM VPN dialog") }
 
@@ -62,10 +66,13 @@ class CarPlayVpnConsentTest {
 
         assertUnavailable()
         assertTrue(log().contains("failureClass=ActivityNotFoundException"))
-        assertTrue(log().contains("component=com.android.vpndialogs/com.android.vpndialogs.ConfirmDialog"))
+        assertTrue(
+            log().contains("component=com.android.vpndialogs/com.android.vpndialogs.ConfirmDialog")
+        )
     }
 
-    @Test fun deniedConsentLaunchDoesNotCrashOrUnlockUsb() {
+    @Test
+    fun deniedConsentLaunchDoesNotCrashOrUnlockUsb() {
         replaceLauncher { throw SecurityException("OEM blocked VPN activity") }
         invoke("requestVpnConsent")
         assertUnavailable()
@@ -73,7 +80,8 @@ class CarPlayVpnConsentTest {
         assertTrue(log().contains("failureClass=SecurityException"))
     }
 
-    @Test fun deniedPrepareDoesNotCrashOrLeaveStaleAuthorization() {
+    @Test
+    fun deniedPrepareDoesNotCrashOrLeaveStaleAuthorization() {
         ReflectionHelpers.setField(activity, "vpnReady", true)
         VpnConsentTestShadow.failure = SecurityException("OEM blocked VPN preparation")
         invoke("requestVpnConsent")
@@ -82,7 +90,8 @@ class CarPlayVpnConsentTest {
         assertTrue(log().contains("operation=prepare"))
     }
 
-    @Test fun grantedAuthorizationDoesNotOpenAConsentActivity() {
+    @Test
+    fun grantedAuthorizationDoesNotOpenAConsentActivity() {
         VpnConsentTestShadow.consent = null
         invoke("requestVpnConsent")
         assertTrue(field("vpnReady"))
@@ -90,14 +99,16 @@ class CarPlayVpnConsentTest {
         assertEquals(0, launches)
     }
 
-    @Test fun pendingAuthorizationDoesNotLaunchTwice() {
+    @Test
+    fun pendingAuthorizationDoesNotLaunchTwice() {
         repeat(2) { invoke("requestVpnConsent") }
         assertFalse(field("vpnReady"))
         assertTrue(field("awaitingVpnConsent"))
         assertEquals(1, launches)
     }
 
-    @Test fun failedLaunchCanBeRetried() {
+    @Test
+    fun failedLaunchCanBeRetried() {
         replaceLauncher { throw ActivityNotFoundException("Missing OEM VPN dialog") }
         invoke("requestVpnConsent")
         replaceLauncher { launches += 1 }
@@ -107,42 +118,63 @@ class CarPlayVpnConsentTest {
         assertEquals(1, launches)
     }
 
-    @Test fun lateSuccessfulResultAfterFailedLaunchDoesNotUnlockUsb() {
+    @Test
+    fun lateSuccessfulResultAfterFailedLaunchDoesNotUnlockUsb() {
         replaceLauncher { throw ActivityNotFoundException("Missing OEM VPN dialog") }
         invoke("requestVpnConsent")
-        ReflectionHelpers.callInstanceMethod<Unit>(activity, "onVpnConsentResult",
-            ReflectionHelpers.ClassParameter.from(Int::class.javaPrimitiveType, Activity.RESULT_OK))
+        ReflectionHelpers.callInstanceMethod<Unit>(
+            activity,
+            "onVpnConsentResult",
+            ReflectionHelpers.ClassParameter.from(Int::class.javaPrimitiveType, Activity.RESULT_OK),
+        )
         assertFalse(field("vpnReady"))
         assertFalse(field("awaitingVpnConsent"))
         assertNull(ReflectionHelpers.getField<Any?>(activity, "controller"))
     }
 
-    @Test fun resultOfPendingConsentCompletesOrDeniesAuthorization() {
+    @Test
+    fun resultOfPendingConsentCompletesOrDeniesAuthorization() {
         invoke("requestVpnConsent")
-        ReflectionHelpers.callInstanceMethod<Unit>(activity, "onVpnConsentResult",
-            ReflectionHelpers.ClassParameter.from(Int::class.javaPrimitiveType, Activity.RESULT_OK))
+        ReflectionHelpers.callInstanceMethod<Unit>(
+            activity,
+            "onVpnConsentResult",
+            ReflectionHelpers.ClassParameter.from(Int::class.javaPrimitiveType, Activity.RESULT_OK),
+        )
         assertTrue(field("vpnReady"))
         assertFalse(field("awaitingVpnConsent"))
         invoke("requestVpnConsent")
-        ReflectionHelpers.callInstanceMethod<Unit>(activity, "onVpnConsentResult",
-            ReflectionHelpers.ClassParameter.from(Int::class.javaPrimitiveType, Activity.RESULT_CANCELED))
+        ReflectionHelpers.callInstanceMethod<Unit>(
+            activity,
+            "onVpnConsentResult",
+            ReflectionHelpers.ClassParameter.from(
+                Int::class.javaPrimitiveType,
+                Activity.RESULT_CANCELED,
+            ),
+        )
         assertFalse(field("vpnReady"))
         assertFalse(field("awaitingVpnConsent"))
     }
 
     private fun replaceLauncher(launch: (Intent) -> Unit) {
-        ReflectionHelpers.setField(activity, "vpnConsent", object : ActivityResultLauncher<Intent>() {
-            override fun launch(input: Intent, options: ActivityOptionsCompat?) = launch(input)
-            override fun unregister() = Unit
-            override fun getContract() = ActivityResultContracts.StartActivityForResult()
-        })
+        ReflectionHelpers.setField(
+            activity,
+            "vpnConsent",
+            object : ActivityResultLauncher<Intent>() {
+                override fun launch(input: Intent, options: ActivityOptionsCompat?) = launch(input)
+
+                override fun unregister() = Unit
+
+                override fun getContract() = ActivityResultContracts.StartActivityForResult()
+            },
+        )
     }
 
     private fun assertUnavailable() {
         assertFalse(field("vpnReady"))
         assertFalse(field("awaitingVpnConsent"))
         assertNull(ReflectionHelpers.getField<Any?>(activity, "controller"))
-        val message = ReflectionHelpers.getField<TextView>(activity, "stageStatusView").text.toString()
+        val message =
+            ReflectionHelpers.getField<TextView>(activity, "stageStatusView").text.toString()
         assertTrue(message.contains("VPN authorization"))
         assertTrue(message.contains("Return to DiPlay"))
         assertFalse(message.contains("Exception"))
@@ -150,10 +182,23 @@ class CarPlayVpnConsentTest {
     }
 
     private fun field(name: String): Boolean = ReflectionHelpers.getField(activity, name)
-    private fun log() = File(activity.filesDir, "logs/diplay.log").readText()
+
+    private fun log(): String {
+        assertTrue(
+            ReflectionHelpers.getField<SessionLogFile>(activity, "sessionLog").awaitIdle(2_000)
+        )
+        return File(activity.filesDir, "logs/diplay.log").readText()
+    }
+
     private fun invoke(name: String) {
-        try { activity.javaClass.getDeclaredMethod(name).apply { isAccessible = true }.invoke(activity) }
-        catch (error: InvocationTargetException) { throw error.targetException }
+        try {
+            activity.javaClass
+                .getDeclaredMethod(name)
+                .apply { isAccessible = true }
+                .invoke(activity)
+        } catch (error: InvocationTargetException) {
+            throw error.targetException
+        }
     }
 }
 
@@ -162,7 +207,10 @@ class VpnConsentTestShadow {
     companion object {
         var consent: Intent? = null
         var failure: RuntimeException? = null
-        @JvmStatic @Implementation fun prepare(context: Context): Intent? {
+
+        @JvmStatic
+        @Implementation
+        fun prepare(context: Context): Intent? {
             failure?.let { throw it }
             return consent
         }

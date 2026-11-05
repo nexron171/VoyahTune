@@ -15,19 +15,20 @@ data class MicrophoneConfig(
     val codec: AudioCodecKind = AudioCodecKind.LPCM,
     val bitrate: Int? = null,
     /**
-     * The CarPlay clock for an Opus stream. Capture and encoding remain at 48 kHz.
-     * Captured Siri packets for audioFormat 0x20000000 advance by 480 per 20 ms and calls
-     * (0x40000000) by 960, so the clock follows the format's rate; 0x10000000 counts at 16 kHz on that
-     * rule. The report's "Audio: rtp clock" line measures the iPhone's own clock for each stream.
+     * The CarPlay clock for an Opus stream. Capture and encoding remain at 48 kHz. Captured Siri
+     * packets for audioFormat 0x20000000 advance by 480 per 20 ms and calls (0x40000000) by 960, so
+     * the clock follows the format's rate; 0x10000000 counts at 16 kHz on that rule. The report's
+     * "Audio: rtp clock" line measures the iPhone's own clock for each stream.
      */
     val opusClockRate: Int = OPUS_CAPTURE_RATE,
 ) {
     val samplesPerPacket: Int
-        get() = if (codec == AudioCodecKind.OPUS) {
-            OPUS_SAMPLES_PER_PACKET
-        } else {
-            maxOf(1, sampleRate * frameMillis / 1000)
-        }
+        get() =
+            if (codec == AudioCodecKind.OPUS) {
+                OPUS_SAMPLES_PER_PACKET
+            } else {
+                maxOf(1, sampleRate * frameMillis / 1000)
+            }
 
     /** The clock the RTP timestamps count in: the Opus format's rate, or the PCM sample rate. */
     val rtpClockRate: Int
@@ -35,7 +36,9 @@ data class MicrophoneConfig(
 
     /** How far each packet moves the RTP timestamp, on the negotiated clock. */
     val rtpSamplesPerPacket: Int
-        get() = if (codec == AudioCodecKind.OPUS) opusClockRate * OPUS_FRAME_MILLIS / 1000 else samplesPerPacket
+        get() =
+            if (codec == AudioCodecKind.OPUS) opusClockRate * OPUS_FRAME_MILLIS / 1000
+            else samplesPerPacket
 
     val frameBytes: Int
         get() = samplesPerPacket * channels * 2
@@ -46,32 +49,46 @@ data class MicrophoneConfig(
         private const val OPUS_FRAME_MILLIS = 20
 
         /** The negotiated Opus format's rate: 48, 24 or 16 kHz; 48 kHz when no Opus bit is set. */
-        fun opusClockRate(formatBits: Long): Int = when {
-            formatBits and 0x40000000L != 0L -> 48_000
-            formatBits and 0x20000000L != 0L -> 24_000
-            formatBits and 0x10000000L != 0L -> 16_000
-            else -> OPUS_CAPTURE_RATE
-        }
+        fun opusClockRate(formatBits: Long): Int =
+            when {
+                formatBits and 0x40000000L != 0L -> 48_000
+                formatBits and 0x20000000L != 0L -> 24_000
+                formatBits and 0x10000000L != 0L -> 16_000
+                else -> OPUS_CAPTURE_RATE
+            }
+
+        /** Longest default PCM frame that fits MTU 1500 with RTP, AEAD, IPv6 and UDP headers. */
+        fun pcmFrameMillis(sampleRate: Int, channels: Int): Int =
+            PCM_FRAME_MILLIS.firstOrNull { millis ->
+                MicrophonePacketizer.SEAL_OVERHEAD + sampleRate * millis / 1000 * channels * 2 <=
+                    MAX_UDP_PAYLOAD
+            } ?: PCM_FRAME_MILLIS.last()
+
+        private val PCM_FRAME_MILLIS = listOf(20, 10, 5)
+
+        /** A 1,500-byte link MTU less the 40-byte IPv6 and 8-byte UDP headers. */
+        private const val MAX_UDP_PAYLOAD = 1500 - 40 - 8
     }
 }
 
 /** Mutable RTP/ChaCha counters for one microphone uplink. */
-class MicrophoneCounters(
-    var sequence: Int = 0,
-    var timestamp: Int = 0,
-    var nonce: Long = 0,
-)
+class MicrophoneCounters(var sequence: Int = 0, var timestamp: Int = 0, var nonce: Long = 0)
 
 /**
  * Seals one PCM microphone frame in the wired CarPlay RTP layout.
  *
- * The 12-byte RTP header is clear; its timestamp and SSRC are authenticated as AAD. The packet
- * tail repeats the eight-byte little-endian nonce counter after the 16-byte Poly1305 tag.
+ * The 12-byte RTP header is clear; its timestamp and SSRC are authenticated as AAD. The packet tail
+ * repeats the eight-byte little-endian nonce counter after the 16-byte Poly1305 tag.
  */
 object MicrophonePacketizer {
     const val RTP_HEADER_LEN = 12
     const val TAG_LEN = 16
     const val NONCE_LEN = 8
+
+    /**
+     * Bytes a sealed packet adds to its samples: the RTP header, the Poly1305 tag and the nonce.
+     */
+    const val SEAL_OVERHEAD = RTP_HEADER_LEN + TAG_LEN + NONCE_LEN
 
     fun sealPacket(
         key: ByteArray,
@@ -88,12 +105,13 @@ object MicrophonePacketizer {
 
         val nonce = ByteArray(12)
         putU64Le(nonce, 4, counters.nonce)
-        val sealed = AirPlayCrypto.chachaSeal(
-            key = key,
-            nonce = nonce,
-            plaintext = body,
-            aad = header.copyOfRange(4, RTP_HEADER_LEN),
-        )
+        val sealed =
+            AirPlayCrypto.chachaSeal(
+                key = key,
+                nonce = nonce,
+                plaintext = body,
+                aad = header.copyOfRange(4, RTP_HEADER_LEN),
+            )
 
         val packet = ByteArray(RTP_HEADER_LEN + sealed.size + NONCE_LEN)
         header.copyInto(packet, 0)

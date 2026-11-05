@@ -30,18 +30,22 @@ class Ch341UsbHost(
     private val permissionAction: String = "${context.packageName}.CH341_USB_PERMISSION",
 ) {
     private val appContext = context.applicationContext
+
     sealed class PermissionRequest {
         data class AlreadyGranted(val device: UsbDevice) : PermissionRequest()
+
         data class Requested(val device: UsbDevice) : PermissionRequest()
     }
 
     sealed class PermissionResult {
         data class Granted(val device: UsbDevice) : PermissionResult()
+
         data class Denied(val device: UsbDevice) : PermissionResult()
     }
 
     sealed class OpenResult {
         data class Connected(val session: Ch341UsbSession) : OpenResult()
+
         data class Failed(val error: I2cTransportException) : OpenResult()
     }
 
@@ -49,11 +53,11 @@ class Ch341UsbHost(
         usbManager.deviceList.values.filter { matcher.matches(it.vendorId, it.productId) }
 
     /**
-     * Every USB device Android lists, as `vid:pid node`, sorted. When no configured CH341 is listed, this shows
-     * whether the adapter left the bus or came back under another identity (#792).
+     * Every USB device Android lists, as `vid:pid node`, sorted. When no configured CH341 is
+     * listed, this shows whether the adapter left the bus or came back under another identity
+     * (#792).
      */
-    fun listedDevices(): List<String> =
-        usbManager.deviceList.values.map(::describe).sorted()
+    fun listedDevices(): List<String> = usbManager.deviceList.values.map(::describe).sorted()
 
     @Throws(I2cTransportException::class)
     fun requestPermission(device: UsbDevice): PermissionRequest {
@@ -78,17 +82,14 @@ class Ch341UsbHost(
 
     /** Register once for this host instance and close the returned handle to unregister it. */
     fun registerPermissionReceiver(onResult: (PermissionResult) -> Unit): Closeable {
-        val receiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context, intent: Intent) {
-                parsePermissionResult(intent)?.let(onResult)
+        val receiver =
+            object : BroadcastReceiver() {
+                override fun onReceive(context: Context, intent: Intent) {
+                    parsePermissionResult(intent)?.let(onResult)
+                }
             }
-        }
         val filter = IntentFilter(permissionAction)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            appContext.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            appContext.registerReceiver(receiver, filter)
-        }
+        UsbPermissionBroadcast.register(appContext, receiver, filter)
         return Closeable { appContext.unregisterReceiver(receiver) }
     }
 
@@ -108,21 +109,34 @@ class Ch341UsbHost(
         if (!usbManager.hasPermission(device)) {
             throw I2cTransportException.PermissionDenied("USB permission has not been granted")
         }
-        val endpoints = findBulkEndpoints(device)
-            ?: throw I2cTransportException.DeviceUnavailable("No USB interface has both bulk IN and OUT endpoints")
-        val connection = usbManager.openDevice(device)
-            ?: throw I2cTransportException.DeviceUnavailable("UsbManager could not open the CH341 device")
+        val endpoints =
+            findBulkEndpoints(device)
+                ?: throw I2cTransportException.DeviceUnavailable(
+                    "No USB interface has both bulk IN and OUT endpoints"
+                )
+        val connection =
+            usbManager.openDevice(device)
+                ?: throw I2cTransportException.DeviceUnavailable(
+                    "UsbManager could not open the CH341 device"
+                )
 
         if (!connection.claimInterface(endpoints.usbInterface, true)) {
             connection.close()
             throw I2cTransportException.DeviceUnavailable("Could not claim CH341 USB interface")
         }
-        return Ch341UsbSession(connection, endpoints.usbInterface, endpoints.input, endpoints.output)
+        return Ch341UsbSession(
+            connection,
+            endpoints.usbInterface,
+            endpoints.input,
+            endpoints.output,
+        )
     }
 
     private fun requireConfiguredDevice(device: UsbDevice) {
         if (!matcher.matches(device.vendorId, device.productId)) {
-            throw I2cTransportException.DeviceUnavailable("USB device is not a configured CH341 identity")
+            throw I2cTransportException.DeviceUnavailable(
+                "USB device is not a configured CH341 identity"
+            )
         }
     }
 
@@ -136,12 +150,12 @@ class Ch341UsbHost(
         )
     }
 
-    private fun Intent.usbDevice(): UsbDevice? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
-    } else {
-        @Suppress("DEPRECATION")
-        getParcelableExtra(UsbManager.EXTRA_DEVICE)
-    }
+    private fun Intent.usbDevice(): UsbDevice? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+        } else {
+            @Suppress("DEPRECATION") getParcelableExtra(UsbManager.EXTRA_DEVICE)
+        }
 
     private fun findBulkEndpoints(device: UsbDevice): BulkEndpoints? {
         for (index in 0 until device.interfaceCount) {
@@ -168,14 +182,20 @@ class Ch341UsbHost(
     )
 
     companion object {
-        /** `1a86:5512 /dev/bus/usb/001/004`: the USB identity and device node only, no serial number. */
+        /**
+         * `1a86:5512 /dev/bus/usb/001/004`: the USB identity and device node only, no serial
+         * number.
+         */
         fun describe(device: UsbDevice): String =
             "%04x:%04x %s".format(device.vendorId, device.productId, device.deviceName)
     }
 }
 
-/** Claimed CH341 USB resources. All transfer methods are blocking and must run off the main thread. */
-class Ch341UsbSession internal constructor(
+/**
+ * Claimed CH341 USB resources. All transfer methods are blocking and must run off the main thread.
+ */
+class Ch341UsbSession
+internal constructor(
     private val connection: UsbDeviceConnection,
     private val usbInterface: UsbInterface,
     val inputEndpoint: UsbEndpoint,
@@ -189,7 +209,7 @@ class Ch341UsbSession internal constructor(
         if (transferred != data.size) {
             Log.w(TAG, "bulk write sent $transferred of ${data.size} bytes: ${data.toHexPreview()}")
             throw I2cTransportException.Protocol(
-                "CH341 bulk write transferred $transferred of ${data.size} bytes",
+                "CH341 bulk write transferred $transferred of ${data.size} bytes"
             )
         }
     }
@@ -229,21 +249,23 @@ class Ch341UsbSession internal constructor(
             val packet = ByteArray(minOf(maxLength - offset, packetSize))
             val waitMillis = if (offset == 0) firstPacketMillis else quietMillis
             val fatal = offset == 0 && !allowEmpty
-            val transferred = try {
-                transfer(inputEndpoint, packet, waitMillis, "read", clearHaltOnFailure = fatal)
-            } catch (error: I2cTransportException.DeviceUnavailable) {
-                // The answer ended early: fewer status bytes than the worst case, or a packet the
-                // controller does not answer at all.
-                if (offset > 0 || allowEmpty) {
-                    Log.d(
-                        TAG,
-                        "bulk read ended early at $offset of $maxLength bytes " +
-                            "(quiet-packet timeout of ${waitMillis}ms; accepted as end of answer)",
-                    )
-                    break
+            val transferred =
+                try {
+                    transfer(inputEndpoint, packet, waitMillis, "read", clearHaltOnFailure = fatal)
+                } catch (error: I2cTransportException.DeviceUnavailable) {
+                    // The answer ended early: fewer status bytes than the worst case, or a packet
+                    // the
+                    // controller does not answer at all.
+                    if (offset > 0 || allowEmpty) {
+                        Log.d(
+                            TAG,
+                            "bulk read ended early at $offset of $maxLength bytes " +
+                                "(quiet-packet timeout of ${waitMillis}ms; accepted as end of answer)",
+                        )
+                        break
+                    }
+                    throw error
                 }
-                throw error
-            }
             if (transferred <= 0) {
                 if (offset > 0 || allowEmpty) break
                 throw I2cTransportException.DeviceUnavailable("CH341 bulk read returned no data")
@@ -276,23 +298,29 @@ class Ch341UsbSession internal constructor(
         clearHaltOnFailure: Boolean = true,
     ): Int {
         if (closed) throw I2cTransportException.DeviceUnavailable("CH341 USB session is closed")
-        if (data.isEmpty()) throw I2cTransportException.InvalidRequest("Bulk $operation data must not be empty")
+        if (data.isEmpty())
+            throw I2cTransportException.InvalidRequest("Bulk $operation data must not be empty")
         if (timeoutMillis <= 0) {
             throw I2cTransportException.InvalidRequest("Bulk transfer timeout must be positive")
         }
 
-        val transferred = try {
-            connection.bulkTransfer(endpoint, data, data.size, timeoutMillis)
-        } catch (error: SecurityException) {
-            throw I2cTransportException.PermissionDenied("USB permission was denied during bulk $operation")
-        } catch (error: RuntimeException) {
-            throw I2cTransportException.DeviceUnavailable("CH341 bulk $operation failed", error)
-        }
+        val transferred =
+            try {
+                connection.bulkTransfer(endpoint, data, data.size, timeoutMillis)
+            } catch (error: SecurityException) {
+                throw I2cTransportException.PermissionDenied(
+                    "USB permission was denied during bulk $operation"
+                )
+            } catch (error: RuntimeException) {
+                throw I2cTransportException.DeviceUnavailable("CH341 bulk $operation failed", error)
+            }
         if (transferred < 0) {
             // Android's bulkTransfer result does not identify whether the device timed out, NAKed,
             // or reported another USB failure. Do not manufacture a CH341 NAK classification.
             clearEndpointHalt(endpoint, operation)
-            throw I2cTransportException.DeviceUnavailable("CH341 bulk $operation failed or timed out")
+            throw I2cTransportException.DeviceUnavailable(
+                "CH341 bulk $operation failed or timed out"
+            )
         }
         return transferred
     }
@@ -305,25 +333,35 @@ class Ch341UsbSession internal constructor(
      * clears it, which is why a full stack rebuild always recovers; clearing it here keeps a single
      * stalled transfer from consuming the caller's entire retry budget.
      *
-     * A control transfer is harmless when the endpoint was never halted, so this is a one-sided bet.
+     * A control transfer is harmless when the endpoint was never halted, so this is a one-sided
+     * bet.
      */
     private fun clearEndpointHalt(endpoint: UsbEndpoint, operation: String) {
-        val result = try {
-            connection.controlTransfer(
-                UsbConstants.USB_DIR_OUT or UsbConstants.USB_TYPE_STANDARD or
-                    USB_RECIP_ENDPOINT,
-                USB_REQUEST_CLEAR_FEATURE,
-                USB_FEATURE_ENDPOINT_HALT,
-                endpoint.address,
-                null,
-                0,
-                RECOVERY_TIMEOUT_MILLIS,
-            )
-        } catch (error: RuntimeException) {
-            Log.w(TAG, "halt clear on endpoint ${endpoint.address} threw after failed bulk $operation", error)
-            -1
-        }
-        Log.w(TAG, "bulk $operation failed; halt clear on endpoint ${endpoint.address} returned $result")
+        val result =
+            try {
+                connection.controlTransfer(
+                    UsbConstants.USB_DIR_OUT or
+                        UsbConstants.USB_TYPE_STANDARD or
+                        USB_RECIP_ENDPOINT,
+                    USB_REQUEST_CLEAR_FEATURE,
+                    USB_FEATURE_ENDPOINT_HALT,
+                    endpoint.address,
+                    null,
+                    0,
+                    RECOVERY_TIMEOUT_MILLIS,
+                )
+            } catch (error: RuntimeException) {
+                Log.w(
+                    TAG,
+                    "halt clear on endpoint ${endpoint.address} threw after failed bulk $operation",
+                    error,
+                )
+                -1
+            }
+        Log.w(
+            TAG,
+            "bulk $operation failed; halt clear on endpoint ${endpoint.address} returned $result",
+        )
     }
 
     private fun ByteArray.toHexPreview(): String = joinToString(" ") { "%02x".format(it) }
@@ -336,7 +374,9 @@ class Ch341UsbSession internal constructor(
 
         const val TAG = "Ch341UsbHost"
 
-        /** Milliseconds allowed for the halt-clear control transfer before recovery is abandoned. */
+        /**
+         * Milliseconds allowed for the halt-clear control transfer before recovery is abandoned.
+         */
         const val RECOVERY_TIMEOUT_MILLIS = 200
 
         // USB 2.0 standard request: CLEAR_FEATURE(ENDPOINT_HALT) on one endpoint.

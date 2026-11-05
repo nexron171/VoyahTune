@@ -79,38 +79,39 @@ internal class AudioFocusCoordinator(
     internal val listener: AudioManager.OnAudioFocusChangeListener
         get() = currentListener
 
-    private fun listenerFor(generation: Long) = AudioManager.OnAudioFocusChangeListener { change ->
-        synchronized(this) {
-            // Android may have queued callbacks before a request was abandoned or replaced.
-            if (generation != focusGeneration || request == null || active.isEmpty()) {
-                // Dropping this silently hides the one window that matters: between a telephony
-                // track closing and media reopening, a head unit that keeps focus looks like
-                // nothing at all. Say the callback arrived and why it was not acted on.
-                runCatching {
-                    report(
-                        "Audio: focus change=$change dropped" +
-                            " stale=${generation != focusGeneration} noRequest=${request == null}" +
-                            " activeTracks=${active.size}",
-                    )
-                }
-                return@synchronized
-            }
-            runCatching { report("Audio: focus change=$change activeTracks=${active.size}") }
-            when (change) {
-                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> setMediaVolume(DUCKED_VOLUME)
-                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                    if (muteMediaOnTransientLoss) {
-                        // This reports a temporary Android focus owner, not a confirmed call.
-                        Log.i(TAG, "Audio: muting media during transient focus loss")
-                        setMediaVolume(0f)
+    private fun listenerFor(generation: Long) =
+        AudioManager.OnAudioFocusChangeListener { change ->
+            synchronized(this) {
+                // Android may have queued callbacks before a request was abandoned or replaced.
+                if (generation != focusGeneration || request == null || active.isEmpty()) {
+                    // Dropping this silently hides the one window that matters: between a telephony
+                    // track closing and media reopening, a head unit that keeps focus looks like
+                    // nothing at all. Say the callback arrived and why it was not acted on.
+                    runCatching {
+                        report(
+                            "Audio: focus change=$change dropped" +
+                                " stale=${generation != focusGeneration} noRequest=${request == null}" +
+                                " activeTracks=${active.size}"
+                        )
                     }
+                    return@synchronized
                 }
-                AudioManager.AUDIOFOCUS_GAIN -> setMediaVolume(FULL_VOLUME)
-            // Keep CarPlay audio running on permanent loss. Some head units
-            // do not send a later gain callback after taking focus back.
+                runCatching { report("Audio: focus change=$change activeTracks=${active.size}") }
+                when (change) {
+                    AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> setMediaVolume(DUCKED_VOLUME)
+                    AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                        if (muteMediaOnTransientLoss) {
+                            // This reports a temporary Android focus owner, not a confirmed call.
+                            Log.i(TAG, "Audio: muting media during transient focus loss")
+                            setMediaVolume(0f)
+                        }
+                    }
+                    AudioManager.AUDIOFOCUS_GAIN -> setMediaVolume(FULL_VOLUME)
+                // Keep CarPlay audio running on permanent loss. Some head units
+                // do not send a later gain callback after taking focus back.
+                }
             }
         }
-    }
 
     @Synchronized
     fun setCarPlayDucking(volumeDb: Double, durationMs: Long) {
@@ -259,10 +260,9 @@ internal class AudioFocusCoordinator(
         // This changes only the renderer's relative gain, never Android's user stream volume.
         val volume = minOf(mediaVolume, carPlayVolume)
         if (entry.channel != AudioChannel.MEDIA || entry.appliedVolume == volume) return
-        val applied = runCatching {
-            track.setStereoVolume(volume, volume) == AudioTrack.SUCCESS
-        }
-            .getOrDefault(false)
+        val applied =
+            runCatching { track.setStereoVolume(volume, volume) == AudioTrack.SUCCESS }
+                .getOrDefault(false)
         if (applied) entry.appliedVolume = volume
     }
 
@@ -367,7 +367,7 @@ class AndroidMediaSink(
         SharedPreferences.OnSharedPreferenceChangeListener { preferences, key ->
             if (key == CarPlayAudioSettings.DUCK_MUSIC || key == null) {
                 audioFocusCoordinator.setCarPlayDuckingEnabled(
-                    preferences.getBoolean(CarPlayAudioSettings.DUCK_MUSIC, true),
+                    preferences.getBoolean(CarPlayAudioSettings.DUCK_MUSIC, true)
                 )
             }
         }
@@ -375,7 +375,7 @@ class AndroidMediaSink(
     init {
         audioPreferences?.registerOnSharedPreferenceChangeListener(audioPreferenceListener)
         audioFocusCoordinator.setCarPlayDuckingEnabled(
-            audioPreferences?.getBoolean(CarPlayAudioSettings.DUCK_MUSIC, true) ?: true,
+            audioPreferences?.getBoolean(CarPlayAudioSettings.DUCK_MUSIC, true) ?: true
         )
     }
 
@@ -433,9 +433,10 @@ class AndroidMediaSink(
     private val mirrorSurfaces = HashMap<Pair<Int, String>, Surface>()
     private val mirrorDecoders = HashMap<Pair<Int, String>, VideoDecoder>()
     private val lastVideoConfig = ConcurrentHashMap<Int, Pair<VideoCodec, ByteArray>>()
-    private val recoveryExecutor = Executors.newSingleThreadExecutor { task ->
-        Thread(task, "carplay-video-recovery").apply { isDaemon = true }
-    }
+    private val recoveryExecutor =
+        Executors.newSingleThreadExecutor { task ->
+            Thread(task, "carplay-video-recovery").apply { isDaemon = true }
+        }
 
     override fun setVideoRecoveryHandler(type: Int, handler: () -> Unit) {
         videoRecoveryHandlers[type] = handler
@@ -597,6 +598,15 @@ class AndroidMediaSink(
     val videoPacingEnabled: Boolean
         get() = videoPacingDelayMillis > 0
 
+    /**
+     * False until the main screen's first video frame. The screen stream's keepalives never reach
+     * the sink, so a stream that carries only those, as from the stuck iPhones in #975 and #249,
+     * leaves it false.
+     */
+    @Volatile
+    var mainVideoReceived = false
+        private set
+
     /** Requests a keyframe for stream [type], e.g. after its surface came back. */
     /**
      * Running totals of the main screen's decoder for a live FPS counter; null while it has none.
@@ -652,9 +662,7 @@ class AndroidMediaSink(
     }
 
     override fun onVideoCodec(type: Int, codec: VideoCodec) {
-        synchronized(videoOwnershipLock) {
-            if (!videoClosed) pendingVideoCodec[type] = codec
-        }
+        synchronized(videoOwnershipLock) { if (!videoClosed) pendingVideoCodec[type] = codec }
     }
 
     override fun onVideoConfig(type: Int, codecData: ByteArray) {
@@ -668,6 +676,7 @@ class AndroidMediaSink(
     }
 
     override fun onVideoFrame(type: Int, naluBytes: ByteArray) {
+        if (type == MAIN_SCREEN_TYPE) mainVideoReceived = true
         synchronized(videoOwnershipLock) {
             if (videoClosed) return
             videoDecoder(type).submit(naluBytes)
@@ -681,6 +690,7 @@ class AndroidMediaSink(
         senderNanos: Long,
         arrivalNanos: Long,
     ) {
+        if (type == MAIN_SCREEN_TYPE) mainVideoReceived = true
         synchronized(videoOwnershipLock) {
             if (videoClosed) return
             videoDecoder(type).submit(naluBytes, senderNanos, arrivalNanos)
@@ -809,7 +819,7 @@ class AndroidMediaSink(
                 onAudioDiagnostic(
                     "Audio: mode entered communication from=$before" +
                         " now=${manager.mode} stream=$id" +
-                        if (speakerRequested) " loudspeaker=${callSpeaker != null}" else "",
+                        if (speakerRequested) " loudspeaker=${callSpeaker != null}" else ""
                 )
             }
         }
@@ -860,10 +870,8 @@ class AndroidMediaSink(
                     "Audio: mode restored requested=${AudioManager.MODE_NORMAL} now=${manager.mode} stream=$active"
                 } catch (error: RuntimeException) {
                     Log.w("xcertplay-usb", "could not restore audio mode", error)
-                    val currentMode = runCatching {
-                        manager.mode.toString()
-                    }
-                        .getOrDefault("unknown")
+                    val currentMode =
+                        runCatching { manager.mode.toString() }.getOrDefault("unknown")
                     "Audio: mode restore failed requested=${AudioManager.MODE_NORMAL} now=$currentMode" +
                         " error=${error.javaClass.simpleName}"
                 }
@@ -1046,9 +1054,7 @@ internal class ParkingOutput(width: Int, height: Int) {
                 )
             reader.setOnImageAvailableListener(
                 { source ->
-                    synchronized(consumerLock) {
-                        if (!closed) source.acquireLatestImage()?.close()
-                    }
+                    synchronized(consumerLock) { if (!closed) source.acquireLatestImage()?.close() }
                 },
                 android.os.Handler(thread.looper),
             )
@@ -1581,7 +1587,7 @@ private class VideoDecoder(
         ) {
             report(
                 "MTK decoder tuning fell back at configure from=${requestedMtkMode.diagnosticName} " +
-                    "to=${configuredMtkMode.diagnosticName}",
+                    "to=${configuredMtkMode.diagnosticName}"
             )
             maximumMtkMode = configuredMtkMode
         }
@@ -1602,7 +1608,7 @@ private class VideoDecoder(
                 }
             report(
                 "decoder=${configured.codecName} mime=$mime size=${width}x$height" +
-                    "$rate$lowLatency$output$atOnceReport$mtk",
+                    "$rate$lowLatency$output$atOnceReport$mtk"
             )
             Log.i(
                 TAG,
@@ -1623,7 +1629,7 @@ private class VideoDecoder(
         if (fallback.ordinal < maximumMtkMode.ordinal) maximumMtkMode = fallback
         report(
             "MTK decoder tuning ${previous.diagnosticName} dropped: $reason; " +
-                "next=${fallback.diagnosticName}",
+                "next=${fallback.diagnosticName}"
         )
     }
 
@@ -1701,13 +1707,12 @@ private class VideoDecoder(
             codec.start()
             startedLowLatency = lowLatency
             startedPictureOrder = pictureOrder
-            val configuredName = runCatching {
-                codec.name
-            }
-                .getOrNull()
-                .orEmpty()
-                .ifEmpty { createdName }
-                .ifEmpty { attempt.codecName ?: "default" }
+            val configuredName =
+                runCatching { codec.name }
+                    .getOrNull()
+                    .orEmpty()
+                    .ifEmpty { createdName }
+                    .ifEmpty { attempt.codecName ?: "default" }
             ConfiguredVideoDecoder(codec, configuredName, mtkMode)
         } catch (error: Exception) {
             val phaseMs = (System.nanoTime() - phaseStartNs) / 1_000_000
@@ -1740,21 +1745,23 @@ private class VideoDecoder(
     private fun findLowLatencyDecoder(mime: String): String? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
         return runCatching {
-            lowLatencyDecoderName(
-                MediaCodecList(MediaCodecList.REGULAR_CODECS)
-                    .codecInfos
-                    .filter { !it.isEncoder && mime in it.supportedTypes }
-                    .map { info ->
-                        DecoderCandidate(
-                            name = info.name,
-                            hardware = info.isHardwareAccelerated,
-                            alias = info.isAlias,
-                            lowLatency =
-                                info.getCapabilitiesForType(mime).isFeatureSupported("low-latency"),
-                        )
-                    },
-            )
-        }
+                lowLatencyDecoderName(
+                    MediaCodecList(MediaCodecList.REGULAR_CODECS)
+                        .codecInfos
+                        .filter { !it.isEncoder && mime in it.supportedTypes }
+                        .map { info ->
+                            DecoderCandidate(
+                                name = info.name,
+                                hardware = info.isHardwareAccelerated,
+                                alias = info.isAlias,
+                                lowLatency =
+                                    info
+                                        .getCapabilitiesForType(mime)
+                                        .isFeatureSupported("low-latency"),
+                            )
+                        }
+                )
+            }
             .getOrNull()
     }
 
@@ -1768,9 +1775,7 @@ private class VideoDecoder(
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
         return MediaCodecList(MediaCodecList.REGULAR_CODECS)
             .codecInfos
-            .firstOrNull {
-                !it.isEncoder && it.isSoftwareOnly && mime in it.supportedTypes
-            }
+            .firstOrNull { !it.isEncoder && it.isSoftwareOnly && mime in it.supportedTypes }
             ?.name
     }
 
@@ -1896,10 +1901,7 @@ private class VideoDecoder(
         }
         if (!submittedFrameLogged) {
             submittedFrameLogged = true
-            Log.i(
-                TAG,
-                "video decoder first input avcc=${nalus.size} annexB=${annexB.size}",
-            )
+            Log.i(TAG, "video decoder first input avcc=${nalus.size} annexB=${annexB.size}")
         }
         val index =
             DecoderInputPump.acquire(
@@ -2044,7 +2046,7 @@ private class VideoDecoder(
                 "crop=${format.intOrNull("crop-left")},${format.intOrNull("crop-top")}," +
                 "${format.intOrNull("crop-right")},${format.intOrNull("crop-bottom")} " +
                 "stride=${format.intOrNull(MediaFormat.KEY_STRIDE)} slice=${format.intOrNull(MediaFormat.KEY_SLICE_HEIGHT)} " +
-                "color=${format.intOrNull(MediaFormat.KEY_COLOR_STANDARD)}/${format.intOrNull(MediaFormat.KEY_COLOR_RANGE)}/${format.intOrNull(MediaFormat.KEY_COLOR_TRANSFER)}",
+                "color=${format.intOrNull(MediaFormat.KEY_COLOR_STANDARD)}/${format.intOrNull(MediaFormat.KEY_COLOR_RANGE)}/${format.intOrNull(MediaFormat.KEY_COLOR_TRANSFER)}"
         )
         Log.i(
             TAG,
@@ -2066,7 +2068,7 @@ private class VideoDecoder(
         runCatching {
             report(
                 "decoder failed api=${Build.VERSION.SDK_INT} $context " +
-                    MediaFailureSummary.describe(error),
+                    MediaFailureSummary.describe(error)
             )
         }
     }
@@ -2358,7 +2360,7 @@ private class AudioRenderer(
                     lagRecoveryReports++
                     report(
                         "Audio: stale media packet backlog recovered audioType=${format.audioType} " +
-                            "packetsDiscarded=$removed remaining=${queue.size}",
+                            "packetsDiscarded=$removed remaining=${queue.size}"
                     )
                 }
             }
@@ -2371,7 +2373,7 @@ private class AudioRenderer(
                 if (queueFullReportCount < MAX_QUEUE_FULL_REPORTS) {
                     queueFullReportCount++
                     report(
-                        "Audio: queue full audioType=${format.audioType} count=$queueFullReportCount",
+                        "Audio: queue full audioType=${format.audioType} count=$queueFullReportCount"
                     )
                 }
             }
@@ -2395,7 +2397,7 @@ private class AudioRenderer(
                     "Audio: starting api=${Build.VERSION.SDK_INT} " +
                         "audioType=${format.audioType} codec=${format.codec} rate=${format.sampleRate} channels=${format.channels} " +
                         "mapping=${if (advancedAudioChannelMapping) "automotive" else "mobile"} " +
-                        "mediaChannel=$mediaChannel navigationChannel=$navigationChannel focus=$audioFocusEnabled",
+                        "mediaChannel=$mediaChannel navigationChannel=$navigationChannel focus=$audioFocusEnabled"
                 )
             }
             when (format.codec) {
@@ -2486,7 +2488,7 @@ private class AudioRenderer(
                             val name = it.name
                             Log.i(TAG, "audio decoder configured mime=$mime name=$name")
                             report(
-                                "Audio: decoder ready audioType=${format.audioType} codec=${format.codec} name=$name",
+                                "Audio: decoder ready audioType=${format.audioType} codec=${format.codec} name=$name"
                             )
                         }
                     }
@@ -2513,7 +2515,7 @@ private class AudioRenderer(
                 report(
                     "Audio: track unavailable api=${Build.VERSION.SDK_INT} stage=$diagnosticStage " +
                         "audioType=${format.audioType} codec=${format.codec} rate=${format.sampleRate} " +
-                        "channels=${format.channels} minBufferResult=$minBuffer",
+                        "channels=${format.channels} minBufferResult=$minBuffer"
                 )
             }
             return
@@ -2569,7 +2571,7 @@ private class AudioRenderer(
                             val accepted =
                                 VoyahAudioRouting.accepted(streamType, actual, initialized)
                             report(
-                                "Audio: Voyah route audioType=${format.audioType} requested=$streamType actual=$actual accepted=$accepted",
+                                "Audio: Voyah route audioType=${format.audioType} requested=$streamType actual=$actual accepted=$accepted"
                             )
                             accepted
                         }
@@ -2584,7 +2586,7 @@ private class AudioRenderer(
                             "streamType=$streamType rejected by this ROM; falling back to usage-based track",
                         )
                         report(
-                            "Audio: route fallback audioType=${format.audioType} requested=$streamType; independent volume unconfirmed",
+                            "Audio: route fallback audioType=${format.audioType} requested=$streamType; independent volume unconfirmed"
                         )
                         attributes = audioAttributesFor(selection)
                         AudioTrack.Builder()
@@ -2598,13 +2600,14 @@ private class AudioRenderer(
         }
         track = built
         if (mappedChannel == AudioChannel.PHONE) {
-            val listener = AudioRouting.OnRoutingChangedListener { routing ->
-                checkCallRoute(routing.routedDevice)
-            }
+            val listener =
+                AudioRouting.OnRoutingChangedListener { routing ->
+                    checkCallRoute(routing.routedDevice)
+                }
             if (
                 runCatching {
-                    built.addOnRoutingChangedListener(listener, Handler(Looper.getMainLooper()))
-                }
+                        built.addOnRoutingChangedListener(listener, Handler(Looper.getMainLooper()))
+                    }
                     .isSuccess
             ) {
                 routingListener = listener
@@ -2665,18 +2668,19 @@ private class AudioRenderer(
                     recoverLatency = format.payloadType != 103,
                 )
         }
-        val trackMetadata = runCatching {
-            "api=${Build.VERSION.SDK_INT} trackState=${built.state} trackRate=${built.sampleRate} " +
-                "usage=${trackAttributes?.usage} contentType=${trackAttributes?.contentType} actualStream=${built.streamType} " +
-                "attributesSource=${if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) "track" else "configured"}"
-        }
-            .getOrDefault("api=${Build.VERSION.SDK_INT} trackMetadata=unavailable")
+        val trackMetadata =
+            runCatching {
+                    "api=${Build.VERSION.SDK_INT} trackState=${built.state} trackRate=${built.sampleRate} " +
+                        "usage=${trackAttributes?.usage} contentType=${trackAttributes?.contentType} actualStream=${built.streamType} " +
+                        "attributesSource=${if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) "track" else "configured"}"
+                }
+                .getOrDefault("api=${Build.VERSION.SDK_INT} trackMetadata=unavailable")
         report(
             "Audio: ready audioType=${format.audioType} codec=${format.codec} " +
                 "rate=${format.sampleRate} channels=${format.channels} " +
                 "route=$routeLabel " +
                 "bufferMs=${capacityBytes * 1000L / bytesPerSecond} startMs=${startThresholdBytes * 1000L / bytesPerSecond} " +
-                trackMetadata,
+                trackMetadata
         )
         Log.i(
             TAG,
@@ -2897,10 +2901,7 @@ private class AudioRenderer(
                 if (accessUnit.isNotEmpty()) {
                     if (!firstAacPayloadLogged) {
                         firstAacPayloadLogged = true
-                        Log.i(
-                            TAG,
-                            "audio AAC access unit bytes=${accessUnit.size}",
-                        )
+                        Log.i(TAG, "audio AAC access unit bytes=${accessUnit.size}")
                     }
                     feedCodec(
                         MediaCodecSupport.adtsFrame(accessUnit, format.sampleRate, format.channels),
@@ -2914,10 +2915,7 @@ private class AudioRenderer(
                     shortOpusPackets++
                     if (!firstOpusShortPacketLogged) {
                         firstOpusShortPacketLogged = true
-                        Log.i(
-                            TAG,
-                            "audio Opus skipping short packet bytes=${accessUnit.size}",
-                        )
+                        Log.i(TAG, "audio Opus skipping short packet bytes=${accessUnit.size}")
                     }
                     return
                 }
@@ -2970,10 +2968,7 @@ private class AudioRenderer(
             inputQueued++
             if (!firstInputQueuedLogged) {
                 firstInputQueuedLogged = true
-                Log.i(
-                    TAG,
-                    "audio decoder first input codec=${format.codec} bytes=${payload.size}",
-                )
+                Log.i(TAG, "audio decoder first input codec=${format.codec} bytes=${payload.size}")
             }
         } else {
             codec.queueInputBuffer(index, 0, 0, 0, 0)
@@ -3003,7 +2998,7 @@ private class AudioRenderer(
                                 lastDecoderOutputMetadata = metadata
                                 decoderOutputReports++
                                 report(
-                                    "Audio: decoded format audioType=${format.audioType} codec=${format.codec} $metadata",
+                                    "Audio: decoded format audioType=${format.audioType} codec=${format.codec} $metadata"
                                 )
                             }
                         }
@@ -3051,10 +3046,7 @@ private class AudioRenderer(
         diagnosticStage = "track-write"
         if (!firstPcmLogged && length > 0) {
             firstPcmLogged = true
-            Log.i(
-                TAG,
-                "audio first PCM type=${format.payloadType} bytes=$length",
-            )
+            Log.i(TAG, "audio first PCM type=${format.payloadType} bytes=$length")
         }
         voiceFilter?.process(data, offset, length)
         applyNavigationAttenuation()
@@ -3154,7 +3146,7 @@ private class AudioRenderer(
         if (rebufferCount > 0 && rebufferRecoverReportCount < MAX_REBUFFER_REPORTS) {
             rebufferRecoverReportCount++
             report(
-                "Audio: rebuffer recovered audioType=${format.audioType} rebufferCount=$rebufferCount",
+                "Audio: rebuffer recovered audioType=${format.audioType} rebufferCount=$rebufferCount"
             )
         }
     }
@@ -3216,19 +3208,22 @@ private class AudioRenderer(
         if (tempoSupported) {
             val clockFactor = adjustment.clockRate.toFloat() / format.sampleRate
             var parametersSet = false
-            val accepted = runCatching {
-                track.playbackParams =
-                    PlaybackParams()
-                        .allowDefaults()
-                        .setAudioFallbackMode(PlaybackParams.AUDIO_FALLBACK_MODE_FAIL)
-                        .setSpeed((clockFactor * adjustment.tempo).toFloat())
-                        .setPitch(clockFactor)
-                parametersSet = true
-                val actual = track.playbackParams
-                check(kotlin.math.abs(actual.speed - clockFactor * adjustment.tempo) < 0.0001)
-                check(kotlin.math.abs(actual.pitch - clockFactor) < 0.0001)
-            }
-                .isSuccess
+            val accepted =
+                runCatching {
+                        track.playbackParams =
+                            PlaybackParams()
+                                .allowDefaults()
+                                .setAudioFallbackMode(PlaybackParams.AUDIO_FALLBACK_MODE_FAIL)
+                                .setSpeed((clockFactor * adjustment.tempo).toFloat())
+                                .setPitch(clockFactor)
+                        parametersSet = true
+                        val actual = track.playbackParams
+                        check(
+                            kotlin.math.abs(actual.speed - clockFactor * adjustment.tempo) < 0.0001
+                        )
+                        check(kotlin.math.abs(actual.pitch - clockFactor) < 0.0001)
+                    }
+                    .isSuccess
             if (accepted) {
                 control.applied(adjustment)
                 return
@@ -3245,35 +3240,35 @@ private class AudioRenderer(
                         .setSpeed(factor)
                         .setPitch(factor)
             }
-            val neutral = runCatching {
-                val actual = track.playbackParams
-                check(kotlin.math.abs(actual.speed - factor) < 0.0001)
-                check(kotlin.math.abs(actual.pitch - factor) < 0.0001)
-            }
-                .isSuccess
+            val neutral =
+                runCatching {
+                        val actual = track.playbackParams
+                        check(kotlin.math.abs(actual.speed - factor) < 0.0001)
+                        check(kotlin.math.abs(actual.pitch - factor) < 0.0001)
+                    }
+                    .isSuccess
             report(
-                "Audio: tempo unavailable audioType=${format.audioType} restored=$neutral; no PCM skip",
+                "Audio: tempo unavailable audioType=${format.audioType} restored=$neutral; no PCM skip"
             )
             if (!neutral && (previous.tempo != 1.0 || parametersSet)) {
                 control.disableClock()
                 playbackAdjustmentFailed = true
                 report(
-                    "Audio: playback parameters retained audioType=${format.audioType}; adjustment disabled",
+                    "Audio: playback parameters retained audioType=${format.audioType}; adjustment disabled"
                 )
                 return
             }
             control.applied(MusicPlaybackControl.Adjustment(previous.clockRate, 1.0))
         }
-        val result = runCatching {
-            track.setPlaybackRate(adjustment.clockRate)
-        }
-            .getOrDefault(AudioTrack.ERROR)
+        val result =
+            runCatching { track.setPlaybackRate(adjustment.clockRate) }
+                .getOrDefault(AudioTrack.ERROR)
         if (result == AudioTrack.SUCCESS) {
             control.applied(MusicPlaybackControl.Adjustment(adjustment.clockRate, 1.0))
         } else {
             control.disableClock()
             report(
-                "Audio: clock trim unavailable audioType=${format.audioType} rate=${adjustment.clockRate} result=$result",
+                "Audio: clock trim unavailable audioType=${format.audioType} rate=${adjustment.clockRate} result=$result"
             )
         }
     }
@@ -3320,7 +3315,7 @@ private class AudioRenderer(
                     if (bytesPerSecond > 0) prebufferBytes * 1000L / bytesPerSecond else 0L
                 report(
                     "Audio: rebuffer paused audioType=${format.audioType} rebufferCount=$rebufferCount retainedMs=$retainedMs " +
-                        "restartMs=${if (bytesPerSecond > 0) startThresholdBytes * 1000L / bytesPerSecond else 0L}",
+                        "restartMs=${if (bytesPerSecond > 0) startThresholdBytes * 1000L / bytesPerSecond else 0L}"
                 )
             }
         }
@@ -3337,8 +3332,7 @@ private class AudioRenderer(
         updatePlaybackSnapshot(track)
         navigationAudioFocus?.advance(
             System.nanoTime(),
-            totalWrittenFrames -
-                bufferProgress.queuedBytes(track.playbackHeadPosition) / frameBytes,
+            totalWrittenFrames - bufferProgress.queuedBytes(track.playbackHeadPosition) / frameBytes,
         )
     }
 
@@ -3352,11 +3346,12 @@ private class AudioRenderer(
         val lastRx = lastArrivalNs.get()
         val currentTrack = track
         val playbackHeadFrames = currentTrack?.playbackHeadPosition?.toLong()?.and(0xffff_ffffL)
-        val playbackAdvanceFrames = playbackHeadFrames?.let { current ->
-            val previous = lastPlaybackHeadFrames
-            lastPlaybackHeadFrames = current
-            previous?.let { (current - it) and 0xffff_ffffL }
-        }
+        val playbackAdvanceFrames =
+            playbackHeadFrames?.let { current ->
+                val previous = lastPlaybackHeadFrames
+                lastPlaybackHeadFrames = current
+                previous?.let { (current - it) and 0xffff_ffffL }
+            }
         val queuedFrames = playbackHeadFrames?.let { (totalWrittenFrames - it).coerceAtLeast(0L) }
         // A route decided before the listener was added reaches no callback; the stats see it.
         if (mappedChannel == AudioChannel.PHONE)
@@ -3389,7 +3384,7 @@ private class AudioRenderer(
                 "Audio: music timing audioType=${format.audioType} clockRate=${control.applied.clockRate} " +
                     "tempo=${control.applied.tempo} targetMs=${control.targetFrames * 1000 / format.sampleRate} " +
                     "queuedMs=${queuedFrames?.times(1000)?.div(format.sampleRate) ?: -1} pcmSkipMs=0 " +
-                    "tempoSupported=$tempoSupported rebuffers=$rebufferCount",
+                    "tempoSupported=$tempoSupported rebuffers=$rebufferCount"
             )
         }
         if (format.codec != AudioCodecKind.LPCM) {
@@ -3418,7 +3413,7 @@ private class AudioRenderer(
             report(
                 "Audio: renderer failed api=${Build.VERSION.SDK_INT} " +
                     "audioType=${format.audioType} codec=${format.codec} stage=$diagnosticStage " +
-                    MediaFailureSummary.describe(error),
+                    MediaFailureSummary.describe(error)
             )
         }
     }

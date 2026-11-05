@@ -14,28 +14,55 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * A replaced screen stream's thread may still be delivering when its successor starts. Its codec, config and
- * frames must not reach the sink, which by then belongs to the successor's decoder.
+ * A replaced screen stream's thread may still be delivering when its successor starts. Its codec,
+ * config and frames must not reach the sink, which by then belongs to the successor's decoder.
  */
 @RunWith(RobolectricTestRunner::class) // CarPlayMediaEngine.onScreen logs through android.util.Log.
 @Config(sdk = [29], manifest = Config.NONE)
 class CurrentScreenListenerTest {
     private sealed class Event {
         data class Codec(val type: Int, val codec: VideoCodec) : Event()
+
         data class CodecData(val type: Int, val data: List<Byte>) : Event()
+
         data class Frame(val type: Int, val data: List<Byte>) : Event()
-        data class TimedFrame(val type: Int, val data: List<Byte>, val senderNanos: Long, val arrivalNanos: Long) : Event()
+
+        data class TimedFrame(
+            val type: Int,
+            val data: List<Byte>,
+            val senderNanos: Long,
+            val arrivalNanos: Long,
+        ) : Event()
     }
 
-    /** Records the four video deliveries; the 4-argument frame is recorded on its own, not via the 3-argument default. */
+    /**
+     * Records the four video deliveries; the 4-argument frame is recorded on its own, not via the
+     * 3-argument default.
+     */
     private class RecordingSink : MediaSink {
         val events: MutableList<Event> = Collections.synchronizedList(mutableListOf())
-        override fun onVideoCodec(type: Int, codec: VideoCodec) { events += Event.Codec(type, codec) }
-        override fun onVideoConfig(type: Int, codecData: ByteArray) { events += Event.CodecData(type, codecData.toList()) }
-        override fun onVideoFrame(type: Int, naluBytes: ByteArray) { events += Event.Frame(type, naluBytes.toList()) }
-        override fun onVideoFrame(type: Int, naluBytes: ByteArray, senderNanos: Long, arrivalNanos: Long) {
+
+        override fun onVideoCodec(type: Int, codec: VideoCodec) {
+            events += Event.Codec(type, codec)
+        }
+
+        override fun onVideoConfig(type: Int, codecData: ByteArray) {
+            events += Event.CodecData(type, codecData.toList())
+        }
+
+        override fun onVideoFrame(type: Int, naluBytes: ByteArray) {
+            events += Event.Frame(type, naluBytes.toList())
+        }
+
+        override fun onVideoFrame(
+            type: Int,
+            naluBytes: ByteArray,
+            senderNanos: Long,
+            arrivalNanos: Long,
+        ) {
             events += Event.TimedFrame(type, naluBytes.toList(), senderNanos, arrivalNanos)
         }
+
         fun take(): List<Event> = synchronized(events) { events.toList().also { events.clear() } }
     }
 
@@ -50,12 +77,13 @@ class CurrentScreenListenerTest {
         onFrame(timedFrame, 1_234_567_890L, 9_876_543_210L)
     }
 
-    private fun expected(type: Int, codec: VideoCodec = VideoCodec.H265) = listOf(
-        Event.Codec(type, codec),
-        Event.CodecData(type, config.toList()),
-        Event.Frame(type, frame.toList()),
-        Event.TimedFrame(type, timedFrame.toList(), 1_234_567_890L, 9_876_543_210L),
-    )
+    private fun expected(type: Int, codec: VideoCodec = VideoCodec.H265) =
+        listOf(
+            Event.Codec(type, codec),
+            Event.CodecData(type, config.toList()),
+            Event.Frame(type, frame.toList()),
+            Event.TimedFrame(type, timedFrame.toList(), 1_234_567_890L, 9_876_543_210L),
+        )
 
     @Test
     fun currentStreamDeliversEveryCallbackWithItsTypeAndTimes() {
@@ -87,7 +115,11 @@ class CurrentScreenListenerTest {
         val sink = RecordingSink()
         val current = AtomicBoolean(true)
         var checks = 0
-        val listener = currentScreenListener(110, sink) { checks++; current.get() }
+        val listener =
+            currentScreenListener(110, sink) {
+                checks++
+                current.get()
+            }
 
         listener.onCodec(VideoCodec.H264)
         listener.onConfig(config)
@@ -118,16 +150,19 @@ class CurrentScreenListenerTest {
             firstListener.deliverAll()
             assertEquals(expected(110), sink.take())
 
-            // The cluster stream of the same session has a different key and is not affected by the replacement.
+            // The cluster stream of the same session has a different key and is not affected by the
+            // replacement.
             assertNotNull(engine.onScreen(session, 111, mapOf("streamConnectionID" to 3L)))
-            val clusterListener = listenerOf(streams[CarPlayMediaEngine.StreamKey(session, 111)] as ScreenStream)
+            val clusterListener =
+                listenerOf(streams[CarPlayMediaEngine.StreamKey(session, 111)] as ScreenStream)
 
             assertNotNull(engine.onScreen(session, 110, mapOf("streamConnectionID" to 2L)))
             val second = streams[mainKey] as ScreenStream
             assertNotSame(first, second)
             val secondListener = listenerOf(second)
 
-            // The replaced stream's thread was already past its read when it was closed and still delivers.
+            // The replaced stream's thread was already past its read when it was closed and still
+            // delivers.
             firstListener.deliverAll()
             assertEquals(emptyList<Event>(), sink.take())
 
@@ -142,34 +177,52 @@ class CurrentScreenListenerTest {
     }
 
     private fun withSharedSecret(session: AirPlaySession) {
-        // onScreen derives the stream key from the pair-verify secret; any 32 bytes will do for routing.
-        PairVerify::class.java.getDeclaredField("sharedSecret").apply { isAccessible = true }
+        // onScreen derives the stream key from the pair-verify secret; any 32 bytes will do for
+        // routing.
+        PairVerify::class
+            .java
+            .getDeclaredField("sharedSecret")
+            .apply { isAccessible = true }
             .set(session.pairVerify, ByteArray(32) { it.toByte() })
         assertTrue(session.sharedSecret != null)
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun streamsOf(engine: CarPlayMediaEngine): Map<CarPlayMediaEngine.StreamKey, Closeable> =
-        CarPlayMediaEngine::class.java.getDeclaredField("streams").apply { isAccessible = true }
+    private fun streamsOf(
+        engine: CarPlayMediaEngine
+    ): Map<CarPlayMediaEngine.StreamKey, Closeable> =
+        CarPlayMediaEngine::class
+            .java
+            .getDeclaredField("streams")
+            .apply { isAccessible = true }
             .get(engine) as Map<CarPlayMediaEngine.StreamKey, Closeable>
 
     private fun listenerOf(screen: ScreenStream): ScreenStream.Listener =
-        ScreenStream::class.java.getDeclaredField("listener").apply { isAccessible = true }
+        ScreenStream::class
+            .java
+            .getDeclaredField("listener")
+            .apply { isAccessible = true }
             .get(screen) as ScreenStream.Listener
 
-    private fun testSession(): AirPlaySession = AirPlaySession(
-        socket = Socket(),
-        config = AirPlayConfig(
-            deviceName = "test",
-            deviceId = "02:00:00:00:00:02",
-            btMac = "02:00:00:00:00:01",
-            sourceVersion = "1.0",
-            main = AirPlayDisplayConfig(widthPixels = 800, heightPixels = 480),
-        ),
-        identity = AirPlayIdentity.generate(),
-        pairings = PairingStore(),
-        mfi = null,
-        listener = object : AirPlaySessionListener {},
-        media = object : AirPlayMediaHandler {},
-    )
+    private fun testSession(): AirPlaySession =
+        AirPlaySession(
+            socket =
+                java.net.ServerSocket(0, 1, java.net.InetAddress.getLoopbackAddress()).use { server
+                    ->
+                    Socket(server.inetAddress, server.localPort)
+                },
+            config =
+                AirPlayConfig(
+                    deviceName = "test",
+                    deviceId = "02:00:00:00:00:02",
+                    btMac = "02:00:00:00:00:01",
+                    sourceVersion = "1.0",
+                    main = AirPlayDisplayConfig(widthPixels = 800, heightPixels = 480),
+                ),
+            identity = AirPlayIdentity.generate(),
+            pairings = PairingStore(),
+            mfi = null,
+            listener = object : AirPlaySessionListener {},
+            media = object : AirPlayMediaHandler {},
+        )
 }

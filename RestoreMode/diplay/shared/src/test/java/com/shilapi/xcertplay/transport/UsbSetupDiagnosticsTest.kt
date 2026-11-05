@@ -1,5 +1,6 @@
 package com.shilapi.xcertplay.transport
 
+import android.hardware.usb.UsbConstants
 import com.shilapi.xcertplay.network.CarPlayVpnService
 import java.io.IOException
 import org.junit.Assert.assertEquals
@@ -33,16 +34,57 @@ class UsbSetupDiagnosticsTest {
             "CarPlay USB mode request rejected; current mode=3:3:3:0 usbVersion=15.04 configurations=[1[0/0:6.1.1x3]]",
             IphoneUsbHost.usbModeDiagnostic(4, mode, "15.04", listOf("1[0/0:6.1.1x3]")),
         )
-        assertTrue(IphoneUsbHost.usbModeDiagnostic(-1, ByteArray(4), null, emptyList()).contains("current mode=unreadable(-1) usbVersion=unknown"))
+        assertTrue(
+            IphoneUsbHost.usbModeDiagnostic(-1, ByteArray(4), null, emptyList())
+                .contains("current mode=unreadable(-1) usbVersion=unknown")
+        )
         // iOS 12 and 15 reply with three bytes.
-        assertTrue(IphoneUsbHost.usbModeDiagnostic(3, byteArrayOf(1, 2, 3, 0), "7.01", emptyList())
-            .contains("current mode=1:2:3 (short:3) usbVersion=7.01"))
+        assertTrue(
+            IphoneUsbHost.usbModeDiagnostic(3, byteArrayOf(1, 2, 3, 0), "7.01", emptyList())
+                .contains("current mode=1:2:3 (short:3) usbVersion=7.01")
+        )
+    }
+
+    @Test
+    fun onlyAHubCountsAsNoDeviceInThePort() {
+        assertTrue(IphoneUsbHost.isHub(UsbConstants.USB_CLASS_HUB, emptyList()))
+        assertTrue(
+            IphoneUsbHost.isHub(
+                UsbConstants.USB_CLASS_PER_INTERFACE,
+                listOf(UsbConstants.USB_CLASS_HUB),
+            )
+        )
+        assertFalse(
+            IphoneUsbHost.isHub(
+                UsbConstants.USB_CLASS_PER_INTERFACE,
+                listOf(UsbConstants.USB_CLASS_HUB, UsbConstants.USB_CLASS_MASS_STORAGE),
+            )
+        )
+        assertFalse(
+            IphoneUsbHost.isHub(
+                UsbConstants.USB_CLASS_PER_INTERFACE,
+                listOf(UsbConstants.USB_CLASS_STILL_IMAGE, UsbConstants.USB_CLASS_VENDOR_SPEC),
+            )
+        )
     }
 
     @Test
     fun configurationSwitchDetachesDriversOnlyAfterAndroidRefusesIt() {
         val detached = mutableListOf<Int>()
-        assertNull(UsbConfigurationSelection.select(6, listOf(0, 1), { true }, { 6 }, { detached += it; true }) { fail("no reopen") })
+        assertNull(
+            UsbConfigurationSelection.select(
+                6,
+                listOf(0, 1),
+                { true },
+                { 6 },
+                {
+                    detached += it
+                    true
+                },
+            ) {
+                fail("no reopen")
+            }
+        )
         assertTrue(detached.isEmpty())
 
         // The 8227L kernel's snd-usb-audio held interface 0 of configuration 2 (#518). The switch
@@ -50,9 +92,20 @@ class UsbSetupDiagnosticsTest {
         var active = 2
         var attempts = 0
         var reopened = false
-        val outcome = UsbConfigurationSelection.select(6, listOf(2, 0, 1, 0, 3), {
-            (++attempts == 2 && reopened).also { if (it) active = 6 }
-        }, { active }, { assertFalse(reopened); detached += it; it != 3 }) { reopened = true }
+        val outcome =
+            UsbConfigurationSelection.select(
+                6,
+                listOf(2, 0, 1, 0, 3),
+                { (++attempts == 2 && reopened).also { if (it) active = 6 } },
+                { active },
+                {
+                    assertFalse(reopened)
+                    detached += it
+                    it != 3
+                },
+            ) {
+                reopened = true
+            }
         assertTrue(reopened)
         assertEquals(listOf(0, 1, 2, 3), detached)
         assertEquals(
@@ -65,25 +118,52 @@ class UsbSetupDiagnosticsTest {
     @Test
     fun configurationSwitchReportsADriverItCouldNotMove() {
         var reopens = 0
-        val stuck = UsbConfigurationSelection.select(6, listOf(0), { false }, { 2 }, { false }) { reopens++ }
+        val stuck =
+            UsbConfigurationSelection.select(6, listOf(0), { false }, { 2 }, { false }) {
+                reopens++
+            }
         assertTrue(stuck!!.wrongConfiguration)
         assertEquals("nothing detached, nothing to drop", 0, reopens)
-        assertEquals("USB configuration select target=6 ok=false before=2 detached=none after=2", stuck.diagnostic())
+        assertEquals(
+            "USB configuration select target=6 ok=false before=2 detached=none after=2",
+            stuck.diagnostic(),
+        )
 
-        // Already in configuration 6: the forced claims later detach cdc_ncm; nothing to switch here.
+        // Already in configuration 6: the forced claims later detach cdc_ncm; nothing to switch
+        // here.
         val detached = mutableListOf<Int>()
-        val current = UsbConfigurationSelection.select(6, listOf(0, 3), { false }, { 6 }, { detached += it; true }) { fail("no reopen") }
+        val current =
+            UsbConfigurationSelection.select(
+                6,
+                listOf(0, 3),
+                { false },
+                { 6 },
+                {
+                    detached += it
+                    true
+                },
+            ) {
+                fail("no reopen")
+            }
         assertFalse(current!!.wrongConfiguration)
         assertTrue(detached.isEmpty())
 
         // An unreadable configuration keeps the earlier claim-anyway behavior.
-        assertFalse(UsbConfigurationSelection.select(6, listOf(0), { false }, { null }, { true }) {}!!.wrongConfiguration)
+        assertFalse(
+            UsbConfigurationSelection.select(6, listOf(0), { false }, { null }, { true }) {}!!
+                .wrongConfiguration
+        )
     }
 
     @Test
     fun vpnAttachFailureNamesTheExceptionChain() {
         val failure = IllegalStateException("Cannot set address", IOException("Invalid argument"))
         val detail = CarPlayVpnService.attachFailure(failure)
-        assertTrue(detail, detail.startsWith("IllegalStateException: Cannot set address <- IOException: Invalid argument at "))
+        assertTrue(
+            detail,
+            detail.startsWith(
+                "IllegalStateException: Cannot set address <- IOException: Invalid argument at "
+            ),
+        )
     }
 }

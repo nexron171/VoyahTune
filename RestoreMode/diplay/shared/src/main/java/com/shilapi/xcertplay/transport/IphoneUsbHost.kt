@@ -23,14 +23,14 @@ import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** Exact Apple USB identities allowed by the deployment configuration. */
-class IphoneUsbMatcher private constructor(
+class IphoneUsbMatcher
+private constructor(
     private val allowedDevices: Set<UsbDeviceId>?,
     private val allowAnyAppleProduct: Boolean,
 ) {
-    constructor(allowedDevices: Collection<UsbDeviceId>) : this(
-        allowedDevices.toSet(),
-        allowAnyAppleProduct = false,
-    )
+    constructor(
+        allowedDevices: Collection<UsbDeviceId>
+    ) : this(allowedDevices.toSet(), allowAnyAppleProduct = false)
 
     init {
         require(allowedDevices == null || allowedDevices.isNotEmpty()) {
@@ -59,8 +59,8 @@ class IphoneUsbMatcher private constructor(
  *
  * LIVI's fixed commit uses Apple vendor request `0x52`, value `0`, index `4`, and then selects
  * configuration `6`. The vendor request can make the iPhone re-enumerate. Android does not offer
- * Linux sysfs configuration control or a synchronous re-enumeration primitive, so this class
- * closes the first connection and requires the caller to receive, re-authorize, and pass the new
+ * Linux sysfs configuration control or a synchronous re-enumeration primitive, so this class closes
+ * the first connection and requires the caller to receive, re-authorize, and pass the new
  * [UsbDevice] to [selectCarPlayConfigurationAsync]. All opens run on the supplied executor.
  */
 class IphoneUsbHost(
@@ -74,15 +74,16 @@ class IphoneUsbHost(
 
     sealed class PermissionRequest {
         data class AlreadyGranted(val device: UsbDevice) : PermissionRequest()
-        data class Requested(
-            val device: UsbDevice,
-            val afterMissingUiAdbFailure: Boolean = false,
-        ) : PermissionRequest()
+
+        data class Requested(val device: UsbDevice, val afterMissingUiAdbFailure: Boolean = false) :
+            PermissionRequest()
+
         data class AdbRequired(val device: UsbDevice) : PermissionRequest()
     }
 
     sealed class PermissionResult {
         data class Granted(val device: UsbDevice) : PermissionResult()
+
         data class Denied(val device: UsbDevice) : PermissionResult()
     }
 
@@ -95,6 +96,7 @@ class IphoneUsbHost(
 
     sealed class Iap2SessionResult {
         data class Connected(val session: Iap2UsbSession) : Iap2SessionResult()
+
         data class Failed(val error: IphoneUsbException) : Iap2SessionResult()
     }
 
@@ -102,11 +104,19 @@ class IphoneUsbHost(
         usbManager.deviceList.values.filter { matcher.matches(it.vendorId, it.productId) }
 
     /**
-     * Every USB device Android lists, as `vid:pid node` like [Ch341UsbHost.describe], sorted. When no iPhone is
-     * listed, this shows whether Android sees anything on the head unit's port at all.
+     * Every USB device Android lists, as `vid:pid node` like [Ch341UsbHost.describe], sorted. When
+     * no iPhone is listed, this shows whether Android sees anything on the head unit's port at all.
      */
     fun listedDevices(): List<String> =
         usbManager.deviceList.values.map(Ch341UsbHost::describe).sorted()
+
+    fun listsNonHubDevice(): Boolean =
+        usbManager.deviceList.values.any { device ->
+            !isHub(
+                device.deviceClass,
+                (0 until device.interfaceCount).map { device.getInterface(it).interfaceClass },
+            )
+        }
 
     @Throws(IphoneUsbException::class)
     fun requestPermission(device: UsbDevice, allowAdbFallback: Boolean = true): PermissionRequest {
@@ -141,7 +151,9 @@ class IphoneUsbHost(
         }
     }
 
-    /** Returns the new matching device after the vendor request caused Android USB re-enumeration. */
+    /**
+     * Returns the new matching device after the vendor request caused Android USB re-enumeration.
+     */
     fun parseAttachedDevice(intent: Intent): UsbDevice? {
         if (intent.action != UsbManager.ACTION_USB_DEVICE_ATTACHED) return null
         val device = intent.usbDevice() ?: return null
@@ -150,7 +162,9 @@ class IphoneUsbHost(
 
     /** Register once for this host instance and close the returned handle to unregister it. */
     fun registerPermissionReceiver(onResult: (PermissionResult) -> Unit): Closeable =
-        registerReceiver(IntentFilter(permissionAction)) { parsePermissionResult(it)?.let(onResult) }
+        registerReceiver(IntentFilter(permissionAction), guarded = true) {
+            parsePermissionResult(it)?.let(onResult)
+        }
 
     /** Register once for this host instance and close the returned handle to unregister it. */
     fun registerAttachReceiver(onAttached: (UsbDevice) -> Unit): Closeable =
@@ -159,8 +173,8 @@ class IphoneUsbHost(
         }
 
     /**
-     * Sends the LIVI-evidenced vendor request then closes the connection before re-enumeration.
-     * The callback is invoked from [executor].
+     * Sends the LIVI-evidenced vendor request then closes the connection before re-enumeration. The
+     * callback is invoked from [executor].
      */
     fun requestCarPlayReenumerationAsync(
         device: UsbDevice,
@@ -168,27 +182,32 @@ class IphoneUsbHost(
         callback: (TransitionResult) -> Unit,
     ) {
         executor.execute {
-            callback(runTransition(device) { connection ->
-                val response = ByteArray(VENDOR_RESPONSE_LENGTH)
-                val transferred = connection.controlTransfer(
-                    USB_VENDOR_DEVICE_IN,
-                    CARPLAY_CONFIGURATION_REQUEST,
-                    0,
-                    CARPLAY_CONFIGURATION_INDEX,
-                    response,
-                    response.size,
-                    CONTROL_TRANSFER_TIMEOUT_MILLIS,
-                )
-                if (transferred != response.size) {
-                    // iOS 12 and 15 rejected this request even while unlocked (#509, #455); a locked
-                    // iPhone rejects it too (#100). Record what the iPhone exposes to tell them apart.
-                    runCatching { onDiagnostic(modeRejectionDiagnostic(connection, device)) }
-                    throw IphoneUsbException.Protocol(
-                        "CarPlay configuration request transferred $transferred of ${response.size} bytes",
-                    )
+            callback(
+                runTransition(device) { connection ->
+                    val response = ByteArray(VENDOR_RESPONSE_LENGTH)
+                    val transferred =
+                        connection.controlTransfer(
+                            USB_VENDOR_DEVICE_IN,
+                            CARPLAY_CONFIGURATION_REQUEST,
+                            0,
+                            CARPLAY_CONFIGURATION_INDEX,
+                            response,
+                            response.size,
+                            CONTROL_TRANSFER_TIMEOUT_MILLIS,
+                        )
+                    if (transferred != response.size) {
+                        // iOS 12 and 15 rejected this request even while unlocked (#509, #455); a
+                        // locked
+                        // iPhone rejects it too (#100). Record what the iPhone exposes to tell them
+                        // apart.
+                        runCatching { onDiagnostic(modeRejectionDiagnostic(connection, device)) }
+                        throw IphoneUsbException.Protocol(
+                            "CarPlay configuration request transferred $transferred of ${response.size} bytes"
+                        )
+                    }
+                    TransitionResult.ReenumerationRequested
                 }
-                TransitionResult.ReenumerationRequested
-            })
+            )
         }
     }
 
@@ -196,9 +215,9 @@ class IphoneUsbHost(
      * Opens LIVI's USBMUX bulk pipe on the re-enumerated iPhone.
      *
      * This repeats CarPlay configuration selection on the newly opened Android connection and
-     * claims the Apple USB Multiplexor interface, preferring the LIVI bulk pair 0x04/0x85.
-     * After a successful callback, it owns the returned session and must close it. If the callback
-     * throws, this method closes the session before propagating the callback failure.
+     * claims the Apple USB Multiplexor interface, preferring the LIVI bulk pair 0x04/0x85. After a
+     * successful callback, it owns the returned session and must close it. If the callback throws,
+     * this method closes the session before propagating the callback failure.
      */
     fun openIap2UsbSessionAsync(
         device: UsbDevice,
@@ -206,19 +225,23 @@ class IphoneUsbHost(
         callback: (Iap2SessionResult) -> Unit,
     ) {
         executor.execute {
-            val result = try {
-                Iap2SessionResult.Connected(openIap2UsbSession(device))
-            } catch (error: IphoneUsbException) {
-                Iap2SessionResult.Failed(error)
-            } catch (error: SecurityException) {
-                Iap2SessionResult.Failed(
-                    IphoneUsbException.PermissionDenied("USB permission was denied", error),
-                )
-            } catch (error: RuntimeException) {
-                Iap2SessionResult.Failed(
-                    IphoneUsbException.DeviceUnavailable("iPhone USBMUX operation failed", error),
-                )
-            }
+            val result =
+                try {
+                    Iap2SessionResult.Connected(openIap2UsbSession(device))
+                } catch (error: IphoneUsbException) {
+                    Iap2SessionResult.Failed(error)
+                } catch (error: SecurityException) {
+                    Iap2SessionResult.Failed(
+                        IphoneUsbException.PermissionDenied("USB permission was denied", error)
+                    )
+                } catch (error: RuntimeException) {
+                    Iap2SessionResult.Failed(
+                        IphoneUsbException.DeviceUnavailable(
+                            "iPhone USBMUX operation failed",
+                            error,
+                        )
+                    )
+                }
             try {
                 callback(result)
             } catch (error: Throwable) {
@@ -237,44 +260,62 @@ class IphoneUsbHost(
     private fun runTransition(
         device: UsbDevice,
         operation: (UsbDeviceConnection) -> TransitionResult,
-    ): TransitionResult = try {
-        requireConfiguredDevice(device)
-        if (!usbManager.hasPermission(device)) {
-            throw IphoneUsbException.PermissionDenied("USB permission has not been granted")
-        }
-        val connection = usbManager.openDevice(device)
-            ?: throw IphoneUsbException.DeviceUnavailable("UsbManager could not open the iPhone")
+    ): TransitionResult =
         try {
-            operation(connection)
-        } finally {
-            connection.close()
+            requireConfiguredDevice(device)
+            if (!usbManager.hasPermission(device)) {
+                throw IphoneUsbException.PermissionDenied("USB permission has not been granted")
+            }
+            val connection =
+                usbManager.openDevice(device)
+                    ?: throw IphoneUsbException.DeviceUnavailable(
+                        "UsbManager could not open the iPhone"
+                    )
+            try {
+                operation(connection)
+            } finally {
+                connection.close()
+            }
+        } catch (error: IphoneUsbException) {
+            TransitionResult.Failed(error)
+        } catch (error: SecurityException) {
+            TransitionResult.Failed(
+                IphoneUsbException.PermissionDenied("USB permission was denied", error)
+            )
+        } catch (error: RuntimeException) {
+            TransitionResult.Failed(
+                IphoneUsbException.DeviceUnavailable("iPhone USB operation failed", error)
+            )
         }
-    } catch (error: IphoneUsbException) {
-        TransitionResult.Failed(error)
-    } catch (error: SecurityException) {
-        TransitionResult.Failed(IphoneUsbException.PermissionDenied("USB permission was denied", error))
-    } catch (error: RuntimeException) {
-        TransitionResult.Failed(IphoneUsbException.DeviceUnavailable("iPhone USB operation failed", error))
-    }
 
     private fun openIap2UsbSession(device: UsbDevice): Iap2UsbSession {
         requireConfiguredDevice(device)
         if (!usbManager.hasPermission(device)) {
             throw IphoneUsbException.PermissionDenied("USB permission has not been granted")
         }
-        var connection = usbManager.openDevice(device)
-            ?: throw IphoneUsbException.DeviceUnavailable("UsbManager could not open the iPhone")
+        var connection =
+            usbManager.openDevice(device)
+                ?: throw IphoneUsbException.DeviceUnavailable(
+                    "UsbManager could not open the iPhone"
+                )
         var claimedInterface: UsbInterface? = null
         try {
-            val configuration = IphoneCarPlayConfiguration.find(device)
-                ?: throw IphoneUsbException.Protocol(
-                    "Re-enumerated iPhone exposes no USBMUX CarPlay configuration",
-                )
+            val configuration =
+                IphoneCarPlayConfiguration.find(device)
+                    ?: throw IphoneUsbException.Protocol(
+                        "Re-enumerated iPhone exposes no USBMUX CarPlay configuration"
+                    )
             connection = selectConfiguration(connection, device, configuration)
-            val usbMux = IphoneCarPlayConfiguration.usbMuxInterface(configuration)
-                ?: throw IphoneUsbException.Protocol("CarPlay configuration exposes no USBMUX interface")
-            val endpoints = IphoneCarPlayConfiguration.usbMuxEndpoints(usbMux)
-                ?: throw IphoneUsbException.Protocol("USBMUX interface exposes no bulk endpoint pair")
+            val usbMux =
+                IphoneCarPlayConfiguration.usbMuxInterface(configuration)
+                    ?: throw IphoneUsbException.Protocol(
+                        "CarPlay configuration exposes no USBMUX interface"
+                    )
+            val endpoints =
+                IphoneCarPlayConfiguration.usbMuxEndpoints(usbMux)
+                    ?: throw IphoneUsbException.Protocol(
+                        "USBMUX interface exposes no bulk endpoint pair"
+                    )
             Log.i(
                 IphoneCarPlayConfiguration.TAG,
                 "usbmux config=${configuration.id} iface=${usbMux.id} alt=${usbMux.alternateSetting} " +
@@ -284,7 +325,9 @@ class IphoneUsbHost(
                     "in=${describeUsbEndpoint(endpoints.second)}",
             )
             if (!connection.claimInterface(usbMux, true)) {
-                throw IphoneUsbException.DeviceUnavailable("Android could not claim USBMUX interface 1")
+                throw IphoneUsbException.DeviceUnavailable(
+                    "Android could not claim USBMUX interface 1"
+                )
             }
             claimedInterface = usbMux
             return Iap2UsbSession(connection, endpoints.first, endpoints.second, onDiagnostic)
@@ -304,34 +347,44 @@ class IphoneUsbHost(
         device: UsbDevice,
         configuration: UsbConfiguration,
     ): UsbDeviceConnection {
-        val interfaces = (0 until device.configurationCount).map(device::getConfiguration)
-            .flatMap { config -> (0 until config.interfaceCount).map(config::getInterface) }
-            .associateBy { it.id }
+        val interfaces =
+            (0 until device.configurationCount)
+                .map(device::getConfiguration)
+                .flatMap { config -> (0 until config.interfaceCount).map(config::getInterface) }
+                .associateBy { it.id }
         var current = connection
         try {
-            val outcome = UsbConfigurationSelection.select(
-                target = configuration.id,
-                interfaceIds = interfaces.keys.toList(),
-                setConfiguration = { current.setConfiguration(configuration) },
-                activeConfiguration = { activeConfiguration(current) },
-                // A forced claim detaches the kernel driver. It stays claimed until the reopen.
-                detach = { id -> current.claimInterface(interfaces.getValue(id), true) },
-                // Closing drops the claims without the driver reattach that releaseInterface() requests.
-                reopen = {
-                    current.close()
-                    current = usbManager.openDevice(device)
-                        ?: throw IphoneUsbException.DeviceUnavailable("UsbManager could not reopen the iPhone")
-                },
-            ) ?: return current
+            val outcome =
+                UsbConfigurationSelection.select(
+                    target = configuration.id,
+                    interfaceIds = interfaces.keys.toList(),
+                    setConfiguration = { current.setConfiguration(configuration) },
+                    activeConfiguration = { activeConfiguration(current) },
+                    // A forced claim detaches the kernel driver. It stays claimed until the reopen.
+                    detach = { id -> current.claimInterface(interfaces.getValue(id), true) },
+                    // Closing drops the claims without the driver reattach that releaseInterface()
+                    // requests.
+                    reopen = {
+                        current.close()
+                        current =
+                            usbManager.openDevice(device)
+                                ?: throw IphoneUsbException.DeviceUnavailable(
+                                    "UsbManager could not reopen the iPhone"
+                                )
+                    },
+                ) ?: return current
             runCatching { onDiagnostic(outcome.diagnostic()) }
             if (outcome.wrongConfiguration) {
                 throw IphoneUsbException.DeviceUnavailable(
                     "Android could not switch the iPhone to USB configuration ${configuration.id} " +
-                        "(still ${outcome.after}); a head-unit driver may hold it",
+                        "(still ${outcome.after}); a head-unit driver may hold it"
                 )
             }
             if (!outcome.selected) {
-                Log.w(IphoneCarPlayConfiguration.TAG, "setConfiguration ${configuration.id} reported failure; claiming anyway")
+                Log.w(
+                    IphoneCarPlayConfiguration.TAG,
+                    "setConfiguration ${configuration.id} reported failure; claiming anyway",
+                )
             }
             return current
         } catch (error: Throwable) {
@@ -341,18 +394,29 @@ class IphoneUsbHost(
         }
     }
 
-    /** The iPhone's current configuration value (standard GET_CONFIGURATION), or null if unreadable. */
+    /**
+     * The iPhone's current configuration value (standard GET_CONFIGURATION), or null if unreadable.
+     */
     private fun activeConfiguration(connection: UsbDeviceConnection): Int? {
         val value = ByteArray(1)
-        val read = connection.controlTransfer(
-            USB_STANDARD_DEVICE_IN, GET_CONFIGURATION_REQUEST, 0, 0, value, value.size, CONTROL_TRANSFER_TIMEOUT_MILLIS,
-        )
+        val read =
+            connection.controlTransfer(
+                USB_STANDARD_DEVICE_IN,
+                GET_CONFIGURATION_REQUEST,
+                0,
+                0,
+                value,
+                value.size,
+                CONTROL_TRANSFER_TIMEOUT_MILLIS,
+            )
         return if (read == value.size) value[0].toInt() and 0xff else null
     }
 
     private fun requireConfiguredDevice(device: UsbDevice) {
         if (!matcher.matches(device.vendorId, device.productId)) {
-            throw IphoneUsbException.DeviceUnavailable("USB device is not a configured iPhone identity")
+            throw IphoneUsbException.DeviceUnavailable(
+                "USB device is not a configured iPhone identity"
+            )
         }
     }
 
@@ -366,11 +430,18 @@ class IphoneUsbHost(
         )
     }
 
-    private fun registerReceiver(filter: IntentFilter, onReceive: (Intent) -> Unit): Closeable {
-        val receiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context, intent: Intent) = onReceive(intent)
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+    private fun registerReceiver(
+        filter: IntentFilter,
+        guarded: Boolean = false,
+        onReceive: (Intent) -> Unit,
+    ): Closeable {
+        val receiver =
+            object : BroadcastReceiver() {
+                override fun onReceive(context: Context, intent: Intent) = onReceive(intent)
+            }
+        if (guarded) {
+            UsbPermissionBroadcast.register(appContext, receiver, filter)
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             appContext.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
         } else {
             appContext.registerReceiver(receiver, filter)
@@ -381,21 +452,39 @@ class IphoneUsbHost(
         }
     }
 
-    private fun Intent.usbDevice(): UsbDevice? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
-    } else {
-        @Suppress("DEPRECATION")
-        getParcelableExtra(UsbManager.EXTRA_DEVICE)
-    }
+    private fun Intent.usbDevice(): UsbDevice? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+        } else {
+            @Suppress("DEPRECATION") getParcelableExtra(UsbManager.EXTRA_DEVICE)
+        }
 
-    /** The iPhone's current USB mode (usbmuxd's 0x45 request) and every configuration it exposes. */
-    private fun modeRejectionDiagnostic(connection: UsbDeviceConnection, device: UsbDevice): String {
+    /**
+     * The iPhone's current USB mode (usbmuxd's 0x45 request) and every configuration it exposes.
+     */
+    private fun modeRejectionDiagnostic(
+        connection: UsbDeviceConnection,
+        device: UsbDevice,
+    ): String {
         val mode = ByteArray(USB_MODE_RESPONSE_LENGTH)
-        val read = connection.controlTransfer(
-            USB_VENDOR_DEVICE_IN, GET_USB_MODE_REQUEST, 0, 0, mode, mode.size, CONTROL_TRANSFER_TIMEOUT_MILLIS,
+        val read =
+            connection.controlTransfer(
+                USB_VENDOR_DEVICE_IN,
+                GET_USB_MODE_REQUEST,
+                0,
+                0,
+                mode,
+                mode.size,
+                CONTROL_TRANSFER_TIMEOUT_MILLIS,
+            )
+        return usbModeDiagnostic(
+            read,
+            mode,
+            device.version,
+            (0 until device.configurationCount).map(device::getConfiguration).map {
+                "${it.id}[${IphoneCarPlayConfiguration.describe(it)}]"
+            },
         )
-        return usbModeDiagnostic(read, mode, device.version,
-            (0 until device.configurationCount).map(device::getConfiguration).map { "${it.id}[${IphoneCarPlayConfiguration.describe(it)}]" })
     }
 
     companion object {
@@ -410,19 +499,34 @@ class IphoneUsbHost(
         private const val CONTROL_TRANSFER_TIMEOUT_MILLIS = 1_000
 
         /** usbmuxd reads 3:3:3:0 in the initial mode and 5:3:3:0 once a mode is set. */
-        /** iOS 12 and 15 answer the mode request with 3 bytes instead of 4 (#509, #455); keep them. */
-        internal fun usbModeDiagnostic(read: Int, mode: ByteArray, deviceVersion: String?, configurations: List<String>): String {
-            val bytes = mode.copyOf(read.coerceIn(0, mode.size)).joinToString(":") { (it.toInt() and 0xff).toString() }
-            val current = when (read) {
-                mode.size -> bytes
-                in 1 until mode.size -> "$bytes (short:$read)"
-                else -> "unreadable($read)"
-            }
+        /**
+         * iOS 12 and 15 answer the mode request with 3 bytes instead of 4 (#509, #455); keep them.
+         */
+        internal fun usbModeDiagnostic(
+            read: Int,
+            mode: ByteArray,
+            deviceVersion: String?,
+            configurations: List<String>,
+        ): String {
+            val bytes =
+                mode.copyOf(read.coerceIn(0, mode.size)).joinToString(":") {
+                    (it.toInt() and 0xff).toString()
+                }
+            val current =
+                when (read) {
+                    mode.size -> bytes
+                    in 1 until mode.size -> "$bytes (short:$read)"
+                    else -> "unreadable($read)"
+                }
             return "CarPlay USB mode request rejected; current mode=$current " +
                 "usbVersion=${deviceVersion ?: "unknown"} configurations=$configurations"
         }
-    }
 
+        internal fun isHub(deviceClass: Int, interfaceClasses: List<Int>): Boolean =
+            deviceClass == UsbConstants.USB_CLASS_HUB ||
+                interfaceClasses.isNotEmpty() &&
+                    interfaceClasses.all { it == UsbConstants.USB_CLASS_HUB }
+    }
 }
 
 /**
@@ -430,7 +534,8 @@ class IphoneUsbHost(
  *
  * All operations must run off the Android main thread. The session does not parse iAP2 frames.
  */
-class Iap2UsbSession internal constructor(
+class Iap2UsbSession
+internal constructor(
     private val connection: UsbDeviceConnection,
     private val outEndpoint: UsbEndpoint,
     private val inEndpoint: UsbEndpoint,
@@ -445,85 +550,91 @@ class Iap2UsbSession internal constructor(
     private val readQueuePolicy = UsbReadQueuePolicy.forCurrentPlatform()
     private val requests = UsbRequestQueue(connection, "usbmux-read-reaper")
 
-    fun write(data: ByteArray, timeoutMillis: Int) = synchronized(writeLock) {
-        checkOpen()
-        require(timeoutMillis > 0) { "timeoutMillis must be positive" }
-        if (data.isEmpty()) return@synchronized
-        val transferred = connection.bulkTransfer(outEndpoint, data, data.size, timeoutMillis)
-        if (transferred != data.size) {
-            throw IphoneUsbException.DeviceUnavailable(
-                "USBMUX write transferred $transferred of ${data.size} bytes",
-            )
+    fun write(data: ByteArray, timeoutMillis: Int) =
+        synchronized(writeLock) {
+            checkOpen()
+            require(timeoutMillis > 0) { "timeoutMillis must be positive" }
+            if (data.isEmpty()) return@synchronized
+            val transferred = connection.bulkTransfer(outEndpoint, data, data.size, timeoutMillis)
+            if (transferred != data.size) {
+                throw IphoneUsbException.DeviceUnavailable(
+                    "USBMUX write transferred $transferred of ${data.size} bytes"
+                )
+            }
         }
-    }
 
     /** Returns null only when no completed USB request arrives before [timeoutMillis]. */
-    fun read(timeoutMillis: Long): ByteArray? = synchronized(readLock) {
-        checkOpen()
-        require(timeoutMillis > 0) { "timeoutMillis must be positive" }
-        val request = UsbRequest()
-        var initialized = false
-        try {
-            if (!request.initialize(connection, inEndpoint)) {
-                throw IphoneUsbException.DeviceUnavailable(
-                    "Android could not initialize USBMUX read request (${requestDiagnostics(timeoutMillis)})",
-                )
+    fun read(timeoutMillis: Long): ByteArray? =
+        synchronized(readLock) {
+            checkOpen()
+            require(timeoutMillis > 0) { "timeoutMillis must be positive" }
+            val request = UsbRequest()
+            var initialized = false
+            try {
+                if (!request.initialize(connection, inEndpoint)) {
+                    throw IphoneUsbException.DeviceUnavailable(
+                        "Android could not initialize USBMUX read request (${requestDiagnostics(timeoutMillis)})"
+                    )
+                }
+                initialized = true
+                val buffer = ByteBuffer.allocateDirect(USBMUX_READ_CHUNK_BYTES)
+                val queueResult =
+                    synchronized(stateLock) {
+                        checkOpenLocked()
+                        pendingRead = request
+                        readQueuePolicy.queue(buffer, ::checkOpenLocked) {
+                            requests.queue(request, it)
+                        }
+                    }
+                if (!queueResult.queued) {
+                    throw IphoneUsbException.DeviceUnavailable(
+                        "Android could not queue USBMUX read request (${requestDiagnostics(timeoutMillis)} " +
+                            "firstBytes=${queueResult.firstBytes} fallbackBytes=${queueResult.fallbackBytes ?: "not_attempted"})"
+                    )
+                }
+                // The policy remembers an accepted fallback, so this event occurs once per pipe.
+                if (queueResult.fallbackBytes != null)
+                    runCatching {
+                        onDiagnostic(
+                            "USBMUX read queue compatibility fallback api=${Build.VERSION.SDK_INT} " +
+                                "endpoint=${describeUsbEndpoint(inEndpoint)} firstBytes=${queueResult.firstBytes} " +
+                                "fallbackBytes=${queueResult.fallbackBytes}"
+                        )
+                    }
+                val completed =
+                    try {
+                        requests.await(timeoutMillis)
+                    } catch (_: TimeoutException) {
+                        return@synchronized drainTimedOutRead(request, buffer)
+                    }
+                if (completed == null) {
+                    throw failSession("Android returned no USBMUX read request")
+                }
+                if (completed !== request) {
+                    throw failSession("Android completed an unexpected USB request")
+                }
+                return@synchronized ByteArray(buffer.position()).also {
+                    buffer.flip()
+                    buffer.get(it)
+                }
+            } catch (error: IphoneUsbException) {
+                throw error
+            } catch (error: RuntimeException) {
+                throw failSession("USBMUX read failed", error)
+            } finally {
+                synchronized(stateLock) { if (pendingRead === request) pendingRead = null }
+                if (initialized) request.cancel()
+                request.close()
             }
-            initialized = true
-            val buffer = ByteBuffer.allocateDirect(USBMUX_READ_CHUNK_BYTES)
-            val queueResult = synchronized(stateLock) {
-                checkOpenLocked()
-                pendingRead = request
-                readQueuePolicy.queue(buffer, ::checkOpenLocked) { requests.queue(request, it) }
-            }
-            if (!queueResult.queued) {
-                throw IphoneUsbException.DeviceUnavailable(
-                    "Android could not queue USBMUX read request (${requestDiagnostics(timeoutMillis)} " +
-                        "firstBytes=${queueResult.firstBytes} fallbackBytes=${queueResult.fallbackBytes ?: "not_attempted"})",
-                )
-            }
-            // The policy remembers an accepted fallback, so this event occurs once per pipe.
-            if (queueResult.fallbackBytes != null) runCatching {
-                onDiagnostic(
-                    "USBMUX read queue compatibility fallback api=${Build.VERSION.SDK_INT} " +
-                        "endpoint=${describeUsbEndpoint(inEndpoint)} firstBytes=${queueResult.firstBytes} " +
-                        "fallbackBytes=${queueResult.fallbackBytes}",
-                )
-            }
-            val completed = try {
-                requests.await(timeoutMillis)
-            } catch (_: TimeoutException) {
-                return@synchronized drainTimedOutRead(request, buffer)
-            }
-            if (completed == null) {
-                throw failSession("Android returned no USBMUX read request")
-            }
-            if (completed !== request) {
-                throw failSession("Android completed an unexpected USB request")
-            }
-            return@synchronized ByteArray(buffer.position()).also {
-                buffer.flip()
-                buffer.get(it)
-            }
-        } catch (error: IphoneUsbException) {
-            throw error
-        } catch (error: RuntimeException) {
-            throw failSession("USBMUX read failed", error)
-        } finally {
-            synchronized(stateLock) {
-                if (pendingRead === request) pendingRead = null
-            }
-            if (initialized) request.cancel()
-            request.close()
         }
-    }
 
     override fun close() {
-        val requestToCancel = synchronized(stateLock) {
-            if (closed) return
-            closed = true
-            pendingRead
-        }
+        val requestToCancel =
+            synchronized(stateLock) {
+                if (closed) return
+                closed = true
+                pendingRead
+            }
         requestToCancel?.cancel()
         requests.close()
         connection.close()
@@ -547,14 +658,15 @@ class Iap2UsbSession internal constructor(
      */
     private fun drainTimedOutRead(request: UsbRequest, buffer: ByteBuffer): ByteArray? {
         val cancelled = request.cancel()
-        val completed = try {
-            requests.await(CANCEL_DRAIN_TIMEOUT_MILLIS)
-        } catch (_: TimeoutException) {
-            throw failSession(
-                if (cancelled) "Timed out draining cancelled USBMUX read request"
-                else "Android could not cancel timed out USBMUX read request",
-            )
-        }
+        val completed =
+            try {
+                requests.await(CANCEL_DRAIN_TIMEOUT_MILLIS)
+            } catch (_: TimeoutException) {
+                throw failSession(
+                    if (cancelled) "Timed out draining cancelled USBMUX read request"
+                    else "Android could not cancel timed out USBMUX read request"
+                )
+            }
         if (completed !== request) {
             throw failSession("Android did not drain the cancelled USBMUX read request")
         }
@@ -565,11 +677,12 @@ class Iap2UsbSession internal constructor(
         }
     }
 
-    private fun failSession(message: String, cause: Throwable? = null): IphoneUsbException.DeviceUnavailable {
+    private fun failSession(
+        message: String,
+        cause: Throwable? = null,
+    ): IphoneUsbException.DeviceUnavailable {
         val error = IphoneUsbException.DeviceUnavailable(message, cause)
-        synchronized(stateLock) {
-            if (failure == null) failure = error
-        }
+        synchronized(stateLock) { if (failure == null) failure = error }
         return error
     }
 
@@ -590,9 +703,15 @@ internal fun describeUsbEndpoint(endpoint: UsbEndpoint): String =
         "type=${endpoint.type},maxPacket=${endpoint.maxPacketSize})"
 
 /** USB bring-up failures that precede iAP2 and are distinct from MFi I2C failures. */
-sealed class IphoneUsbException(message: String, cause: Throwable? = null) : IOException(message, cause) {
-    class PermissionDenied(message: String, cause: Throwable? = null) : IphoneUsbException(message, cause)
-    class DeviceUnavailable(message: String, cause: Throwable? = null) : IphoneUsbException(message, cause)
+sealed class IphoneUsbException(message: String, cause: Throwable? = null) :
+    IOException(message, cause) {
+    class PermissionDenied(message: String, cause: Throwable? = null) :
+        IphoneUsbException(message, cause)
+
+    class DeviceUnavailable(message: String, cause: Throwable? = null) :
+        IphoneUsbException(message, cause)
+
     class TimedOut(message: String, cause: Throwable? = null) : IphoneUsbException(message, cause)
+
     class Protocol(message: String) : IphoneUsbException(message)
 }

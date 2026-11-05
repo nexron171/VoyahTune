@@ -3,15 +3,17 @@ package com.shilapi.xcertplay.transport
 import android.util.Log
 import java.io.Closeable
 import java.util.ArrayDeque
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * USBMUX version-2 host over an already claimed iPhone bulk pipe.
  *
- * This is deliberately limited to USBMUX framing and one minimal outbound TCP connection. It
- * does not parse lockdown messages, iAP2, TLS, NCM, AirPlay, or any media protocol. All calls
- * may block and must run away from Android's main thread.
+ * This is deliberately limited to USBMUX framing and one minimal outbound TCP connection. It does
+ * not parse lockdown messages, iAP2, TLS, NCM, AirPlay, or any media protocol. All calls may block
+ * and must run away from Android's main thread.
  */
-class Iap2UsbMuxHost private constructor(
+class Iap2UsbMuxHost
+private constructor(
     private val pipe: Iap2UsbSession,
     private val readTimeoutMillis: Long,
     private val onDiagnostic: (String) -> Unit,
@@ -24,6 +26,8 @@ class Iap2UsbMuxHost private constructor(
     private var nextMuxSequence = 0
     private var nextMuxAcknowledgement = 0
     private var receivedFrames = 0
+    private val loggedControlFrames = AtomicInteger()
+    private val loggedLargeWrites = AtomicInteger()
     private var nextSourcePort = FIRST_SOURCE_PORT
     private lateinit var readerThread: Thread
     private val receiveFrames = UsbMuxFrameBuffer { line ->
@@ -39,18 +43,21 @@ class Iap2UsbMuxHost private constructor(
         require(destinationPort in 1..0xffff) { "destinationPort must be a valid TCP port" }
         require(timeoutMillis > 0) { "timeoutMillis must be positive" }
 
-        val connection = synchronized(stateLock) {
-            checkOpenLocked()
-            val sourcePort = allocateSourcePortLocked()
-            Iap2UsbMuxTcpConnection(this, sourcePort, destinationPort).also {
-                connections[sourcePort] = it
+        val connection =
+            synchronized(stateLock) {
+                checkOpenLocked()
+                val sourcePort = allocateSourcePortLocked()
+                Iap2UsbMuxTcpConnection(this, sourcePort, destinationPort).also {
+                    connections[sourcePort] = it
+                }
             }
-        }
         try {
             connection.beginConnect()
             if (!connection.awaitConnected(timeoutMillis)) {
                 connection.abort()
-                throw IphoneUsbException.TimedOut("USBMUX TCP connection to port $destinationPort timed out")
+                throw IphoneUsbException.TimedOut(
+                    "USBMUX TCP connection to port $destinationPort timed out"
+                )
             }
             return connection
         } catch (error: IphoneUsbException) {
@@ -60,11 +67,12 @@ class Iap2UsbMuxHost private constructor(
     }
 
     override fun close() {
-        val activeConnections = synchronized(stateLock) {
-            if (closed) return
-            closed = true
-            connections.values.toList().also { connections.clear() }
-        }
+        val activeConnections =
+            synchronized(stateLock) {
+                if (closed) return
+                closed = true
+                connections.values.toList().also { connections.clear() }
+            }
         activeConnections.forEach(Iap2UsbMuxTcpConnection::closeFromHost)
         pipe.close()
         if (::readerThread.isInitialized && Thread.currentThread() !== readerThread) {
@@ -84,7 +92,11 @@ class Iap2UsbMuxHost private constructor(
         flags: Int,
         payload: ByteArray,
     ) {
-        if (payload.size > 512) Log.i("xcertplay-usb", "usbmux TX source=$sourcePort destination=$destinationPort bytes=${payload.size} seq=$sequence ack=$acknowledgement")
+        if (payload.size > 512 && loggedLargeWrites.incrementAndGet() <= LOGGED_RX_FRAMES)
+            Log.i(
+                "xcertplay-usb",
+                "usbmux TX source=$sourcePort destination=$destinationPort bytes=${payload.size} seq=$sequence ack=$acknowledgement",
+            )
         val tcp = ByteArray(TCP_HEADER_BYTES + payload.size)
         putU16(tcp, 0, sourcePort)
         putU16(tcp, 2, destinationPort)
@@ -121,13 +133,17 @@ class Iap2UsbMuxHost private constructor(
             if (remainingNanos <= 0) {
                 throw IphoneUsbException.TimedOut("Timed out waiting for the USBMUX version reply")
             }
-            val remainingMillis = (remainingNanos + NANOS_PER_MILLISECOND - 1) / NANOS_PER_MILLISECOND
-            reply = takeFrame(remainingMillis)
-                ?: throw IphoneUsbException.TimedOut("Timed out waiting for the USBMUX version reply")
+            val remainingMillis =
+                (remainingNanos + NANOS_PER_MILLISECOND - 1) / NANOS_PER_MILLISECOND
+            reply =
+                takeFrame(remainingMillis)
+                    ?: throw IphoneUsbException.TimedOut(
+                        "Timed out waiting for the USBMUX version reply"
+                    )
             if (
                 reply.protocol == PROTOCOL_VERSION &&
-                reply.length == VERSION_MESSAGE_BYTES &&
-                reply.word8 == USBMUX_VERSION
+                    reply.length == VERSION_MESSAGE_BYTES &&
+                    reply.word8 == USBMUX_VERSION
             ) {
                 break
             }
@@ -137,7 +153,7 @@ class Iap2UsbMuxHost private constructor(
             if (reply.protocol != PROTOCOL_TCP || ++staleFrames > MAX_STALE_HANDSHAKE_FRAMES) {
                 throw IphoneUsbException.Protocol(
                     "Invalid USBMUX version reply: proto=${reply.protocol} " +
-                        "length=${reply.length} version=${reply.word8}",
+                        "length=${reply.length} version=${reply.word8}"
                 )
             }
             Log.i("xcertplay-usb", "discarding stale usbmux TCP frame before version reply")
@@ -146,10 +162,11 @@ class Iap2UsbMuxHost private constructor(
         // Optional reply padding is handled by the incremental framer. Retain a possible
         // fragmented/coalesced next frame instead of discarding the entire remainder.
         sendFrame(PROTOCOL_SETUP, byteArrayOf(SETUP_VALUE.toByte()))
-        readerThread = Thread(::readerLoop, "iap2-usbmux-reader").apply {
-            isDaemon = true
-            start()
-        }
+        readerThread =
+            Thread(::readerLoop, "iap2-usbmux-reader").apply {
+                isDaemon = true
+                start()
+            }
     }
 
     /** Reads one complete USBMUX frame, keeping partial data buffered across reads. */
@@ -162,54 +179,52 @@ class Iap2UsbMuxHost private constructor(
                     // LIVI only trusts the length field on receive: iPhone replies do not
                     // carry the 0xFEEDFACE word in the header's fourth field.
                     // One line per frame filled logcat within a minute of a wired session (#634).
-                    if (++receivedFrames <= LOGGED_RX_FRAMES) Log.i(
-                        "xcertplay-usb",
-                        "usbmux rx proto=${frame.protocol} length=${frame.length} word8=0x" +
-                            frame.word8.toUInt().toString(16),
-                    )
+                    if (++receivedFrames <= LOGGED_RX_FRAMES)
+                        Log.i(
+                            "xcertplay-usb",
+                            "usbmux rx proto=${frame.protocol} length=${frame.length} word8=0x" +
+                                frame.word8.toUInt().toString(16),
+                        )
                     nextMuxAcknowledgement = frame.sequence
                     return frame
                 }
             }
             val remainingNanos = deadline - System.nanoTime()
             if (remainingNanos <= 0) return null
-            val remainingMillis = (remainingNanos + NANOS_PER_MILLISECOND - 1) / NANOS_PER_MILLISECOND
+            val remainingMillis =
+                (remainingNanos + NANOS_PER_MILLISECOND - 1) / NANOS_PER_MILLISECOND
             val bytes = pipe.read(remainingMillis) ?: continue
-            synchronized(stateLock) {
-                receiveFrames.append(bytes)
-            }
+            synchronized(stateLock) { receiveFrames.append(bytes) }
         }
     }
 
-    private fun sendFrame(protocol: Int, payload: ByteArray) = synchronized(writeLock) {
-        val sequenceAndAcknowledgement = synchronized(stateLock) {
-            checkOpenLocked()
-            nextMuxSequence to nextMuxAcknowledgement
+    private fun sendFrame(protocol: Int, payload: ByteArray) =
+        synchronized(writeLock) {
+            val sequenceAndAcknowledgement =
+                synchronized(stateLock) {
+                    checkOpenLocked()
+                    nextMuxSequence to nextMuxAcknowledgement
+                }
+            val frame = ByteArray(MUX_HEADER_BYTES + payload.size)
+            putU32(frame, 0, protocol)
+            putU32(frame, 4, frame.size)
+            putU32(frame, 8, MUX_MAGIC)
+            putU16(frame, 12, sequenceAndAcknowledgement.first)
+            putU16(frame, 14, sequenceAndAcknowledgement.second)
+            payload.copyInto(frame, MUX_HEADER_BYTES)
+            try {
+                pipe.write(frame, WRITE_TIMEOUT_MILLIS)
+            } catch (error: IphoneUsbException) {
+                fail(error)
+                throw error
+            }
+            synchronized(stateLock) { nextMuxSequence = (nextMuxSequence + 1) and 0xffff }
         }
-        val frame = ByteArray(MUX_HEADER_BYTES + payload.size)
-        putU32(frame, 0, protocol)
-        putU32(frame, 4, frame.size)
-        putU32(frame, 8, MUX_MAGIC)
-        putU16(frame, 12, sequenceAndAcknowledgement.first)
-        putU16(frame, 14, sequenceAndAcknowledgement.second)
-        payload.copyInto(frame, MUX_HEADER_BYTES)
-        try {
-            pipe.write(frame, WRITE_TIMEOUT_MILLIS)
-        } catch (error: IphoneUsbException) {
-            fail(error)
-            throw error
-        }
-        synchronized(stateLock) {
-            nextMuxSequence = (nextMuxSequence + 1) and 0xffff
-        }
-    }
 
     private fun readerLoop() {
         try {
             while (true) {
-                synchronized(stateLock) {
-                    if (closed) return
-                }
+                synchronized(stateLock) { if (closed) return }
                 val frame = takeFrame(readTimeoutMillis) ?: continue
                 if (frame.protocol == PROTOCOL_TCP) dispatchTcp(frame.payload)
             }
@@ -231,7 +246,15 @@ class Iap2UsbMuxHost private constructor(
             throw IphoneUsbException.Protocol("Invalid USBMUX TCP header length")
         }
         val destinationPort = readU16(frame, offset + 2)
-        if (length == tcpHeaderBytes) Log.i("xcertplay-usb", "usbmux TCP control destination=$destinationPort flags=${frame[13].toInt() and 0xff} ack=${readU32(frame, 8)} window=${readU16(frame, 14)}")
+        if (
+            length == tcpHeaderBytes &&
+                (frame[13].toInt() and TCP_SYN_FIN_RST != 0 ||
+                    loggedControlFrames.incrementAndGet() <= LOGGED_RX_FRAMES)
+        )
+            Log.i(
+                "xcertplay-usb",
+                "usbmux TCP control destination=$destinationPort flags=${frame[13].toInt() and 0xff} ack=${readU32(frame, 8)} window=${readU16(frame, 14)}",
+            )
         val connection = synchronized(stateLock) { connections[destinationPort] } ?: return
         connection.onPacket(
             flags = frame[offset + 13].toInt() and 0xff,
@@ -241,12 +264,13 @@ class Iap2UsbMuxHost private constructor(
     }
 
     private fun fail(error: IphoneUsbException) {
-        val activeConnections = synchronized(stateLock) {
-            if (closed) return
-            failure = failure ?: error
-            closed = true
-            connections.values.toList().also { connections.clear() }
-        }
+        val activeConnections =
+            synchronized(stateLock) {
+                if (closed) return
+                failure = failure ?: error
+                closed = true
+                connections.values.toList().also { connections.clear() }
+            }
         activeConnections.forEach { it.closeFromHost(error) }
         pipe.close()
     }
@@ -279,6 +303,7 @@ class Iap2UsbMuxHost private constructor(
         private const val NANOS_PER_MILLISECOND = 1_000_000L
         private const val MUX_HEADER_BYTES = 16
         private const val TCP_HEADER_BYTES = 20
+        private const val TCP_SYN_FIN_RST = 0x07
         private const val TCP_WINDOW_FIELD = 512
         private const val FIRST_SOURCE_PORT = 1
         private const val HANDSHAKE_TIMEOUT_MILLIS = 60_000L
@@ -328,7 +353,8 @@ class Iap2UsbMuxHost private constructor(
 }
 
 /** A blocking TCP byte stream carried by [Iap2UsbMuxHost]. */
-class Iap2UsbMuxTcpConnection internal constructor(
+class Iap2UsbMuxTcpConnection
+internal constructor(
     private val host: Iap2UsbMuxHost,
     internal val sourcePort: Int,
     private val destinationPort: Int,
@@ -350,10 +376,11 @@ class Iap2UsbMuxTcpConnection internal constructor(
             val count = minOf(MAX_SEND_PAYLOAD_BYTES, data.size - offset)
             val chunk = data.copyOfRange(offset, offset + count)
             synchronized(writeLock) {
-                val sequenceAndAck = synchronized(stateLock) {
-                    checkConnectedLocked()
-                    nextSequence to nextAcknowledgement
-                }
+                val sequenceAndAck =
+                    synchronized(stateLock) {
+                        checkConnectedLocked()
+                        nextSequence to nextAcknowledgement
+                    }
                 host.sendTcp(
                     sourcePort,
                     destinationPort,
@@ -381,10 +408,15 @@ class Iap2UsbMuxTcpConnection internal constructor(
                 val remainingNanos = deadline - System.nanoTime()
                 if (remainingNanos <= 0) return null
                 try {
-                    stateLock.wait(remainingNanos / NANOS_PER_MILLISECOND, (remainingNanos % NANOS_PER_MILLISECOND).toInt())
+                    stateLock.wait(
+                        remainingNanos / NANOS_PER_MILLISECOND,
+                        (remainingNanos % NANOS_PER_MILLISECOND).toInt(),
+                    )
                 } catch (_: InterruptedException) {
                     Thread.currentThread().interrupt()
-                    throw IphoneUsbException.DeviceUnavailable("Interrupted while waiting for USBMUX TCP data")
+                    throw IphoneUsbException.DeviceUnavailable(
+                        "Interrupted while waiting for USBMUX TCP data"
+                    )
                 }
             }
             failure?.let { throw it }
@@ -402,16 +434,18 @@ class Iap2UsbMuxTcpConnection internal constructor(
     }
 
     override fun close() {
-        val shouldSendFin = synchronized(stateLock) {
-            if (closed) return
-            closed = true
-            stateLock.notifyAll()
-            connected
-        }
+        val shouldSendFin =
+            synchronized(stateLock) {
+                if (closed) return
+                closed = true
+                stateLock.notifyAll()
+                connected
+            }
         if (shouldSendFin) {
             try {
                 synchronized(writeLock) {
-                    val sequenceAndAck = synchronized(stateLock) { nextSequence to nextAcknowledgement }
+                    val sequenceAndAck =
+                        synchronized(stateLock) { nextSequence to nextAcknowledgement }
                     host.sendTcp(
                         sourcePort,
                         destinationPort,
@@ -439,10 +473,15 @@ class Iap2UsbMuxTcpConnection internal constructor(
                 val remainingNanos = deadline - System.nanoTime()
                 if (remainingNanos <= 0) return false
                 try {
-                    stateLock.wait(remainingNanos / NANOS_PER_MILLISECOND, (remainingNanos % NANOS_PER_MILLISECOND).toInt())
+                    stateLock.wait(
+                        remainingNanos / NANOS_PER_MILLISECOND,
+                        (remainingNanos % NANOS_PER_MILLISECOND).toInt(),
+                    )
                 } catch (_: InterruptedException) {
                     Thread.currentThread().interrupt()
-                    throw IphoneUsbException.DeviceUnavailable("Interrupted while connecting USBMUX TCP")
+                    throw IphoneUsbException.DeviceUnavailable(
+                        "Interrupted while connecting USBMUX TCP"
+                    )
                 }
             }
             failure?.let { throw it }
@@ -451,12 +490,13 @@ class Iap2UsbMuxTcpConnection internal constructor(
     }
 
     internal fun abort() {
-        val shouldSendReset = synchronized(stateLock) {
-            if (closed) return
-            closed = true
-            stateLock.notifyAll()
-            true
-        }
+        val shouldSendReset =
+            synchronized(stateLock) {
+                if (closed) return
+                closed = true
+                stateLock.notifyAll()
+                true
+            }
         if (shouldSendReset) {
             try {
                 sendControl(TCP_RST or TCP_ACK)
@@ -467,17 +507,21 @@ class Iap2UsbMuxTcpConnection internal constructor(
         host.removeConnection(this)
     }
 
-    internal fun closeFromHost(error: IphoneUsbException? = null) = synchronized(stateLock) {
-        if (closed) return@synchronized
-        failure = error ?: failure
-        closed = true
-        stateLock.notifyAll()
-    }
+    internal fun closeFromHost(error: IphoneUsbException? = null) =
+        synchronized(stateLock) {
+            if (closed) return@synchronized
+            failure = error ?: failure
+            closed = true
+            stateLock.notifyAll()
+        }
 
     internal fun onPacket(flags: Int, sequence: Int, payload: ByteArray) {
         if ((flags and TCP_RST) != 0) {
             synchronized(stateLock) {
-                failure = IphoneUsbException.DeviceUnavailable("USBMUX TCP connection was reset by the peer")
+                failure =
+                    IphoneUsbException.DeviceUnavailable(
+                        "USBMUX TCP connection was reset by the peer"
+                    )
                 closed = true
                 stateLock.notifyAll()
             }
@@ -522,21 +566,23 @@ class Iap2UsbMuxTcpConnection internal constructor(
         }
     }
 
-    private fun sendControl(flags: Int) = synchronized(writeLock) {
-        val sequenceAndAck = synchronized(stateLock) { nextSequence to nextAcknowledgement }
-        host.sendTcp(
-            sourcePort,
-            destinationPort,
-            sequenceAndAck.first,
-            sequenceAndAck.second,
-            flags,
-            ByteArray(0),
-        )
-    }
+    private fun sendControl(flags: Int) =
+        synchronized(writeLock) {
+            val sequenceAndAck = synchronized(stateLock) { nextSequence to nextAcknowledgement }
+            host.sendTcp(
+                sourcePort,
+                destinationPort,
+                sequenceAndAck.first,
+                sequenceAndAck.second,
+                flags,
+                ByteArray(0),
+            )
+        }
 
     private fun checkConnectedLocked() {
         failure?.let { throw it }
-        if (!connected || closed) throw IphoneUsbException.DeviceUnavailable("USBMUX TCP connection is not open")
+        if (!connected || closed)
+            throw IphoneUsbException.DeviceUnavailable("USBMUX TCP connection is not open")
     }
 
     private companion object {

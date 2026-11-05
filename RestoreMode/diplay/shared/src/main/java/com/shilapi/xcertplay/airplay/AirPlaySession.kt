@@ -6,6 +6,7 @@ import com.shilapi.xcertplay.transport.BlockingDuplexByteStream
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.Closeable
+import java.io.IOException
 import java.math.BigInteger
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -26,39 +27,79 @@ data class AirPlayDeviceInfo(
 /** Session lifecycle and command callbacks for the driver/UI layer. */
 interface AirPlaySessionListener {
     fun onTcpAccepted(event: AirPlayTcpAccepted) {}
+
     fun onSessionActive(session: AirPlaySession) {}
+
     fun onSessionEnded(session: AirPlaySession) {}
+
     fun onVideoFrameRendered(session: AirPlaySession) {}
+
     /** Validated downstream; immutable copy of iPhone's top-left grayscale coverage PNG. */
     fun onCornerMask(session: AirPlaySession, png: ByteArray, displayWidth: Int) {}
+
     fun onTransportError(message: String) {}
+
     fun onDeviceInfo(session: AirPlaySession, info: AirPlayDeviceInfo) {}
+
     fun onHostUiRequested(session: AirPlaySession) {}
+
     fun onCommand(session: AirPlaySession, type: String, params: Map<String, Any?>) {}
+
     /** Video in car: a playback message on a remote control session (X-Apple-StreamID). */
-    fun onRemoteControlMessage(session: AirPlaySession, streamId: Long, message: Map<String, Any?>) {}
-    /** Video in car: requestUI "videoplayback:", the iPhone asks the car to show its video player. */
+    fun onRemoteControlMessage(
+        session: AirPlaySession,
+        streamId: Long,
+        message: Map<String, Any?>,
+    ) {}
+
+    /**
+     * Video in car: requestUI "videoplayback:", the iPhone asks the car to show its video player.
+     */
     fun onVideoPlaybackUiRequested(session: AirPlaySession) {}
+
+    /**
+     * False when this listener drops "TRACE " lines: the session then skips building their hex
+     * dumps.
+     */
+    val wantsTrace: Boolean
+        get() = true
+
     fun onDebugLog(message: String) {}
 }
 
 /** Stream transport seam; media decode/render is supplied by a later layer. */
 interface AirPlayMediaHandler {
     fun onAudioDucking(session: AirPlaySession, volumeDb: Double, durationMs: Long) {}
+
     fun onScreen(session: AirPlaySession, type: Int, stream: Map<String, Any?>): Int? = null
-    fun onAudio(session: AirPlaySession, type: Int, stream: Map<String, Any?>): Map<String, Any?>? = null
+
+    fun onAudio(session: AirPlaySession, type: Int, stream: Map<String, Any?>): Map<String, Any?>? =
+        null
+
     fun onDataStream(session: AirPlaySession, stream: Map<String, Any?>): Map<String, Any?>? = null
+
     /** CarPlay's main buffered audio (type 103): the SETUP response, or null to decline it. */
-    fun onBufferedAudio(session: AirPlaySession, stream: Map<String, Any?>): Map<String, Any?>? = null
+    fun onBufferedAudio(session: AirPlaySession, stream: Map<String, Any?>): Map<String, Any?>? =
+        null
+
     /**
      * SETRATE, SETRATEANCHORTIME, GETANCHOR and FLUSHBUFFERED for the buffered stream: the response
      * plist (the anchor), or null for an empty 200.
      */
-    fun onBufferedAudioControl(session: AirPlaySession, method: String, body: Map<String, Any?>): Map<String, Any?>? = null
+    fun onBufferedAudioControl(
+        session: AirPlaySession,
+        method: String,
+        body: Map<String, Any?>,
+    ): Map<String, Any?>? = null
+
     fun onFeedback(session: AirPlaySession): Map<String, Any?>? = null
+
     fun onTeardown(session: AirPlaySession, type: Int) {}
+
     fun onSessionClosed(session: AirPlaySession) {}
+
     fun setIapTunnelHandler(handler: ((BlockingDuplexByteStream) -> Boolean)?) {}
+
     fun onSetupResponseSent(session: AirPlaySession) {}
 }
 
@@ -85,13 +126,17 @@ class AirPlaySession(
     internal val activeStreams = linkedSetOf<Int>()
 
     /** Counts the iPhone's cluster stream setups; 0 while no cluster stream is up. */
-    @Volatile var clusterStream = 0
+    @Volatile
+    var clusterStream = 0
         private set
+
     private var clusterStreamSetups = 0
     @Volatile private var mainScreenToken: Any? = null
 
     private val closed = AtomicBoolean(false)
-    internal val isClosed: Boolean get() = closed.get()
+    internal val isClosed: Boolean
+        get() = closed.get()
+
     private val notified = AtomicBoolean(false)
     private var eventServer: ServerSocket? = null
     private var eventSocket: Socket? = null
@@ -119,19 +164,28 @@ class AirPlaySession(
     private val peerAddress: InetAddress? = socket.inetAddress
     internal val remoteAddress: InetAddress?
         get() = (socket.remoteSocketAddress as? InetSocketAddress)?.address
-    val controllerId: String? get() = pairVerify.verifiedControllerId
-    val sharedSecret: ByteArray? get() = pairVerify.shared?.copyOf()
-    val videoInCar: Boolean get() = config.videoInCar
+
+    val controllerId: String?
+        get() = pairVerify.verifiedControllerId
+
+    val sharedSecret: ByteArray?
+        get() = pairVerify.shared?.copyOf()
+
+    val videoInCar: Boolean
+        get() = config.videoInCar
+
     private val protocolExtension = config.protocolExtension?.forSession()
     @Volatile private var mfi4: com.shilapi.xcertplay.airplay.mfi4.Mfi4Session? = null
-    @Volatile var vehicleStateEnabled: Boolean = false
+    @Volatile
+    var vehicleStateEnabled: Boolean = false
         private set
+
     private val videoPlaybackAvailability = VideoPlaybackAvailability { allowed ->
         sendCommand(
             linkedMapOf(
                 "type" to "setVideoPlaybackAllowed",
                 "params" to linkedMapOf("videoPlaybackAllowed" to allowed),
-            ),
+            )
         )
     }
 
@@ -143,7 +197,7 @@ class AirPlaySession(
         if (!closed.get()) listener.onVideoFrameRendered(this)
     }
 
-    internal fun logTrace(message: String) = trace(message)
+    internal fun logTrace(message: String) = trace { message }
 
     fun start() {
         Thread(::runControl, "airplay-control").apply {
@@ -169,25 +223,34 @@ class AirPlaySession(
         if (notified.compareAndSet(false, true)) listener.onSessionEnded(this)
     }
 
-    /** Stable identity of the usable primary screen; replaced on SETUP, absent after teardown/close. */
+    /**
+     * Stable identity of the usable primary screen; replaced on SETUP, absent after teardown/close.
+     */
     internal fun mainScreenSessionToken(): Any? = if (closed.get()) null else mainScreenToken
 
     /**
-     * Asks the iPhone to draw CarPlay's cluster UI on the alt screen (showUI with the display's URL,
-     * then a keyframe) or to stop drawing it (stopUI). The stream stays up either way; CarKit handles
-     * both as car-initiated commands for a screen UUID.
+     * Asks the iPhone to draw CarPlay's cluster UI on the alt screen (showUI with the display's
+     * URL, then a keyframe) or to stop drawing it (stopUI). The stream stays up either way; CarKit
+     * handles both as car-initiated commands for a screen UUID.
      */
     fun setClusterUiShown(shown: Boolean): Boolean {
         synchronized(clusterCommandLock) {
             if (closed.get() || clusterStream <= 0) return false
             val content = synchronized(clusterContentLock) { clusterContent } ?: return false
             if (!shown) {
-                val sent = sendCommand(mapOf("type" to "stopUI",
-                    "params" to mapOf("uuid" to config.clusterDisplayIdentifier)))
+                val sent =
+                    sendCommand(
+                        mapOf(
+                            "type" to "stopUI",
+                            "params" to mapOf("uuid" to config.clusterDisplayIdentifier),
+                        )
+                    )
                 return synchronized(clusterContentLock) {
                     val current = clusterContent ?: return false
                     if (closed.get() || current.stream != content.stream) {
-                        if (sent) clusterContent = current.copy(displayed = null, shown = false, token = Any())
+                        if (sent)
+                            clusterContent =
+                                current.copy(displayed = null, shown = false, token = Any())
                         return false
                     }
                     if (sent) clusterContent = current.copy(shown = false)
@@ -198,17 +261,28 @@ class AirPlaySession(
         }
     }
 
-    private data class ClusterContent(val stream: Int, val requested: String?, val displayed: String?,
-        val shown: Boolean = true, val token: Any = Any())
+    private data class ClusterContent(
+        val stream: Int,
+        val requested: String?,
+        val displayed: String?,
+        val shown: Boolean = true,
+        val token: Any = Any(),
+    )
+
     private val clusterContentLock = Any()
     private val clusterCommandLock = Any()
     @Volatile private var clusterContent: ClusterContent? = null
     private var requestedClusterUrl = config.cluster?.initialUrl // guarded by clusterContentLock
 
-    /** Last delivered content for this stream. Pending selections never grant wheel zoom eligibility. */
+    /**
+     * Last delivered content for this stream. Pending selections never grant wheel zoom
+     * eligibility.
+     */
     fun clusterUrl(): String? = clusterContentRoute()?.second
 
-    /** One immutable snapshot keeps content and generation checks consistent without locking keys. */
+    /**
+     * One immutable snapshot keeps content and generation checks consistent without locking keys.
+     */
     internal fun clusterContentRoute(): Triple<Int, String?, Any>? {
         val content = clusterContent ?: return null
         if (closed.get() || content.stream != clusterStream) return null
@@ -216,65 +290,83 @@ class AirPlaySession(
     }
 
     /**
-     * Switches the dashboard to another of the iPhone's `altScreenURLs` without reconnecting: `showUI`
-     * with that URL and a keyframe (on a Tang this switches map, turn card and both at once). With [send]
-     * false (the map is paused) the URL is only kept for the next `showUI`. False without a cluster stream.
+     * Switches the dashboard to another of the iPhone's `altScreenURLs` without reconnecting:
+     * `showUI` with that URL and a keyframe (on a Tang this switches map, turn card and both at
+     * once). With [send] false (the map is paused) the URL is only kept for the next `showUI`.
+     * False without a cluster stream.
      */
     fun setClusterUrl(url: String, send: Boolean): Boolean {
         return synchronized(clusterCommandLock) {
-            val content = synchronized(clusterContentLock) {
-                val current = clusterContent ?: return false
-                if (closed.get() || current.stream != clusterStream || config.cluster == null) return false
-                requestedClusterUrl = url
-                current.copy(requested = url).also { clusterContent = it }
-            }
+            val content =
+                synchronized(clusterContentLock) {
+                    val current = clusterContent ?: return false
+                    if (closed.get() || current.stream != clusterStream || config.cluster == null)
+                        return false
+                    requestedClusterUrl = url
+                    current.copy(requested = url).also { clusterContent = it }
+                }
             if (!send) true else showClusterUrl(content, url)
         }
     }
 
-    /** Seeds a retained controller selection even when this phone has not set up its cluster yet. */
-    internal fun restoreClusterUrl(url: String, send: Boolean): Boolean = synchronized(clusterCommandLock) {
-        val content = synchronized(clusterContentLock) {
-            if (closed.get() || config.cluster == null) return false
-            requestedClusterUrl = url
-            clusterContent?.copy(requested = url)?.also { clusterContent = it }
+    /**
+     * Seeds a retained controller selection even when this phone has not set up its cluster yet.
+     */
+    internal fun restoreClusterUrl(url: String, send: Boolean): Boolean =
+        synchronized(clusterCommandLock) {
+            val content =
+                synchronized(clusterContentLock) {
+                    if (closed.get() || config.cluster == null) return false
+                    requestedClusterUrl = url
+                    clusterContent?.copy(requested = url)?.also { clusterContent = it }
+                }
+            if (content == null || !send || (content.shown && content.displayed == url)) true
+            else showClusterUrl(content, url)
         }
-        if (content == null || !send || (content.shown && content.displayed == url)) true
-        else showClusterUrl(content, url)
-    }
 
     private fun showClusterUrl(content: ClusterContent, url: String): Boolean {
         if (closed.get() || clusterStream != content.stream) return false
         val uuid = config.clusterDisplayIdentifier
-        val uiSent = sendCommand(mapOf("type" to "showUI", "params" to mapOf("uuid" to uuid, "url" to url)))
-        val sent = uiSent && clusterStream == content.stream && !closed.get() &&
-            sendCommand(mapOf("type" to "forceKeyFrame", "params" to mapOf("uuid" to uuid)))
+        val uiSent =
+            sendCommand(mapOf("type" to "showUI", "params" to mapOf("uuid" to uuid, "url" to url)))
+        val sent =
+            uiSent &&
+                clusterStream == content.stream &&
+                !closed.get() &&
+                sendCommand(mapOf("type" to "forceKeyFrame", "params" to mapOf("uuid" to uuid)))
         return synchronized(clusterContentLock) {
             val current = clusterContent ?: return false
-            if (closed.get() || current.stream != content.stream || clusterStream != content.stream) {
-                // A command already in flight can outlast re-SETUP. Its displayed result is unknown.
+            if (
+                closed.get() || current.stream != content.stream || clusterStream != content.stream
+            ) {
+                // A command already in flight can outlast re-SETUP. Its displayed result is
+                // unknown.
                 if (uiSent) clusterContent = current.copy(displayed = null, token = Any())
                 return false
             }
-            if (uiSent) clusterContent = current.copy(displayed = if (sent) url else null,
-                shown = true, token = Any())
+            if (uiSent)
+                clusterContent =
+                    current.copy(displayed = if (sent) url else null, shown = true, token = Any())
             sent
         }
     }
 
-    private fun beginClusterContent() = synchronized(clusterContentLock) {
-        val stream = ++clusterStreamSetups
-        val initial = config.cluster?.initialUrl
-        clusterContent = ClusterContent(stream, requestedClusterUrl, initial)
-        clusterStream = stream
-    }
+    private fun beginClusterContent() =
+        synchronized(clusterContentLock) {
+            val stream = ++clusterStreamSetups
+            val initial = config.cluster?.initialUrl
+            clusterContent = ClusterContent(stream, requestedClusterUrl, initial)
+            clusterStream = stream
+        }
 
-    private fun clearClusterContent() = synchronized(clusterContentLock) {
-        clusterStream = 0
-        clusterContent = null
-    }
+    private fun clearClusterContent() =
+        synchronized(clusterContentLock) {
+            clusterStream = 0
+            clusterContent = null
+        }
 
-    // Re-SETUP starts at initialURL. Reapply the saved live selection only after SETUP was answered,
+    // Re-SETUP starts at initialURL. Reapply the saved live selection only after SETUP was
+    // answered,
     // or the event channel becomes ready, without claiming it was displayed before delivery.
     private fun reapplyClusterContent() {
         synchronized(clusterCommandLock) {
@@ -286,43 +378,51 @@ class AirPlaySession(
 
     /**
      * Zooms CarPlay's dashboard map one step, as a car's own zoom controls do: the car command
-     * changeMapZoomLevel for the cluster screen's UUID. Seen with Apple Maps on a Tang: zoomDirection 0
-     * zooms in, 1 zooms out. Sent only while the cluster stream is up.
+     * changeMapZoomLevel for the cluster screen's UUID. Seen with Apple Maps on a Tang:
+     * zoomDirection 0 zooms in, 1 zooms out. Sent only while the cluster stream is up.
      */
-    fun changeMapZoomLevel(zoomIn: Boolean): Boolean = clusterStream > 0 && sendCommand(
-        linkedMapOf(
-            "type" to "changeMapZoomLevel",
-            "params" to linkedMapOf(
-                "uuid" to config.clusterDisplayIdentifier,
-                "zoomDirection" to if (zoomIn) ZOOM_DIRECTION_IN else ZOOM_DIRECTION_OUT,
-            ),
-        ),
-    )
+    fun changeMapZoomLevel(zoomIn: Boolean): Boolean =
+        clusterStream > 0 &&
+            sendCommand(
+                linkedMapOf(
+                    "type" to "changeMapZoomLevel",
+                    "params" to
+                        linkedMapOf(
+                            "uuid" to config.clusterDisplayIdentifier,
+                            "zoomDirection" to if (zoomIn) ZOOM_DIRECTION_IN else ZOOM_DIRECTION_OUT,
+                        ),
+                )
+            )
 
     /** Moves CarPlay on the main screen to one of its declared view areas, without reconnecting. */
     fun showViewArea(index: Int): Boolean =
         sendCommand(
-            AirPlayInfoPlist.viewAreaCommand(index, config.main.viewAreas?.size ?: 1, config.mainDisplayIdentifier),
+            AirPlayInfoPlist.viewAreaCommand(
+                index,
+                config.main.viewAreas?.size ?: 1,
+                config.mainDisplayIdentifier,
+            )
         )
 
-    fun takeAudioForRadio(timeoutMillis: Long = 1_500): Boolean = radioAudioResource.takeForRadio(timeoutMillis)
+    fun takeAudioForRadio(timeoutMillis: Long = 1_500): Boolean =
+        radioAudioResource.takeForRadio(timeoutMillis)
 
     fun releaseRadioAudio() = radioAudioResource.releaseRadio()
 
-    fun sendCommand(command: Map<String, Any?>): Boolean = synchronized(eventWriteLock) {
-        sendCommandLocked(command)
-    }
+    fun sendCommand(command: Map<String, Any?>): Boolean =
+        synchronized(eventWriteLock) { sendCommandLocked(command) }
 
     /**
-     * A message on a video in car remote control session, framed like the iPhone's own: POST /command
-     * with X-Apple-StreamID and {params: {data: bplist(message)}}.
+     * A message on a video in car remote control session, framed like the iPhone's own: POST
+     * /command with X-Apple-StreamID and {params: {data: bplist(message)}}.
      */
-    fun sendRemoteControlMessage(streamId: Long, message: Map<String, Any?>): Boolean = synchronized(eventWriteLock) {
-        sendCommandLocked(
-            linkedMapOf("params" to linkedMapOf("data" to BplistCodec.encode(message))),
-            "X-Apple-StreamID: $streamId\r\n",
-        )
-    }
+    fun sendRemoteControlMessage(streamId: Long, message: Map<String, Any?>): Boolean =
+        synchronized(eventWriteLock) {
+            sendCommandLocked(
+                linkedMapOf("params" to linkedMapOf("data" to BplistCodec.encode(message))),
+                "X-Apple-StreamID: $streamId\r\n",
+            )
+        }
 
     /**
      * Video in car: retains whether video may play now and sends the latest value once SETUP has
@@ -336,11 +436,13 @@ class AirPlaySession(
         val cipher = eventCipher ?: return false
         eventCseq++
         val body = BplistCodec.encode(command)
-        val head = "POST /command RTSP/1.0\r\n" + extraHeaders +
-            "Content-Type: $PLIST_CONTENT_TYPE\r\n" +
-            "Content-Length: ${body.size}\r\n" +
-            "CSeq: $eventCseq\r\n\r\n"
-        trace("airplay event tx headers=$head bodyHex=${body.toHex()}")
+        val head =
+            "POST /command RTSP/1.0\r\n" +
+                extraHeaders +
+                "Content-Type: $PLIST_CONTENT_TYPE\r\n" +
+                "Content-Length: ${body.size}\r\n" +
+                "CSeq: $eventCseq\r\n\r\n"
+        trace { "airplay event tx headers=$head bodyHex=${body.toHex()}" }
         return try {
             val bytes = cipher.encrypt(head.toByteArray(Charsets.US_ASCII) + body)
             val output = socket.getOutputStream()
@@ -356,13 +458,18 @@ class AirPlaySession(
 
     /** [contacts] carry Android pointer ids; an empty list releases every finger. */
     fun sendTouch(contacts: List<AirPlayContact>): Boolean {
-        val scaled = touchSlots.assign(contacts).map {
-            it.copy(x = it.x * config.main.widthPixels, y = it.y * config.main.heightPixels)
-        }
+        val scaled =
+            touchSlots.assign(contacts).map {
+                it.copy(x = it.x * config.main.widthPixels, y = it.y * config.main.heightPixels)
+            }
         val report = AirPlayHid.touchReport(scaled)
         val sendStartNs = System.nanoTime()
         val sent = sendHidReport(AirPlayHid.TOUCH_HID_UID, report)
-        if (sent) com.shilapi.xcertplay.media.TouchLatencyProbe.onTouchSent(sendStartNs, System.nanoTime() - sendStartNs)
+        if (sent)
+            com.shilapi.xcertplay.media.TouchLatencyProbe.onTouchSent(
+                sendStartNs,
+                System.nanoTime() - sendStartNs,
+            )
         if (sent && firstTouchSendLogged.compareAndSet(false, true)) {
             val first = scaled.firstOrNull()
             Log.i(
@@ -378,11 +485,15 @@ class AirPlaySession(
 
     fun sendKnob(state: AirPlayKnobState, momentary: Boolean = true) {
         sendHidReport(AirPlayHid.KNOB_HID_UID, AirPlayHid.knobReport(state))
-        if (momentary) sendHidReport(AirPlayHid.KNOB_HID_UID, AirPlayHid.knobReport(AirPlayKnobState()))
+        if (momentary)
+            sendHidReport(AirPlayHid.KNOB_HID_UID, AirPlayHid.knobReport(AirPlayKnobState()))
     }
 
     fun sendKnobSelect(down: Boolean) =
-        sendHidReport(AirPlayHid.KNOB_HID_UID, AirPlayHid.knobReport(AirPlayKnobState(select = down)))
+        sendHidReport(
+            AirPlayHid.KNOB_HID_UID,
+            AirPlayHid.knobReport(AirPlayKnobState(select = down)),
+        )
 
     fun sendMedia(index: Int) {
         sendHidReport(AirPlayHid.MEDIA_HID_UID, AirPlayHid.mediaReport(index))
@@ -395,36 +506,44 @@ class AirPlaySession(
     }
 
     fun invokeSiri() {
-        sendCommand(linkedMapOf("type" to "requestSiri", "params" to linkedMapOf("siriAction" to 2)))
-        sendCommand(linkedMapOf("type" to "requestSiri", "params" to linkedMapOf("siriAction" to 3)))
+        sendCommand(
+            linkedMapOf("type" to "requestSiri", "params" to linkedMapOf("siriAction" to 2))
+        )
+        sendCommand(
+            linkedMapOf("type" to "requestSiri", "params" to linkedMapOf("siriAction" to 3))
+        )
     }
 
     fun sendIapMessage(data: ByteArray, timeoutMillis: Long = 0L): Boolean {
         require(timeoutMillis >= 0) { "timeoutMillis must not be negative" }
-        val command = linkedMapOf<String, Any?>(
-            "type" to "iAPSendMessage",
-            "params" to linkedMapOf("data" to data),
-        )
+        val command =
+            linkedMapOf<String, Any?>(
+                "type" to "iAPSendMessage",
+                "params" to linkedMapOf("data" to data),
+            )
         if (timeoutMillis == 0L) return sendCommand(command)
 
         val deadlineNanos = System.nanoTime() + timeoutMillis * NANOS_PER_MILLISECOND
         while (true) {
-            val sent = synchronized(eventWriteLock) {
-                if (eventSocket == null || eventCipher == null) {
-                    null
-                } else {
-                    sendCommandLocked(command)
+            val sent =
+                synchronized(eventWriteLock) {
+                    if (eventSocket == null || eventCipher == null) {
+                        null
+                    } else {
+                        sendCommandLocked(command)
+                    }
                 }
-            }
             if (sent != null) return sent
             if (closed.get()) return false
 
             val remainingNanos = deadlineNanos - System.nanoTime()
             if (remainingNanos <= 0) return false
-            val sleepMillis = minOf(
-                EVENT_READY_POLL_MILLIS,
-                (remainingNanos + NANOS_PER_MILLISECOND - 1) / NANOS_PER_MILLISECOND,
-            ).coerceAtLeast(1)
+            val sleepMillis =
+                minOf(
+                        EVENT_READY_POLL_MILLIS,
+                        (remainingNanos + NANOS_PER_MILLISECOND - 1) / NANOS_PER_MILLISECOND,
+                    )
+                    .coerceAtLeast(1)
             try {
                 Thread.sleep(sleepMillis)
             } catch (_: InterruptedException) {
@@ -434,16 +553,18 @@ class AirPlaySession(
         }
     }
 
-    fun setNightMode(night: Boolean): Boolean = synchronized(eventWriteLock) {
-        pendingNightMode = night
-        sendPendingNightModeLocked()
-    }
+    fun setNightMode(night: Boolean): Boolean =
+        synchronized(eventWriteLock) {
+            pendingNightMode = night
+            sendPendingNightModeLocked()
+        }
 
     private fun sendPendingNightModeLocked(): Boolean {
         val night = pendingNightMode ?: return true
-        val sent = sendCommandLocked(
-            linkedMapOf("type" to "setNightMode", "params" to linkedMapOf("nightMode" to night)),
-        )
+        val sent =
+            sendCommandLocked(
+                linkedMapOf("type" to "setNightMode", "params" to linkedMapOf("nightMode" to night))
+            )
         if (sent) pendingNightMode = null
         return sent
     }
@@ -454,7 +575,7 @@ class AirPlaySession(
                 "type" to "hidSendReport",
                 "uuid" to uid.toString(16),
                 "hidReport" to report,
-            ),
+            )
         )
 
     private fun runControl() {
@@ -475,13 +596,15 @@ class AirPlaySession(
                 val activeCipher = cipher
                 if (activeCipher != null) {
                     encBuf += plaintext
-                    val decrypted = try {
-                        activeCipher.decrypt(encBuf)
-                    } catch (error: Exception) {
-                        closeReason = "control decrypt failed: ${error.message ?: error.javaClass.simpleName}"
-                        Log.e(TAG, "airplay $closeReason encrypted=${encBuf.size}", error)
-                        break
-                    }
+                    val decrypted =
+                        try {
+                            activeCipher.decrypt(encBuf)
+                        } catch (error: Exception) {
+                            closeReason =
+                                "control decrypt failed: ${error.message ?: error.javaClass.simpleName}"
+                            Log.e(TAG, "airplay $closeReason encrypted=${encBuf.size}", error)
+                            break
+                        }
                     encBuf = decrypted.rest
                     plaintext = decrypted.data
                 }
@@ -498,34 +621,41 @@ class AirPlaySession(
                         "airplay rx ${request.method} ${request.path} cseq=$cseq body=${request.body.size}",
                         showInDebugOverlay,
                     )
-                    if (showInDebugOverlay) debugLog(
-                        AirPlayControlDiagnostics.request(request.method, request.path, request.body.size),
-                        false,
-                    )
-                    trace(
-                        "airplay control rx headers=${request.headers} " +
-                            "bodyHex=${request.body.toHex()}",
-                    )
-                    val response = try {
-                        handle(request)
-                    } catch (error: Exception) {
-                        Log.e(
-                            TAG,
-                            "airplay handler failed ${request.method} ${request.path} cseq=$cseq",
-                            error,
+                    if (showInDebugOverlay)
+                        debugLog(
+                            AirPlayControlDiagnostics.request(
+                                request.method,
+                                request.path,
+                                request.body.size,
+                            ),
+                            false,
                         )
-                        RtspMessage.Response(status = 500)
+                    trace {
+                        "airplay control rx headers=${request.headers} " +
+                            "bodyHex=${request.body.toHex()}"
                     }
+                    val response =
+                        try {
+                            handle(request)
+                        } catch (error: Exception) {
+                            Log.e(
+                                TAG,
+                                "airplay handler failed ${request.method} ${request.path} cseq=$cseq",
+                                error,
+                            )
+                            RtspMessage.Response(status = 500)
+                        }
                     debugLog(
                         "airplay tx status=${response.status ?: 200} cseq=$cseq body=${response.body.size}",
                         showInDebugOverlay,
                     )
-                    if (showInDebugOverlay) debugLog(
-                        "airplay control response status=${response.status ?: 200} contentBytes=${response.body.size}",
-                        false,
-                    )
+                    if (showInDebugOverlay)
+                        debugLog(
+                            "airplay control response status=${response.status ?: 200} contentBytes=${response.body.size}",
+                            false,
+                        )
                     val wire = RtspMessage.buildResponse(request, response)
-                    trace("airplay control tx wireHex=${wire.toHex()}")
+                    trace { "airplay control tx wireHex=${wire.toHex()}" }
                     output.write(cipher?.encrypt(wire) ?: wire)
                     if (cipher == null && pairVerify.controlKeys != null) {
                         val keys = pairVerify.controlKeys!!
@@ -550,8 +680,10 @@ class AirPlaySession(
             "SETUP" -> return handleSetup(request)
             "SET_PARAMETER" -> {
                 // iOS can replace the mask when the display changes; never decode PNG on RTSP.
-                if (config.main.useIphoneCornerMask && request.body.size <=
-                    IPhoneCornerMaskWireLimit.MAX_PNG_BYTES + 64 * 1024) {
+                if (
+                    config.main.useIphoneCornerMask &&
+                        request.body.size <= IPhoneCornerMaskWireLimit.MAX_PNG_BYTES + 64 * 1024
+                ) {
                     val value = runCatching { BplistCodec.decode(request.body) }.getOrNull()
                     findIphoneCornerMask(value)?.let(::notifyCornerMask)
                 }
@@ -565,62 +697,99 @@ class AirPlaySession(
         }
 
         if (config.bufferedAudioOutputEnabled && request.method in BUFFERED_AUDIO_METHODS) {
-            val body = if (request.body.isEmpty() && request.method == "GETANCHOR") emptyMap() else {
-                runCatching { asMap(BplistCodec.decode(request.body)) }.getOrNull()
-                    ?: return RtspMessage.Response(status = 400)
-            }
+            val body =
+                if (request.body.isEmpty() && request.method == "GETANCHOR") emptyMap()
+                else {
+                    runCatching { asMap(BplistCodec.decode(request.body)) }.getOrNull()
+                        ?: return RtspMessage.Response(status = 400)
+                }
             val response = media.onBufferedAudioControl(this, request.method, body)
-            if (request.method != "GETANCHOR") debugLog("airplay ${request.method} $body -> ${response ?: "ok"}")
-            return if (response == null) RtspMessage.Response(status = 200) else RtspMessage.Response(
-                headers = mapOf("Content-Type" to PLIST_CONTENT_TYPE),
-                body = BplistCodec.encode(response),
-            )
+            if (request.method != "GETANCHOR")
+                debugLog("airplay ${request.method} $body -> ${response ?: "ok"}")
+            return if (response == null) RtspMessage.Response(status = 200)
+            else
+                RtspMessage.Response(
+                    headers = mapOf("Content-Type" to PLIST_CONTENT_TYPE),
+                    body = BplistCodec.encode(response),
+                )
         }
 
         val path = request.path.lowercase()
         val mutual = mfi4
         return when {
-            path.endsWith("/pair-setup") && mutual != null && mfi != null -> mfi4Response("pair-setup") {
-                mutual.handle(request.body, mfi) { pairSetup.handle(it) }
-            }
-            path.endsWith("/auth-setup") && config.mutualAuthentication && mfi != null &&
-                headerNumber(request, "x-apple-at") == com.shilapi.xcertplay.airplay.mfi4.Mfi4Session.AUTH_TYPE -> {
-                val session = mutual ?: com.shilapi.xcertplay.airplay.mfi4.Mfi4Session { debugLog(it) }.also { mfi4 = it }
-                if ((headerNumber(request, "x-apple-pairingtranscript") ?: 0) != 0) session.bindsPairing = true
-                val response = mfi4Response("auth-setup") {
-                    session.handle(request.body, mfi) { shown ->
-                        val (expected, ours) = pairVerify.transcriptProofs()
-                            ?: throw IllegalStateException("nothing to bind, pair-verify has not run")
-                        if (shown.size < expected.size || !shown.copyOf(expected.size).contentEquals(expected))
-                            throw IllegalStateException("the phone's transcript proof does not match")
-                        debugLog("mfi4: this pair-verify is bound to the mutual authentication")
-                        ours
-                    }
+            path.endsWith("/pair-setup") && mutual != null && mfi != null ->
+                mfi4Response("pair-setup") {
+                    mutual.handle(request.body, mfi) { pairSetup.handle(it) }
                 }
-                runCatching { protocolExtension?.onAuthSetup(request.headers, request.body, response.status ?: 200) }
+            path.endsWith("/auth-setup") &&
+                config.mutualAuthentication &&
+                mfi != null &&
+                headerNumber(request, "x-apple-at") ==
+                    com.shilapi.xcertplay.airplay.mfi4.Mfi4Session.AUTH_TYPE -> {
+                val session =
+                    mutual
+                        ?: com.shilapi.xcertplay.airplay.mfi4
+                            .Mfi4Session { debugLog(it) }
+                            .also { mfi4 = it }
+                if ((headerNumber(request, "x-apple-pairingtranscript") ?: 0) != 0)
+                    session.bindsPairing = true
+                val response =
+                    mfi4Response("auth-setup") {
+                        session.handle(request.body, mfi) { shown ->
+                            val (expected, ours) =
+                                pairVerify.transcriptProofs()
+                                    ?: throw IllegalStateException(
+                                        "nothing to bind, pair-verify has not run"
+                                    )
+                            if (
+                                shown.size < expected.size ||
+                                    !shown.copyOf(expected.size).contentEquals(expected)
+                            )
+                                throw IllegalStateException(
+                                    "the phone's transcript proof does not match"
+                                )
+                            debugLog("mfi4: this pair-verify is bound to the mutual authentication")
+                            ours
+                        }
+                    }
+                runCatching {
+                    protocolExtension?.onAuthSetup(
+                        request.headers,
+                        request.body,
+                        response.status ?: 200,
+                    )
+                }
                 response
             }
-            path.endsWith("/pair-setup") -> RtspMessage.Response(
-                headers = mapOf("Content-Type" to PAIRING_CONTENT_TYPE),
-                body = pairSetup.handle(request.body),
-            )
-            path.endsWith("/pair-verify") -> RtspMessage.Response(
-                headers = mapOf("Content-Type" to PAIRING_CONTENT_TYPE),
-                body = pairVerify.handle(request.body),
-            )
+            path.endsWith("/pair-setup") ->
+                RtspMessage.Response(
+                    headers = mapOf("Content-Type" to PAIRING_CONTENT_TYPE),
+                    body = pairSetup.handle(request.body),
+                )
+            path.endsWith("/pair-verify") ->
+                RtspMessage.Response(
+                    headers = mapOf("Content-Type" to PAIRING_CONTENT_TYPE),
+                    body = pairVerify.handle(request.body),
+                )
             path.endsWith("/auth-setup") -> {
                 val body = mfi?.let { MfiSapAuthSetup.handle(request.body, it) }
                 if (body == null) RtspMessage.Response(status = 400)
-                else RtspMessage.Response(headers = mapOf("Content-Type" to OCTET_CONTENT_TYPE), body = body)
+                else
+                    RtspMessage.Response(
+                        headers = mapOf("Content-Type" to OCTET_CONTENT_TYPE),
+                        body = body,
+                    )
             }
             path.endsWith("/info") -> {
-                val info = AirPlayInfoPlist.build(config.copy(protocolExtension = protocolExtension))
+                val info =
+                    AirPlayInfoPlist.build(config.copy(protocolExtension = protocolExtension))
                 if (request.body.isNotEmpty()) {
-                    val requestInfo = try {
-                        BplistCodec.decode(request.body).toString()
-                    } catch (_: Exception) {
-                        "<unparseable ${request.body.size} bytes>"
-                    }
+                    val requestInfo =
+                        try {
+                            BplistCodec.decode(request.body).toString()
+                        } catch (_: Exception) {
+                            "<unparseable ${request.body.size} bytes>"
+                        }
                     debugLog("airplay /info request=$requestInfo")
                 }
                 Log.i(
@@ -631,7 +800,7 @@ class AirPlaySession(
                 )
                 debugLog(
                     "airplay /info videoInCar=${config.videoInCar} " +
-                        "videoPlaybackAllowed=${if (config.videoInCar) VideoInCar.allowed else "not-offered"}",
+                        "videoPlaybackAllowed=${if (config.videoInCar) VideoInCar.allowed else "not-offered"}"
                 )
                 debugLog("airplay /info displays=${info["displays"]}")
                 RtspMessage.Response(
@@ -675,46 +844,58 @@ class AirPlaySession(
         }
     }
 
-    private fun trace(message: String) {
+    private inline fun trace(message: () -> String) {
+        if (!listener.wantsTrace) return
         try {
-            listener.onDebugLog("TRACE $message")
+            listener.onDebugLog("TRACE ${message()}")
         } catch (error: Exception) {
             Log.w(TAG, "trace log callback failed", error)
         }
     }
 
     private fun handleSetup(request: RtspMessage.Request): RtspMessage.Response {
-        val dict = try {
-            asMap(BplistCodec.decode(request.body)) ?: return RtspMessage.Response(status = 400)
-        } catch (error: Exception) {
-            Log.e(TAG, "airplay SETUP plist decode failed body=${request.body.size}", error)
-            return RtspMessage.Response(status = 400)
-        }
+        val dict =
+            try {
+                asMap(BplistCodec.decode(request.body)) ?: return RtspMessage.Response(status = 400)
+            } catch (error: Exception) {
+                Log.e(TAG, "airplay SETUP plist decode failed body=${request.body.size}", error)
+                return RtspMessage.Response(status = 400)
+            }
         debugLog("airplay SETUP keys=${dict.keys.sorted()}")
         val streams = dict["streams"] as? List<*>
         if (streams != null) {
             val responseStreams = handleStreams(streams)
             debugLog("airplay SETUP response streams=$responseStreams")
             val body = BplistCodec.encode(linkedMapOf("streams" to responseStreams))
-            trace("airplay SETUP response bplistHex=${body.toHex()}")
-            return RtspMessage.Response(headers = mapOf("Content-Type" to PLIST_CONTENT_TYPE), body = body)
+            trace { "airplay SETUP response bplistHex=${body.toHex()}" }
+            return RtspMessage.Response(
+                headers = mapOf("Content-Type" to PLIST_CONTENT_TYPE),
+                body = body,
+            )
         }
 
         val name = string(dict["name"])
         val deviceId = string(dict["deviceID"])
         val wifiMac = string(dict["macAddress"]).lowercase()
         val model = string(dict["model"])
-        debugLog(AirPlayPeerDiagnostics.summary(model, string(dict["osVersion"]), string(dict["sourceVersion"])))
+        debugLog(
+            AirPlayPeerDiagnostics.summary(
+                model,
+                string(dict["osVersion"]),
+                string(dict["sourceVersion"]),
+            )
+        )
         if (deviceId.isNotEmpty()) deviceBtMac = deviceId
         if (name.isNotEmpty() || deviceId.isNotEmpty() || wifiMac.isNotEmpty()) {
             listener.onDeviceInfo(this, AirPlayDeviceInfo(name, deviceId, wifiMac, model))
         }
 
         val peerTimingPort = long(dict["timingPort"])?.toInt() ?: 0
-        val response = linkedMapOf<String, Any?>(
-            "timingPort" to openTiming(peerTimingPort),
-            "eventPort" to openEvent(),
-        )
+        val response =
+            linkedMapOf<String, Any?>(
+                "timingPort" to openTiming(peerTimingPort),
+                "eventPort" to openEvent(),
+            )
         if (dict["keepAliveLowPower"] == true || dict["keepAliveLowPower"] == 1L) {
             response["keepAlivePort"] = openKeepAlive()
         }
@@ -723,7 +904,9 @@ class AirPlaySession(
         protocolExtension?.onFeaturesNegotiated(features)
         val videoPlaybackEnabled = VideoInCar.FEATURE in features
         val videoDelivery = videoPlaybackAvailability.setFeatureEnabled(videoPlaybackEnabled)
-        debugLog("airplay video playback negotiated=$videoPlaybackEnabled availability=$videoDelivery")
+        debugLog(
+            "airplay video playback negotiated=$videoPlaybackEnabled availability=$videoDelivery"
+        )
         response["enabledFeatures"] = features
         return RtspMessage.Response(
             headers = mapOf("Content-Type" to PLIST_CONTENT_TYPE),
@@ -738,7 +921,8 @@ class AirPlaySession(
             val type = long(stream["type"])?.toInt() ?: continue
             debugLog("airplay SETUP stream type=$type payload=$stream")
             when (type) {
-                STREAM_TYPE_MAIN_SCREEN, STREAM_TYPE_ALT_SCREEN -> {
+                STREAM_TYPE_MAIN_SCREEN,
+                STREAM_TYPE_ALT_SCREEN -> {
                     val port = media.onScreen(this, type, stream)
                     debugLog("airplay screen stream type=$type dataPort=${port ?: "rejected"}")
                     if (port != null) {
@@ -751,12 +935,14 @@ class AirPlaySession(
                         result.add(linkedMapOf("type" to type, "dataPort" to port))
                     }
                 }
-                STREAM_TYPE_MAIN_AUDIO, STREAM_TYPE_ALT_AUDIO, STREAM_TYPE_MAIN_HIGH_AUDIO -> {
+                STREAM_TYPE_MAIN_AUDIO,
+                STREAM_TYPE_ALT_AUDIO,
+                STREAM_TYPE_MAIN_HIGH_AUDIO -> {
                     val streamResponse = media.onAudio(this, type, stream)
                     debugLog(
                         "airplay audio stream type=$type accepted=${streamResponse != null} " +
                             "dataPort=${streamResponse?.get("dataPort") ?: "none"} " +
-                            "controlPort=${streamResponse?.get("controlPort") ?: "none"}",
+                            "controlPort=${streamResponse?.get("controlPort") ?: "none"}"
                     )
                     if (streamResponse != null) {
                         activeStreams.add(type)
@@ -764,19 +950,25 @@ class AirPlaySession(
                     }
                 }
                 STREAM_TYPE_MAIN_BUFFERED_AUDIO -> {
-                    val streamResponse = if (config.bufferedAudioOutputEnabled) media.onBufferedAudio(this, stream) else null
-                    debugLog("airplay buffered audio stream accepted=${streamResponse != null} " +
-                        "dataPort=${streamResponse?.get("dataPort") ?: "none"}")
+                    val streamResponse =
+                        if (config.bufferedAudioOutputEnabled) media.onBufferedAudio(this, stream)
+                        else null
+                    debugLog(
+                        "airplay buffered audio stream accepted=${streamResponse != null} " +
+                            "dataPort=${streamResponse?.get("dataPort") ?: "none"}"
+                    )
                     if (streamResponse != null) {
                         activeStreams.add(type)
                         result.add(streamResponse)
                     }
                 }
                 STREAM_TYPE_DATA -> {
-                    val streamResponse = protocolExtension?.openDataStream(this, stream) ?: media.onDataStream(this, stream)
+                    val streamResponse =
+                        protocolExtension?.openDataStream(this, stream)
+                            ?: media.onDataStream(this, stream)
                     debugLog(
                         "airplay data stream type=$type accepted=${streamResponse != null} " +
-                            "dataPort=${streamResponse?.get("dataPort") ?: "none"}",
+                            "dataPort=${streamResponse?.get("dataPort") ?: "none"}"
                     )
                     if (streamResponse != null) {
                         activeStreams.add(type)
@@ -790,11 +982,12 @@ class AirPlaySession(
     }
 
     private fun handleCommand(request: RtspMessage.Request): RtspMessage.Response {
-        val body = try {
-            asMap(BplistCodec.decode(request.body)) ?: emptyMap()
-        } catch (_: Exception) {
-            emptyMap<String, Any?>()
-        }
+        val body =
+            try {
+                asMap(BplistCodec.decode(request.body)) ?: emptyMap()
+            } catch (_: Exception) {
+                emptyMap<String, Any?>()
+            }
         val type = string(body["type"])
         val params = asMap(body["params"]) ?: emptyMap()
         if (type == "modesChanged") radioAudioResource.modesChanged(params)
@@ -807,7 +1000,8 @@ class AirPlaySession(
         val streamId = request.headers["x-apple-streamid"]?.toLongOrNull()
         val data = params["data"] as? ByteArray
         if (streamId != null && data != null) {
-            runCatching { asMap(BplistCodec.decode(data)) }.getOrNull()
+            runCatching { asMap(BplistCodec.decode(data)) }
+                .getOrNull()
                 ?.let { listener.onRemoteControlMessage(this, streamId, it) }
             return RtspMessage.Response(status = 200)
         }
@@ -820,15 +1014,23 @@ class AirPlaySession(
         return RtspMessage.Response(status = 200)
     }
 
-    private fun mfi4Response(what: String, action: () -> ByteArray): RtspMessage.Response = try {
-        RtspMessage.Response(headers = mapOf("Content-Type" to OCTET_CONTENT_TYPE), body = action())
-    } catch (error: Exception) {
-        debugLog("MFi4 $what: ${error.message}")
-        RtspMessage.Response(status = 500)
-    }
+    private fun mfi4Response(what: String, action: () -> ByteArray): RtspMessage.Response =
+        try {
+            RtspMessage.Response(
+                headers = mapOf("Content-Type" to OCTET_CONTENT_TYPE),
+                body = action(),
+            )
+        } catch (error: Exception) {
+            debugLog("MFi4 $what: ${error.message}")
+            RtspMessage.Response(status = 500)
+        }
 
     private fun headerNumber(request: RtspMessage.Request, name: String): Int? {
-        val value = request.headers.entries.firstOrNull { it.key.equals(name, ignoreCase = true) }?.value?.trim() ?: return null
+        val value =
+            request.headers.entries
+                .firstOrNull { it.key.equals(name, ignoreCase = true) }
+                ?.value
+                ?.trim() ?: return null
         return when {
             value.startsWith("0x", ignoreCase = true) -> value.substring(2).toIntOrNull(16)
             value.length > 1 && value.startsWith("0") -> value.substring(1).toIntOrNull(8)
@@ -837,20 +1039,22 @@ class AirPlaySession(
     }
 
     private fun handleTeardown(request: RtspMessage.Request): RtspMessage.Response {
-        val decodedBody = try {
-            BplistCodec.decode(request.body)
-        } catch (_: Exception) {
-            null
-        }
+        val decodedBody =
+            try {
+                BplistCodec.decode(request.body)
+            } catch (_: Exception) {
+                null
+            }
         val defaultTypes = teardownStreamTypes(decodedBody)
-        val types = protocolExtension?.mediaTeardownTypes(asMap(decodedBody), defaultTypes) ?: defaultTypes
+        val types =
+            protocolExtension?.mediaTeardownTypes(asMap(decodedBody), defaultTypes) ?: defaultTypes
         protocolExtension?.onTeardown(this, asMap(decodedBody))
 
         debugLog(
             "airplay TEARDOWN types=${types ?: "all"} activeBefore=$activeStreams " +
-                "body=${request.body.size} bytes payload=$decodedBody",
+                "body=${request.body.size} bytes payload=$decodedBody"
         )
-        trace("airplay TEARDOWN raw${request.body.size}Hex=${request.body.toHex()}")
+        trace { "airplay TEARDOWN raw${request.body.size}Hex=${request.body.toHex()}" }
 
         // Restore wheel input before releasing media resources, which may take time to close.
         if (types == null || STREAM_TYPE_MAIN_SCREEN in types) mainScreenToken = null
@@ -881,10 +1085,11 @@ class AirPlaySession(
         socket.reuseAddress = true
         socket.bind(InetSocketAddress(InetAddress.getByName("::"), 0))
         keepAliveSocket = socket
-        keepAliveThread = Thread({ runKeepAlive(socket) }, "airplay-keepalive").apply {
-            isDaemon = true
-            start()
-        }
+        keepAliveThread =
+            Thread({ runKeepAlive(socket) }, "airplay-keepalive").apply {
+                isDaemon = true
+                start()
+            }
         return socket.localPort
     }
 
@@ -925,12 +1130,18 @@ class AirPlaySession(
 
     private fun acceptEvent(server: ServerSocket) {
         try {
-            val socket = server.accept()
+            val expected = peerAddress ?: throw IOException("control peer unknown")
+            val socket =
+                server.acceptFrom(expected) {
+                    debugLog("airplay event rejected sender outside the control session")
+                }
             socket.setSoLinger(true, 0)
             // Avoid Nagle coalescing on this interactive event connection: small HID/event writes
             // need not wait for earlier unacknowledged data.
             socket.tcpNoDelay = true
-            debugLog("airplay event connection accepted from ${socket.remoteSocketAddress} noDelay=${socket.tcpNoDelay}")
+            debugLog(
+                "airplay event connection accepted from ${socket.remoteSocketAddress} noDelay=${socket.tcpNoDelay}"
+            )
             eventSocket = socket
             val shared = pairVerify.shared
             if (shared == null) {
@@ -939,22 +1150,22 @@ class AirPlaySession(
                 close()
                 return
             }
-            val writeKey = AirPlayCrypto.hkdfSha512(
-                shared,
-                "Events-Salt".asciiBytes(),
-                "Events-Write-Encryption-Key".asciiBytes(),
-                32,
-            )
-            val readKey = AirPlayCrypto.hkdfSha512(
-                shared,
-                "Events-Salt".asciiBytes(),
-                "Events-Read-Encryption-Key".asciiBytes(),
-                32,
-            )
+            val writeKey =
+                AirPlayCrypto.hkdfSha512(
+                    shared,
+                    "Events-Salt".asciiBytes(),
+                    "Events-Write-Encryption-Key".asciiBytes(),
+                    32,
+                )
+            val readKey =
+                AirPlayCrypto.hkdfSha512(
+                    shared,
+                    "Events-Salt".asciiBytes(),
+                    "Events-Read-Encryption-Key".asciiBytes(),
+                    32,
+                )
             eventCipher = ControlCipher(readKey, writeKey)
-            synchronized(eventWriteLock) {
-                sendPendingNightModeLocked()
-            }
+            synchronized(eventWriteLock) { sendPendingNightModeLocked() }
             val videoDelivery = videoPlaybackAvailability.setEventReady(true)
             debugLog("airplay video event ready availability=$videoDelivery")
             reapplyClusterContent()
@@ -979,12 +1190,17 @@ class AirPlaySession(
                 if (count < 0) break
                 val cipher = eventCipher ?: break
                 encrypted += buffer.copyOf(count)
-                val decrypted = try {
-                    cipher.decrypt(encrypted)
-                } catch (error: Exception) {
-                    Log.e(TAG, "airplay event decrypt failed encrypted=${encrypted.size}", error)
-                    break
-                }
+                val decrypted =
+                    try {
+                        cipher.decrypt(encrypted)
+                    } catch (error: Exception) {
+                        Log.e(
+                            TAG,
+                            "airplay event decrypt failed encrypted=${encrypted.size}",
+                            error,
+                        )
+                        break
+                    }
                 encrypted = decrypted.rest
                 plaintext += decrypted.data
                 val parsed = RtspMessage.parseMessages(plaintext)
@@ -995,20 +1211,22 @@ class AirPlaySession(
                         continue
                     }
                     if (message.method == "POST" && message.path == "/command") {
-                        val body = runCatching { asMap(BplistCodec.decode(message.body)) }.getOrNull()
+                        val body =
+                            runCatching { asMap(BplistCodec.decode(message.body)) }.getOrNull()
                         if (body?.get("type") == "modesChanged") {
                             asMap(body["params"])?.let(radioAudioResource::modesChanged)
                         }
                     }
                     debugLog(
-                        "airplay event rx ${message.method} ${message.path} cseq=${message.headers["cseq"] ?: "-"} body=${message.body.size}",
+                        "airplay event rx ${message.method} ${message.path} cseq=${message.headers["cseq"] ?: "-"} body=${message.body.size}"
                     )
-                    val response = RtspMessage.buildResponse(message, RtspMessage.Response(status = 200))
-                    trace(
+                    val response =
+                        RtspMessage.buildResponse(message, RtspMessage.Response(status = 200))
+                    trace {
                         "airplay event rx headers=${message.headers} " +
-                            "bodyHex=${message.body.toHex()}",
-                    )
-                    trace("airplay event tx wireHex=${response.toHex()}")
+                            "bodyHex=${message.body.toHex()}"
+                    }
+                    trace { "airplay event tx wireHex=${response.toHex()}" }
                     synchronized(eventWriteLock) {
                         output.write(cipher.encrypt(response))
                         output.flush()
@@ -1046,7 +1264,8 @@ class AirPlaySession(
         const val STREAM_TYPE_MAIN_HIGH_AUDIO = 102
         const val STREAM_TYPE_DATA = 130
         const val STREAM_TYPE_MAIN_BUFFERED_AUDIO = 103
-        private val BUFFERED_AUDIO_METHODS = setOf("SETRATE", "SETRATEANCHORTIME", "GETANCHOR", "FLUSHBUFFERED")
+        private val BUFFERED_AUDIO_METHODS =
+            setOf("SETRATE", "SETRATEANCHORTIME", "GETANCHOR", "FLUSHBUFFERED")
 
         const val READ_CHUNK_BYTES = 16 * 1024
         const val ZOOM_DIRECTION_IN = 0
@@ -1080,33 +1299,45 @@ internal fun findIphoneCornerMask(value: Any?, depth: Int = 0): ByteArray? {
 
 internal fun setupEnabledFeatures(config: AirPlayConfig, proposed: List<*>?): List<String> {
     val features = mutableListOf<String>()
-    if (config.vehicleStateProtocol && VehicleClimate.available && proposed.orEmpty().contains(VehicleStateProtocol.FEATURE)) {
+    if (
+        config.vehicleStateProtocol &&
+            VehicleClimate.available &&
+            proposed.orEmpty().contains(VehicleStateProtocol.FEATURE)
+    ) {
         features.add(VehicleStateProtocol.FEATURE)
     }
     if (config.hevc) features.add("hevc")
     features.add("iAPChannel")
     features.add("viewAreas")
     if (config.cluster != null) features.add("altScreen")
-    if (config.main.useIphoneCornerMask && proposed.orEmpty().contains("cornerMasks")) features.add("cornerMasks")
-    if (config.videoInCar && proposed.orEmpty().contains(VideoInCar.FEATURE)) features.add(VideoInCar.FEATURE)
-    if (config.bufferedAudioOutputEnabled && proposed.orEmpty().contains(MAIN_BUFFERED_FEATURE)) features.add(MAIN_BUFFERED_FEATURE)
-    config.protocolExtension?.enabledFeatures(proposed)?.forEach { if (it !in features) features.add(it) }
+    if (config.main.useIphoneCornerMask && proposed.orEmpty().contains("cornerMasks"))
+        features.add("cornerMasks")
+    if (config.videoInCar && proposed.orEmpty().contains(VideoInCar.FEATURE))
+        features.add(VideoInCar.FEATURE)
+    if (config.bufferedAudioOutputEnabled && proposed.orEmpty().contains(MAIN_BUFFERED_FEATURE))
+        features.add(MAIN_BUFFERED_FEATURE)
+    config.protocolExtension?.enabledFeatures(proposed)?.forEach {
+        if (it !in features) features.add(it)
+    }
     return features
 }
 
 /**
  * The stream types a TEARDOWN body closes, or null when it names none (the whole session). Several
- * type-130 streams can be open, the iAP tunnel (streamID 1) and video in car's data streams; tearing
- * down one of the latter must not close the iAP tunnel.
+ * type-130 streams can be open, the iAP tunnel (streamID 1) and video in car's data streams;
+ * tearing down one of the latter must not close the iAP tunnel.
  */
 internal fun teardownStreamTypes(body: Any?): List<Int>? {
-    val entries = ((body as? Map<*, *>)?.get("streams") as? List<*>).orEmpty().mapNotNull { entry ->
-        val stream = entry as? Map<*, *> ?: return@mapNotNull null
-        val type = (stream["type"] as? Number)?.toInt() ?: return@mapNotNull null
-        type to (stream["streamID"] as? Number)?.toLong()
-    }
+    val entries =
+        ((body as? Map<*, *>)?.get("streams") as? List<*>).orEmpty().mapNotNull { entry ->
+            val stream = entry as? Map<*, *> ?: return@mapNotNull null
+            val type = (stream["type"] as? Number)?.toInt() ?: return@mapNotNull null
+            type to (stream["streamID"] as? Number)?.toLong()
+        }
     if (entries.isEmpty()) return null
-    return entries.filterNot { (type, streamId) -> type == 130 && streamId != null && streamId != 1L }.map { it.first }
+    return entries
+        .filterNot { (type, streamId) -> type == 130 && streamId != null && streamId != 1L }
+        .map { it.first }
 }
 
 internal fun safeClose(closeable: Closeable?) {

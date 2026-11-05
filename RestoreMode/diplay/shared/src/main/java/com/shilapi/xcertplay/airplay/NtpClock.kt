@@ -12,9 +12,9 @@ import java.util.concurrent.atomic.AtomicBoolean
  * CarPlay timing-port clock sync.
  *
  * The accessory drives a two-way RTCP-style exchange with the phone: PT_REQUEST (210) carries our
- * transmit timestamp and PT_RESPONSE (211) echoes it while adding the phone's receive and
- * transmit stamps. The resulting offset and round-trip time steer a local monotonic clock onto
- * the phone's media-clock domain, which /feedback reports.
+ * transmit timestamp and PT_RESPONSE (211) echoes it while adding the phone's receive and transmit
+ * stamps. The resulting offset and round-trip time steer a local monotonic clock onto the phone's
+ * media-clock domain, which /feedback reports.
  */
 class NtpClock : Closeable {
     private val running = AtomicBoolean(false)
@@ -24,7 +24,8 @@ class NtpClock : Closeable {
     private var socket: DatagramSocket? = null
     private var receiver: Thread? = null
     private var sender: Thread? = null
-    private var peer: InetSocketAddress? = null
+    // Written by the session thread, read by the receive thread.
+    @Volatile private var peer: InetSocketAddress? = null
 
     private var clockOffsetNs = wallClockNtpOffsetNs(System.nanoTime())
     private val delays = DoubleArray(DELAY_WINDOW) { Double.POSITIVE_INFINITY }
@@ -41,20 +42,27 @@ class NtpClock : Closeable {
         bound.reuseAddress = true
         bound.bind(InetSocketAddress(InetAddress.getByName("::"), 0))
         synchronized(socketLock) { socket = bound }
-        receiver = Thread(::runReceiver, "airplay-ntp-rx").apply { isDaemon = true; start() }
+        receiver =
+            Thread(::runReceiver, "airplay-ntp-rx").apply {
+                isDaemon = true
+                start()
+            }
         return bound.localPort
     }
 
     fun start(peerAddress: InetAddress, port: Int) {
         require(port > 0) { "timing port must be positive" }
         peer = InetSocketAddress(peerAddress, port)
-        sender = Thread(::runSender, "airplay-ntp-tx").apply { isDaemon = true; start() }
+        sender =
+            Thread(::runSender, "airplay-ntp-tx").apply {
+                isDaemon = true
+                start()
+            }
     }
 
     /** Now in the phone's synchronized clock domain, as an unsigned NTP64 value. */
-    fun syncedNtp(): BigInteger = synchronized(clockLock) {
-        ntpFromNanos(System.nanoTime() + clockOffsetNs)
-    }
+    fun syncedNtp(): BigInteger =
+        synchronized(clockLock) { ntpFromNanos(System.nanoTime() + clockOffsetNs) }
 
     override fun close() {
         running.set(false)
@@ -116,7 +124,7 @@ class NtpClock : Closeable {
     private fun handleMessage(message: ByteArray, source: InetSocketAddress) {
         when (message[1].toInt() and 0xff) {
             PT_REQUEST -> respondToRequest(message, source)
-            PT_RESPONSE -> handleResponse(message)
+            PT_RESPONSE -> if (source.address == peer?.address) handleResponse(message)
         }
     }
 
@@ -202,10 +210,11 @@ private val TWO32 = BigInteger.ONE.shiftLeft(32)
 private val NANOS_PER_SECOND = BigInteger.valueOf(1_000_000_000L)
 
 private fun wallClockNtpOffsetNs(monoNs: Long): Long {
-    val ntpNs = ntp64Now()
-        .and(BigInteger.ONE.shiftLeft(64).subtract(BigInteger.ONE))
-        .multiply(NANOS_PER_SECOND)
-        .shiftRight(32)
+    val ntpNs =
+        ntp64Now()
+            .and(BigInteger.ONE.shiftLeft(64).subtract(BigInteger.ONE))
+            .multiply(NANOS_PER_SECOND)
+            .shiftRight(32)
     return ntpNs.subtract(BigInteger.valueOf(monoNs)).toLong()
 }
 

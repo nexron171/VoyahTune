@@ -1,5 +1,7 @@
 package com.shilapi.xcertplay.airplay
 
+import java.net.ProtocolException
+
 /**
  * RTSP/HTTP-style request framing for the CarPlay control channel.
  *
@@ -26,20 +28,34 @@ object RtspMessage {
 
     data class Parsed(val messages: List<Request>, val rest: ByteArray)
 
-    private val headerEnd = "\r\n\r\n".toByteArray(Charsets.US_ASCII)
-    private val statusText = mapOf(
-        200 to "OK",
-        400 to "Bad Request",
-        404 to "Not Found",
-        500 to "Internal Server Error",
-    )
+    /** Real requests carry headers under 1 KiB; the cap leaves ample room. */
+    private const val MAX_HEADER_BYTES = 16 * 1024
 
-    /** Parses as many complete messages as are buffered, retaining any partial remainder. */
+    /**
+     * Above the largest legitimate body, a corner-mask PNG plus its plist wrapper (about 576 KiB).
+     */
+    private const val MAX_BODY_BYTES = 1024 * 1024
+
+    private val headerEnd = "\r\n\r\n".toByteArray(Charsets.US_ASCII)
+    private val statusText =
+        mapOf(200 to "OK", 400 to "Bad Request", 404 to "Not Found", 500 to "Internal Server Error")
+
+    /**
+     * Parses as many complete messages as are buffered, retaining any partial remainder.
+     *
+     * @throws ProtocolException when a header or body exceeds its cap, so a peer cannot make the
+     *   caller buffer without limit.
+     */
     fun parseMessages(buffer: ByteArray): Parsed {
         val messages = ArrayList<Request>()
         var offset = 0
         while (offset < buffer.size) {
-            val headerEndIndex = indexOf(buffer, headerEnd, offset) ?: break
+            val headerEndIndex = indexOf(buffer, headerEnd, offset)
+            if (headerEndIndex == null || headerEndIndex - offset > MAX_HEADER_BYTES) {
+                if (buffer.size - offset > MAX_HEADER_BYTES)
+                    throw ProtocolException("RTSP header over $MAX_HEADER_BYTES bytes")
+                break
+            }
             val headerText = String(buffer, offset, headerEndIndex - offset, Charsets.US_ASCII)
             val lines = headerText.split("\r\n")
             if (lines.isEmpty()) {
@@ -56,6 +72,8 @@ object RtspMessage {
             }
             val bodyStart = headerEndIndex + headerEnd.size
             val contentLength = headers["content-length"]?.toIntOrNull()?.coerceAtLeast(0) ?: 0
+            if (contentLength > MAX_BODY_BYTES)
+                throw ProtocolException("RTSP body of $contentLength bytes over $MAX_BODY_BYTES")
             val bodyEnd = bodyStart + contentLength
             if (bodyEnd > buffer.size) break
             messages.add(
@@ -65,7 +83,7 @@ object RtspMessage {
                     protocol = requestLine.getOrElse(2) { "RTSP/1.0" },
                     headers = headers,
                     body = buffer.copyOfRange(bodyStart, bodyEnd),
-                ),
+                )
             )
             offset = bodyEnd
         }
@@ -83,7 +101,12 @@ object RtspMessage {
         headers["Content-Length"] = body.size.toString()
 
         val head = buildString {
-            append(protocol).append(' ').append(status).append(' ').append(statusLine).append("\r\n")
+            append(protocol)
+                .append(' ')
+                .append(status)
+                .append(' ')
+                .append(statusLine)
+                .append("\r\n")
             for ((name, value) in headers) append(name).append(": ").append(value).append("\r\n")
             append("\r\n")
         }

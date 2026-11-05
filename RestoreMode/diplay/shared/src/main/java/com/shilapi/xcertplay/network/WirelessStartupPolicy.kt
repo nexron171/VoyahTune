@@ -1,5 +1,6 @@
 package com.shilapi.xcertplay.network
 
+import com.shilapi.xcertplay.orchestration.ConnectionFailureCause
 import java.io.IOException
 
 object WirelessStartupPolicy {
@@ -12,7 +13,9 @@ object WirelessStartupPolicy {
 }
 
 enum class WirelessStartupFailure {
-    HOTSPOT_NOT_READY, FIRST_TCP_TIMEOUT, HOTSPOT_CONFIGURATION,
+    HOTSPOT_NOT_READY,
+    FIRST_TCP_TIMEOUT,
+    HOTSPOT_CONFIGURATION,
 
     /** The head unit's Android Bluetooth accepts connections that reach no phone. */
     BLUETOOTH_UNUSABLE,
@@ -21,8 +24,15 @@ enum class WirelessStartupFailure {
     WIFI_DIRECT_BESIDE_HOTSPOT;
 
     /** False when no further attempt can change what went wrong. */
-    val retryable: Boolean get() = this != HOTSPOT_CONFIGURATION && this != BLUETOOTH_UNUSABLE &&
-        this != WIFI_DIRECT_BESIDE_HOTSPOT
+    val retryable: Boolean
+        get() =
+            this != HOTSPOT_CONFIGURATION &&
+                this != BLUETOOTH_UNUSABLE &&
+                this != WIFI_DIRECT_BESIDE_HOTSPOT
 }
 
-class WirelessStartupException(val reason: WirelessStartupFailure, message: String) : IOException(message)
+class WirelessStartupException(
+    val reason: WirelessStartupFailure,
+    message: String,
+    val knownCause: ConnectionFailureCause? = null,
+) : IOException(message)
