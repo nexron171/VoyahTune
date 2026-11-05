@@ -128,7 +128,6 @@ final class VoiceCommandController {
                             else if (action.startsWith("app:")) {
                                 String pkg = action.substring(4);
                                 ClusterMediaHostActivity.closeForPackage(pkg);
-                                SplitHostActivity.closeActiveHost();
                                 boolean fullscreen =
                                         FullscreenPackagePolicy.contains(
                                                 android.provider.Settings.Global.getString(

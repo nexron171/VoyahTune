@@ -1447,6 +1447,7 @@ public class SetModesService extends Service {
                                 + "x"
                                 + height);
             }
+            registerEmbeddedWindow(widgetId);
             if (!Boolean.TRUE.equals(embeddedLaunched.get(widgetId))) {
                 // Запускаем в дисплей виджета тем же путём, что и любой запуск на конкретный
                 // дисплей: AppDisplayLauncher сперва снимает уже существующую задачу приложения
@@ -1455,14 +1456,19 @@ public class SetModesService extends Service {
                 // прежнем дисплее, а поверхность виджета показывала чёрный квадрат — лечилось
                 // только свернуть/открыть сетку.
                 final String widget = widgetId;
+                final VirtualDisplay targetDisplay = display;
                 int vdDisplayId = display.getDisplay().getDisplayId();
                 AppDisplayLauncher.launch(
                         getApplicationContext(),
                         packageName,
                         vdDisplayId,
                         false,
-                        () -> embeddedDisplays.containsKey(widget), // запуск ещё нужен?
-                        () -> embeddedLaunched.put(widget, false)); // неудача → разрешаем повтор
+                        () -> embeddedDisplays.get(widget) == targetDisplay,
+                        () -> {
+                            if (embeddedDisplays.get(widget) == targetDisplay) {
+                                embeddedLaunched.put(widget, false);
+                            }
+                        });
                 embeddedLaunched.put(widgetId, true);
                 embeddedLaunchAt.put(widgetId, SystemClock.elapsedRealtime());
             }
@@ -1471,7 +1477,30 @@ public class SetModesService extends Service {
         }
     }
 
+    private void registerEmbeddedWindow(String widgetId) {
+        VirtualDisplay display = embeddedDisplays.get(widgetId);
+        String packageName = embeddedPackages.get(widgetId);
+        if (display == null || packageName == null) return;
+        EmbeddedAppWindows.register(
+                this,
+                widgetId,
+                packageName,
+                display.getDisplay().getDisplayId(),
+                done -> {
+                    releaseEmbeddedDisplay(widgetId);
+                    Intent update =
+                            new Intent(ACTION_EMBEDDED_TASK_LEFT).setPackage(RESTOREMODE_PKG);
+                    update.addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES);
+                    update.putExtra(EXTRA_EMBEDDED_TASK_PKG, packageName);
+                    update.putExtra(EXTRA_EMBEDDED_TASK_CLOSED, true);
+                    update.putExtra("widgetId", widgetId);
+                    sendBroadcast(update, BIND_PERMISSION);
+                    done.run();
+                });
+    }
+
     protected void releaseEmbeddedDisplay(String widgetId) {
+        EmbeddedAppWindows.remove(widgetId);
         VirtualDisplay display = embeddedDisplays.remove(widgetId);
         embeddedPackages.remove(widgetId);
         embeddedLaunched.remove(widgetId);
@@ -1589,6 +1618,7 @@ public class SetModesService extends Service {
                             ? null
                             : embeddedDisplays.remove(fromWidgetId);
             if (display != null) {
+                EmbeddedAppWindows.remove(fromWidgetId);
                 embeddedPackages.remove(fromWidgetId);
                 embeddedLaunched.remove(fromWidgetId);
                 embeddedLaunchAt.remove(fromWidgetId);
@@ -1608,6 +1638,7 @@ public class SetModesService extends Service {
             embeddedPackages.put(toWidgetId, packageName);
             embeddedLaunched.put(toWidgetId, true);
             embeddedLaunchAt.put(toWidgetId, SystemClock.elapsedRealtime());
+            registerEmbeddedWindow(toWidgetId);
             if (surface != null && surface.isValid()) {
                 display.setSurface(surface);
                 closeEmbeddedParking(display);
@@ -1660,6 +1691,8 @@ public class SetModesService extends Service {
             embeddedLaunched.put(idB, true);
             embeddedLaunchAt.put(idA, now);
             embeddedLaunchAt.put(idB, now);
+            registerEmbeddedWindow(idA);
+            registerEmbeddedWindow(idB);
             // Сначала снимаем обе поверхности, иначе одну и ту же поверхность получили бы два
             // дисплея. Затем виджет A показывает экземпляр из B — дисплей B переключаем на
             // поверхность A, и наоборот.
@@ -2062,6 +2095,7 @@ public class SetModesService extends Service {
     public void onCreate() {
         Log.i(TAG, "onCreate()");
         super.onCreate();
+        EmbeddedAppWindows.initialize(this);
         enableWifiOnStartup();
         StartupBluetooth.enable(this);
         energyWidgets = new EnergyWidgetController(this);

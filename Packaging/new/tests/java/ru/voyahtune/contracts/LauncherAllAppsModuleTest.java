@@ -109,6 +109,34 @@ public final class LauncherAllAppsModuleTest {
                     require(
                             AppLauncher.launched == music,
                             "Virtual display launch was intercepted");
+                    harness.settings.put("fullscreen_apps", "");
+                    harness.settings.put("embedded_apps", "app.music");
+                    for (int display : new int[] {0, 1}) {
+                        AppLauncher.launched = null;
+                        harness.backend.invoke(
+                                start,
+                                null,
+                                new LauncherDockContractDriver.Context(),
+                                music,
+                                display);
+                        LauncherCommand command = harness.commands.get(harness.commands.size() - 1);
+                        require(
+                                AppLauncher.launched == null
+                                        && command.kind == LauncherCommand.Kind.EMBEDDED
+                                        && command.display == display
+                                        && command.target.equals("app.music"),
+                                "Embedded application bypassed Native handoff");
+                    }
+                    harness.backend.invoke(
+                            start, null, new LauncherDockContractDriver.Context(), music, 4);
+                    require(AppLauncher.launched == music, "Embedded self-launch was intercepted");
+                    harness.settings.put("embedded_apps", "app.music.other");
+                    AppLauncher.launched = null;
+                    harness.backend.invoke(
+                            start, null, new LauncherDockContractDriver.Context(), music, 1);
+                    require(
+                            AppLauncher.launched == music,
+                            "Package prefix closed an unrelated window");
                     AllAppsBar bar = new AllAppsBar(adapter);
                     Data.instance.mAllAppDataListeners.add(bar);
                     harness.appsEvents.reload();

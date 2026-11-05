@@ -1,6 +1,5 @@
 package ru.big.town.anative;
 
-
 import android.app.Activity;
 import android.app.ActivityManager;
 import android.app.ActivityOptions;
@@ -27,7 +26,8 @@ import android.widget.Toast;
 import java.lang.ref.WeakReference;
 
 /** A removable host above the OEM media activity; finishing reveals the original media card. */
-public final class ClusterMediaHostActivity extends Activity implements TextureView.SurfaceTextureListener {
+public final class ClusterMediaHostActivity extends Activity
+        implements TextureView.SurfaceTextureListener {
     private static final String TAG = "VoyahClusterMedia";
     private static final String MEDIA_DISPLAY_NAME = "Cluster-Media-Display";
     private static final String EXTRA_PACKAGE = "clusterPackage";
@@ -55,11 +55,14 @@ public final class ClusterMediaHostActivity extends Activity implements TextureV
         long token = SESSION.begin(pkg);
         if (previous != null) previous.close();
         AppDisplayLauncher.cancel(pkg);
-        SplitHostActivity.closeActiveHost();
         try {
-            Intent intent = new Intent(app, ClusterMediaHostActivity.class)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
-                    .putExtra(EXTRA_PACKAGE, pkg).putExtra(EXTRA_GENERATION, token);
+            Intent intent =
+                    new Intent(app, ClusterMediaHostActivity.class)
+                            .addFlags(
+                                    Intent.FLAG_ACTIVITY_NEW_TASK
+                                            | Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
+                            .putExtra(EXTRA_PACKAGE, pkg)
+                            .putExtra(EXTRA_GENERATION, token);
             ActivityOptions options = ActivityOptions.makeBasic();
             options.setLaunchDisplayId(mediaId);
             app.startActivity(intent, options.toBundle());
@@ -92,16 +95,20 @@ public final class ClusterMediaHostActivity extends Activity implements TextureV
             for (ActivityManager.RunningTaskInfo task : am.getRunningTasks(100)) {
                 if (task.baseActivity != null
                         && "com.qinggan.instrumentcard".equals(task.baseActivity.getPackageName())
-                        && "com.qinggan.instrumentcard.ScreenActivity".equals(task.baseActivity.getClassName())) {
+                        && "com.qinggan.instrumentcard.ScreenActivity"
+                                .equals(task.baseActivity.getClassName())) {
                     int id = task.getClass().getField("displayId").getInt(task);
                     if (id > 1) return id;
                 }
             }
-        } catch (Exception e) { Log.w(TAG, "Cannot locate OEM media display", e); }
+        } catch (Exception e) {
+            Log.w(TAG, "Cannot locate OEM media display", e);
+        }
         return -1;
     }
 
-    @Override public void onCreate(Bundle savedInstanceState) {
+    @Override
+    public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         packageName = getIntent().getStringExtra(EXTRA_PACKAGE);
         generation = getIntent().getLongExtra(EXTRA_GENERATION, -1);
@@ -109,20 +116,27 @@ public final class ClusterMediaHostActivity extends Activity implements TextureV
         Point size = new Point();
         if (media != null) media.getRealSize(size);
         if (!SESSION.owns(generation, packageName)
-                || media == null || !MEDIA_DISPLAY_NAME.equals(media.getName())
-                || size.x != 1920 || size.y != 720) {
+                || media == null
+                || !MEDIA_DISPLAY_NAME.equals(media.getName())
+                || size.x != 1920
+                || size.y != 720) {
             finishAndRemoveTask();
             return;
         }
         active = new WeakReference<>(this);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
-        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN
-                | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+        getWindow()
+                .getDecorView()
+                .setSystemUiVisibility(
+                        View.SYSTEM_UI_FLAG_FULLSCREEN
+                                | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                                | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
         TextureView texture = new TextureView(this);
         texture.setSurfaceTextureListener(this);
-        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(WIDTH, HEIGHT, Gravity.TOP | Gravity.LEFT);
+        FrameLayout.LayoutParams params =
+                new FrameLayout.LayoutParams(WIDTH, HEIGHT, Gravity.TOP | Gravity.LEFT);
         params.leftMargin = LEFT;
         params.topMargin = TOP;
         root.addView(texture, params);
@@ -130,24 +144,44 @@ public final class ClusterMediaHostActivity extends Activity implements TextureV
     }
 
     private boolean isCurrent() {
-        return !closing && !isFinishing() && !isDestroyed() && SESSION.owns(generation, packageName);
+        return !closing
+                && !isFinishing()
+                && !isDestroyed()
+                && SESSION.owns(generation, packageName);
     }
 
-    @Override public void onSurfaceTextureAvailable(SurfaceTexture texture, int width, int height) {
+    @Override
+    public void onSurfaceTextureAvailable(SurfaceTexture texture, int width, int height) {
         if (!isCurrent()) return;
         try {
             texture.setDefaultBufferSize(WIDTH, HEIGHT);
             surface = new Surface(texture);
             DisplayManager manager = getSystemService(DisplayManager.class);
-            virtualDisplay = OemVirtualDisplay.create(manager, "voyah-cluster-media", WIDTH, HEIGHT, DPI,
-                    surface, true, new VirtualDisplay.Callback() {
-                        @Override public void onStopped() { if (!closing) close(); }
-                    }, new Handler(Looper.getMainLooper()));
-            if (virtualDisplay == null) throw new IllegalStateException("VirtualDisplay unavailable");
+            virtualDisplay =
+                    OemVirtualDisplay.create(
+                            manager,
+                            "voyah-cluster-media",
+                            WIDTH,
+                            HEIGHT,
+                            DPI,
+                            surface,
+                            true,
+                            new VirtualDisplay.Callback() {
+                                @Override
+                                public void onStopped() {
+                                    if (!closing) close();
+                                }
+                            },
+                            new Handler(Looper.getMainLooper()));
+            if (virtualDisplay == null)
+                throw new IllegalStateException("VirtualDisplay unavailable");
             virtualDisplay.setSurface(surface);
             int displayId = virtualDisplay.getDisplay().getDisplayId();
-            AppDisplayLauncher.launch(this, packageName, displayId, true, this::isCurrent, this::launchFailed);
-            Log.i(TAG, "host pkg=" + packageName + " display=" + displayId + " bounds=66,200-640,664");
+            AppDisplayLauncher.launch(
+                    this, packageName, displayId, true, this::isCurrent, this::launchFailed);
+            Log.i(
+                    TAG,
+                    "host pkg=" + packageName + " display=" + displayId + " bounds=66,200-640,664");
         } catch (Exception e) {
             Log.e(TAG, "Virtual display failed", e);
             launchFailed();
@@ -168,21 +202,32 @@ public final class ClusterMediaHostActivity extends Activity implements TextureV
             Context app = context.getApplicationContext();
             DisplayManager manager = app.getSystemService(DisplayManager.class);
             Display physical = manager == null ? null : manager.getDisplay(Display.DEFAULT_DISPLAY);
-            if (physical == null || !physical.isValid()) { Log.w(TAG, message); return; }
+            if (physical == null || !physical.isValid()) {
+                Log.w(TAG, message);
+                return;
+            }
             Toast.makeText(app.createDisplayContext(physical), message, Toast.LENGTH_LONG).show();
-        } catch (Exception e) { Log.w(TAG, "Cannot show failure notification: " + message, e); }
+        } catch (Exception e) {
+            Log.w(TAG, "Cannot show failure notification: " + message, e);
+        }
     }
 
     private void releaseDisplay() {
         if (virtualDisplay != null) {
             VirtualDisplay old = virtualDisplay;
             virtualDisplay = null;
-            try { old.release(); }
-            catch (Exception e) { Log.w(TAG, "Display was already removed", e); }
+            try {
+                old.release();
+            } catch (Exception e) {
+                Log.w(TAG, "Display was already removed", e);
+            }
         }
         if (surface != null) {
-            try { surface.release(); }
-            finally { surface = null; }
+            try {
+                surface.release();
+            } finally {
+                surface = null;
+            }
         }
     }
 
@@ -195,7 +240,8 @@ public final class ClusterMediaHostActivity extends Activity implements TextureV
         finishAndRemoveTask();
     }
 
-    @Override protected void onDestroy() {
+    @Override
+    protected void onDestroy() {
         closing = true;
         SESSION.end(generation);
         if (active.get() == this) active = new WeakReference<>(null);
@@ -203,7 +249,15 @@ public final class ClusterMediaHostActivity extends Activity implements TextureV
         super.onDestroy();
     }
 
-    @Override public boolean onSurfaceTextureDestroyed(SurfaceTexture texture) { close(); return true; }
-    @Override public void onSurfaceTextureSizeChanged(SurfaceTexture texture, int width, int height) {}
-    @Override public void onSurfaceTextureUpdated(SurfaceTexture texture) {}
+    @Override
+    public boolean onSurfaceTextureDestroyed(SurfaceTexture texture) {
+        close();
+        return true;
+    }
+
+    @Override
+    public void onSurfaceTextureSizeChanged(SurfaceTexture texture, int width, int height) {}
+
+    @Override
+    public void onSurfaceTextureUpdated(SurfaceTexture texture) {}
 }

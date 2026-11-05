@@ -852,7 +852,6 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         Context app = context.getApplicationContext();
         if (SplitHostActivity.resumeFullscreenCarPlay(pkg, 0, displayId)) return;
         ClusterMediaHostActivity.closeForPackage(pkg);
-        SplitHostActivity.closeActiveHost();
         AppDisplayLauncher.launch(
                 app,
                 pkg,

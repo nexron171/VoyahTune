@@ -129,18 +129,27 @@ final class ScenarioActionExecutor {
 
     private void setWallpaper(String action, Completion completion) {
         String[] error = {"Не удалось сменить обои"};
-        ApplyEngine.postIndependentUserCommand("scenario wallpaper", () -> {
-            try {
-                Bundle result = service.getContentResolver().call(
-                        android.net.Uri.parse("content://" + WallpaperProtocol.AUTHORITY),
-                        WallpaperProtocol.METHOD_SET, WallpaperProtocol.wallpaperId(action), null);
-                if (result != null && result.getBoolean(WallpaperProtocol.RESULT_APPLIED)) {
-                    error[0] = null;
-                }
-            } catch (RuntimeException exception) {
-                android.util.Log.w("ScenarioWallpaper", "Wallpaper change failed", exception);
-            }
-        }, () -> completion.onFinished(error[0] == null, error[0]));
+        ApplyEngine.postIndependentUserCommand(
+                "scenario wallpaper",
+                () -> {
+                    try {
+                        Bundle result =
+                                service.getContentResolver()
+                                        .call(
+                                                android.net.Uri.parse(
+                                                        "content://" + WallpaperProtocol.AUTHORITY),
+                                                WallpaperProtocol.METHOD_SET,
+                                                WallpaperProtocol.wallpaperId(action),
+                                                null);
+                        if (result != null && result.getBoolean(WallpaperProtocol.RESULT_APPLIED)) {
+                            error[0] = null;
+                        }
+                    } catch (RuntimeException exception) {
+                        android.util.Log.w(
+                                "ScenarioWallpaper", "Wallpaper change failed", exception);
+                    }
+                },
+                () -> completion.onFinished(error[0] == null, error[0]));
     }
 
     /** Открытие приложения через сплит-хост на физическом экране (как в Full-ветке голоса). */
@@ -150,7 +159,6 @@ final class ScenarioActionExecutor {
         final AtomicBoolean settled = new AtomicBoolean();
         try {
             ClusterMediaHostActivity.closeForPackage(pkg);
-            SplitHostActivity.closeActiveHost();
             boolean fullscreen =
                     FullscreenPackagePolicy.contains(
                             android.provider.Settings.Global.getString(

@@ -430,6 +430,11 @@ public final class LauncherAllAppsModule implements ModuleRuntime.Module {
             execute(LauncherCommand.Kind.FULLSCREEN, display, name);
             return null;
         }
+        if (embedded(name)) {
+            call.disableFallback();
+            execute(LauncherCommand.Kind.EMBEDDED, display, name);
+            return null;
+        }
         return call.proceed();
     }
 
@@ -453,7 +458,21 @@ public final class LauncherAllAppsModule implements ModuleRuntime.Module {
             execute(LauncherCommand.Kind.FULLSCREEN, display, name);
             return null;
         }
+        if (embedded(name)) {
+            call.disableFallback();
+            execute(LauncherCommand.Kind.EMBEDDED, display, name);
+            return null;
+        }
         return call.proceed();
+    }
+
+    private boolean embedded(String name) throws Exception {
+        String packages = platform.setting("embedded_apps");
+        if (name.isEmpty() || packages == null) return false;
+        for (String value : packages.split(",")) {
+            if (name.equals(value)) return true;
+        }
+        return false;
     }
 
     private boolean dashboard(String name, String activity) {

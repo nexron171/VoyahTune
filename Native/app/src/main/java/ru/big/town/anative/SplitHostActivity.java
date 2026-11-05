@@ -666,6 +666,7 @@ public class SplitHostActivity extends Activity {
     }
 
     private void createVirtualDisplay(Pane pane, Surface surface) {
+        if (hostDestroyed) return;
         int dpi = effectiveDpi(pane);
         String name = "voyah-split-" + pane.side;
         try {
@@ -700,6 +701,39 @@ public class SplitHostActivity extends Activity {
                 Log.e(TAG, "VD " + pane.side + " fallback failed: " + e2.getMessage());
             }
         }
+        if (pane.vd != null && pane.pkg != null && !pane.pkg.isEmpty()) {
+            EmbeddedAppWindows.register(
+                    this,
+                    pane,
+                    pane.pkg,
+                    pane.vd.getDisplay().getDisplayId(),
+                    done -> closeForAppLaunch(pane, done));
+        }
+    }
+
+    private void closeForAppLaunch(Pane departing, Runnable completion) {
+        Pane remaining = departing == left ? right : left;
+        String remainingPackage = remaining.pkg;
+        int displayId = getWindowManager().getDefaultDisplay().getDisplayId();
+        if (activeHost.get() == this) activeHost = new WeakReference<>(null);
+        retireAsyncHostWork(true);
+        releasePane(left);
+        releasePane(right);
+        finishAndRemoveTask();
+        if (remainingPackage == null
+                || remainingPackage.isEmpty()
+                || remainingPackage.equals(departing.pkg)) {
+            completion.run();
+            return;
+        }
+        AppDisplayLauncher.launch(
+                getApplicationContext(),
+                remainingPackage,
+                displayId,
+                true,
+                () -> true,
+                completion,
+                completion);
     }
 
     private void launchApp(Pane pane) {
@@ -762,10 +796,15 @@ public class SplitHostActivity extends Activity {
             pane.launchInFlight = false;
             return;
         }
-        taskLane.requestPaneLaunch(
-                this,
+        AppDisplayLauncher.cancel(pane.pkg);
+        SplitHostTaskLane.PaneTicket ticket =
                 new SplitHostTaskLane.PaneTicket(
-                        workGate.hostGeneration(), paneIndex, paneGeneration, pane.pkg, displayId));
+                        workGate.hostGeneration(), paneIndex, paneGeneration, pane.pkg, displayId);
+        EmbeddedAppWindows.prepare(
+                pane.pkg,
+                displayId,
+                () -> isPaneTicketCurrent(ticket),
+                () -> taskLane.requestPaneLaunch(this, ticket));
     }
 
     /** Worker resolved launch intent and removed old tasks; only the UI launch remains on main. */
@@ -940,6 +979,7 @@ public class SplitHostActivity extends Activity {
     }
 
     private void releasePane(Pane pane) {
+        EmbeddedAppWindows.remove(pane);
         if (workGate != null) workGate.invalidatePane(paneIndex(pane));
         pane.launchInFlight = false;
         pane.launched = false;
@@ -1511,6 +1551,8 @@ public class SplitHostActivity extends Activity {
      * запускаем поменянные. Без выхода из хоста.
      */
     private void swapApps() {
+        releasePane(left);
+        releasePane(right);
         String tp = left.pkg;
         left.pkg = right.pkg;
         right.pkg = tp;
@@ -1539,6 +1581,8 @@ public class SplitHostActivity extends Activity {
         if (hostDestroyed || workGate == null || workGate.hostGeneration() >= newHostGeneration)
             return;
         retireAsyncHostWork(true);
+        releasePane(left);
+        releasePane(right);
         Log.i(
                 TAG,
                 "host generation "
@@ -1676,20 +1720,6 @@ public class SplitHostActivity extends Activity {
         }
     }
 
-    /**
-     * Finishes the Native VD host before a single application is launched as an ordinary physical
-     * task. Destroy-content-on-removal retires its VD activities; vd_bypass then clamps the new
-     * task.
-     */
-    static boolean closeActiveHost() {
-        SplitHostActivity host = activeHost.get();
-        if (host == null || host.isFinishing() || host.isDestroyed()) return false;
-        activeHost = new WeakReference<>(null);
-        host.runOnUiThread(host::finishAndRemoveTask);
-        Log.i(TAG, "active VD host closed before physical window launch");
-        return true;
-    }
-
     /** A widget has already retired the projection task; its old fullscreen VD can now close. */
     static void closeFullscreenCarPlayHostExcept(int displayId) {
         SplitHostActivity host = activeHost.get();
@@ -1741,8 +1771,23 @@ public class SplitHostActivity extends Activity {
                         valid.getAsBoolean()
                                 && (!CarPlayTarget.isCarPlay(pkg)
                                         || generation == carPlayLaunchGeneration);
-        SplitHostTaskLane.get(ctx)
-                .requestSingleHost(pkg, Math.max(0, dpi), displayId, current, completion);
+        int targetDisplayId = displayId;
+        if (resumeFullscreenCarPlay(pkg, dpi, targetDisplayId)) {
+            completion.run();
+            return;
+        }
+        EmbeddedAppWindows.prepare(
+                pkg,
+                targetDisplayId,
+                current,
+                () ->
+                        SplitHostTaskLane.get(ctx)
+                                .requestSingleHost(
+                                        pkg,
+                                        Math.max(0, dpi),
+                                        targetDisplayId,
+                                        current,
+                                        completion));
     }
 
     /** Called on main only after the process lane has resolved the target package. */

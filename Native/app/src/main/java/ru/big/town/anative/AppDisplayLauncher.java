@@ -76,6 +76,33 @@ final class AppDisplayLauncher {
             return;
         }
         long generation = next(pkg);
+        MAIN.post(
+                () ->
+                        EmbeddedAppWindows.prepare(
+                                pkg,
+                                displayId,
+                                () -> current(pkg, generation) && valid.getAsBoolean(),
+                                () ->
+                                        launchPrepared(
+                                                context,
+                                                pkg,
+                                                displayId,
+                                                fullscreen,
+                                                generation,
+                                                valid,
+                                                onFailure,
+                                                onStarted)));
+    }
+
+    private static void launchPrepared(
+            Context context,
+            String pkg,
+            int displayId,
+            boolean fullscreen,
+            long generation,
+            BooleanSupplier valid,
+            Runnable onFailure,
+            Runnable onStarted) {
         if (CarPlayTarget.isCarPlay(pkg) && (displayId == 0 || displayId == 1)) {
             SplitHostActivity.launchSingle(
                     context,
@@ -128,17 +155,6 @@ final class AppDisplayLauncher {
                 snapshot.add(new SplitHostTaskSnapshot.TaskRecord(task.taskId, pkg, oldDisplay));
             }
             Set<Integer> retiring = AppDisplayTaskPlan.retiring(snapshot, pkg, displayId);
-            boolean clearWidgetHost = CarPlayTarget.isCarPlay(pkg) && displayId <= 1;
-            if (!CarPlayTarget.isCarPlay(pkg)) {
-                for (SplitHostTaskSnapshot.TaskRecord task : snapshot) {
-                    if (retiring.contains(task.taskId)
-                            && task.displayId != null
-                            && task.displayId > 1) {
-                        clearWidgetHost = true;
-                        break;
-                    }
-                }
-            }
             Object service = null;
             Method remove = null;
             for (int taskId : retiring) {
@@ -164,7 +180,6 @@ final class AppDisplayLauncher {
                     generation,
                     intent,
                     retiring,
-                    clearWidgetHost,
                     0,
                     valid,
                     onFailure,
@@ -183,7 +198,6 @@ final class AppDisplayLauncher {
             long generation,
             Intent intent,
             Set<Integer> retiring,
-            boolean clearWidgetHost,
             int attempt,
             BooleanSupplier valid,
             Runnable onFailure,
@@ -213,7 +227,6 @@ final class AppDisplayLauncher {
                                             generation,
                                             intent,
                                             retiring,
-                                            clearWidgetHost,
                                             attempt + 1,
                                             valid,
                                             onFailure,
@@ -226,12 +239,6 @@ final class AppDisplayLauncher {
                     () -> {
                         if (!current(pkg, generation) || !valid.getAsBoolean()) return;
                         try {
-                            // Release the old widget only after task removal has completed.
-                            if (clearWidgetHost
-                                    || (CarPlayTarget.isCarPlay(pkg)
-                                            && SplitHostActivity.ownsCarPlayDisplay(displayId))) {
-                                SetModesService.notifyEmbeddedTaskLeft(app, pkg);
-                            }
                             if (CarPlayTarget.isCarPlay(pkg)) {
                                 SplitHostActivity.closeFullscreenCarPlayHostExcept(displayId);
                                 int physicalDisplay =

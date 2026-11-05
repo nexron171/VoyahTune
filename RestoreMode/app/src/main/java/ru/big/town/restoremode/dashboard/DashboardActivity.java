@@ -501,6 +501,16 @@ public class DashboardActivity extends AppCompatActivity {
                 @Override
                 public void onReceive(Context context, Intent intent) {
                     String packageName = intent.getStringExtra(EXTRA_EMBEDDED_TASK_PKG);
+                    String widgetId = intent.getStringExtra("widgetId");
+                    if (widgetId != null) {
+                        AppWidgetSessionStore.forgetLaunch(
+                                sharedPreferences, currentWidgetSessionId(), widgetId);
+                        if (packageName != null
+                                && packageName.equals(embeddedWidgetPackages.get(widgetId))) {
+                            detachEmbeddedWidget(widgetId, appWidgetTileViews.get(widgetId));
+                        }
+                        return;
+                    }
                     if (intent.getBooleanExtra(EXTRA_EMBEDDED_TASK_CLOSED, false)) {
                         AppWidgetSessionStore.forgetPackage(
                                 sharedPreferences, currentWidgetSessionId(), packageName);
@@ -4131,31 +4141,9 @@ public class DashboardActivity extends AppCompatActivity {
         }
     }
 
-    /** Обычный запуск приложения на дефолтном дисплее (без VirtualDisplay). */
-    private void launchAppNormally(String pkg) {
-        try {
-            Intent i =
-                    CarPlayTarget.isCarPlay(pkg)
-                            ? new Intent(Intent.ACTION_MAIN)
-                                    .addCategory(Intent.CATEGORY_LAUNCHER)
-                                    .setClassName(CarPlayTarget.PACKAGE, CarPlayTarget.LAUNCHER)
-                            : CarPlayTarget.launchIntent(this, pkg);
-            if (i == null) {
-                showSnack("Не удалось открыть приложение");
-                return;
-            }
-            if (CarPlayTarget.isCarPlay(pkg)) {
-                carPlayWidgetGeneration++;
-            }
-            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            android.app.ActivityOptions options = android.app.ActivityOptions.makeBasic();
-            options.setLaunchDisplayId(dashboardDisplayId);
-            startActivity(i, options.toBundle());
-            Log.i(TAG, "launchAppNormally " + pkg);
-        } catch (Exception e) {
-            showSnack("Не удалось открыть приложение");
-            Log.w(TAG, "launchAppNormally " + pkg + ": " + e.getMessage());
-        }
+    private void launchAppNormally(String packageName) {
+        if (CarPlayTarget.isCarPlay(packageName)) carPlayWidgetGeneration++;
+        launchAppOnDisplay(packageName, dashboardDisplayId);
     }
 
     /** Native трактует пустой right как отдельную physical task целевого пакета. */

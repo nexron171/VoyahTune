@@ -89,7 +89,6 @@ final class ApplicationStartupController {
         }
         String packageName = action.substring(4);
         ClusterMediaHostActivity.closeForPackage(packageName);
-        if (screen == Screen.MAIN) SplitHostActivity.closeActiveHost();
         boolean fullscreen =
                 FullscreenPackagePolicy.contains(
                         android.provider.Settings.Global.getString(
