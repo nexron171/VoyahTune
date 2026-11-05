@@ -19,6 +19,9 @@ public final class EnergyWidgetLayout {
     }
 
     public static int maxWidth(String id) {
+        if ("tirePressureWidget".equals(id)) {
+            return 2;
+        }
         return "energyConsumptionWidget".equals(id)
                 ? 3
                 : "energyWidget".equals(id) || "energyTripWidget".equals(id) ? 8 : 4;

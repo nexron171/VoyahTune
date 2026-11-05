@@ -28,13 +28,13 @@ public final class TirePressureWidgetView extends VehicleWidgetView {
             IMAGES.execute(
                     () -> {
                         EnergyCarImage loaded = null;
-                        try (InputStream in =
+                        try (InputStream inputStream =
                                 context.getApplicationContext()
                                         .getAssets()
                                         .open("energy/car_" + this.color + ".png")) {
                             BitmapFactory.Options options = new BitmapFactory.Options();
                             options.inSampleSize = 2;
-                            Bitmap body = BitmapFactory.decodeStream(in, null, options);
+                            Bitmap body = BitmapFactory.decodeStream(inputStream, null, options);
                             if (body != null) {
                                 loaded = new EnergyCarImage(body);
                             }
@@ -67,15 +67,15 @@ public final class TirePressureWidgetView extends VehicleWidgetView {
 
     @Override
     protected void drawWidget(Canvas canvas) {
-        boolean narrow = columns < 4, shorter = rows == 3;
-        float pad = columns == 2 ? 16 : narrow ? 20 : 27,
-                titleSize = columns == 2 ? 20 : narrow ? 24 : 28;
+        boolean shorter = rows == 3;
+        float padding = 16;
+        float titleSize = 20;
         float titleY = shorter ? 40 : 55;
-        drawText(canvas, "Давление в шинах", pad, titleY, titleSize, WHITE, true);
+        drawText(canvas, "Давление в шинах", padding, titleY, titleSize, WHITE, true);
         drawRightAlignedText(
-                canvas, "bar", contentWidth - pad, titleY, columns == 2 ? 14 : 19, MUTED);
-        float height = shorter ? 258 : columns == 2 ? 325 : columns == 3 ? 335 : 345,
-                top = shorter ? 60 : 78;
+                canvas, "bar", contentWidth - padding, titleY, 14, MUTED);
+        float height = shorter ? 258 : 325;
+        float top = shorter ? 60 : 78;
         if (car != null) {
             car.draw(canvas, carPaint, contentWidth / 2, top, height);
         } else {
@@ -88,61 +88,31 @@ public final class TirePressureWidgetView extends VehicleWidgetView {
                     MUTED,
                     false);
         }
-        String[] names = {"Левое переднее", "Правое переднее", "Левое заднее", "Правое заднее"};
-        float pressureSize =
-                shorter
-                        ? (columns == 2 ? 30 : columns == 3 ? 34 : 40)
-                        : (columns == 2 ? 36 : columns == 3 ? 42 : 53);
-        float labelSize = columns == 2 ? 12 : columns == 3 ? 14 : 17,
-                plateW = columns == 2 ? 120 : 137;
-        for (int i = 0; i < 4; i++) {
-            boolean left = i % 2 == 0;
-            float y = shorter ? (i < 2 ? 110 : 247) : (i < 2 ? 152 : 327);
-            float valueY = y + pressureSize + 10;
-            if (narrow) {
-                paint.setColor(0x7a000000);
-                float x = left ? pad : contentWidth - pad - plateW;
-                canvas.drawRoundRect(x, y - labelSize - 8, x + plateW, valueY + 8, 4, 4, paint);
-            }
-            float x = left ? pad + (narrow ? 8 : 0) : contentWidth - pad - (narrow ? 8 : 0);
+        float pressureSize = shorter ? 30 : 36;
+        float plateWidth = 88;
+        for (int wheelIndex = 0; wheelIndex < 4; wheelIndex++) {
+            boolean left = wheelIndex % 2 == 0;
+            float valueY = shorter ? (wheelIndex < 2 ? 150 : 287) : (wheelIndex < 2 ? 198 : 373);
+            float plateLeft = left ? padding : contentWidth - padding - plateWidth;
+            paint.setColor(0x7a000000);
+            canvas.drawRoundRect(
+                    plateLeft, valueY - pressureSize - 4,
+                    plateLeft + plateWidth, valueY + 8, 4, 4, paint);
+            String pressure = formatNumber(currentValue(EnergyWidgetProtocol.TIRES, wheelIndex));
             if (left) {
-                drawText(canvas, names[i], x, y, labelSize, MUTED, false);
-                drawText(
-                        canvas,
-                        formatNumber(currentValue(EnergyWidgetProtocol.TIRES, i)),
-                        x,
-                        valueY,
-                        pressureSize,
-                        WHITE,
-                        false);
+                drawText(canvas, pressure, padding + 8, valueY, pressureSize, WHITE, false);
             } else {
-                drawRightAlignedText(canvas, names[i], x, y, labelSize, MUTED);
                 drawRightAlignedText(
-                        canvas,
-                        formatNumber(currentValue(EnergyWidgetProtocol.TIRES, i)),
-                        x,
-                        valueY,
-                        pressureSize,
-                        WHITE);
-            }
-            if (!narrow) {
-                drawLine(
-                        canvas,
-                        left ? 162 : contentWidth - 192,
-                        y + 32,
-                        left ? 192 : contentWidth - 162,
-                        y + 32,
-                        BORDER,
-                        1);
+                        canvas, pressure, contentWidth - padding - 8, valueY, pressureSize, WHITE);
             }
         }
         if (!hasLiveData()) {
             drawText(
                     canvas,
                     "Нет связи",
-                    pad,
+                    padding,
                     shorter ? contentHeight - 27 : 462,
-                    columns == 2 ? 12 : columns == 3 ? 13 : 16,
+                    12,
                     MUTED,
                     false);
         }

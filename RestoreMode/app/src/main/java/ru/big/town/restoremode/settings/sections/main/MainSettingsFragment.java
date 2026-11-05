@@ -291,7 +291,7 @@ public class MainSettingsFragment extends SettingsSectionFragment {
                 R.id.TirePressureSettingWidth,
                 R.id.TirePressureSettingHeight,
                 "tirePressureWidget",
-                4,
+                2,
                 4);
         bindShowSwitch(R.id.switchShowOdometer, "show_odometerWidget", false, R.id.OdometerSizeRow);
         bindTileSizeSpinners(

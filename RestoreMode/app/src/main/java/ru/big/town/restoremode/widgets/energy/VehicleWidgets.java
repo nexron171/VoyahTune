@@ -14,8 +14,8 @@ public final class VehicleWidgets {
     public static final String[] IDS = {ENERGY, CONSUMPTION, TRIP, TIRES, ODO};
 
     public static boolean isWidget(String id) {
-        for (String s : IDS) {
-            if (s.equals(id)) {
+        for (String widgetId : IDS) {
+            if (widgetId.equals(id)) {
                 return true;
             }
         }
@@ -33,7 +33,7 @@ public final class VehicleWidgets {
             return new int[] {8, 2};
         }
         if (TIRES.equals(id)) {
-            return new int[] {4, 4};
+            return new int[] {2, 4};
         }
         return new int[] {4, 1};
     }
