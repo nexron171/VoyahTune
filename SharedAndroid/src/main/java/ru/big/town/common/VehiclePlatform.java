@@ -7,6 +7,7 @@ public enum VehiclePlatform {
     H97C,
     H97X,
     H97Y,
+    H97D,
     OTHER;
 
     private static final class Device {
@@ -29,6 +30,7 @@ public enum VehiclePlatform {
         // VehicleConfigHelper remaps the generic NVRAM type using these exact product names.
         if ("f6811".equals(product) || "f6811".equals(thirdParty)) return H97X;
         if ("f6805h".equals(product) || "f6805h".equals(thirdParty)) return H97Y;
+        if ("f6808".equals(product) || "f6808".equals(thirdParty)) return H97D;
         if ("134".equals(digits) || "f6802h".equals(product) || "f6802h".equals(thirdParty)) {
             return H97C;
         }

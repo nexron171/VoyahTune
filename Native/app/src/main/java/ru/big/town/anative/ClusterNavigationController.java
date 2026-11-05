@@ -6,6 +6,7 @@ import android.content.Intent;
 import android.content.ServiceConnection;
 import android.content.pm.ApplicationInfo;
 import android.database.ContentObserver;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
@@ -27,6 +28,8 @@ final class ClusterNavigationController {
     private static final String TAG = "ClusterNavigation";
     private static ClusterNavigationController instance;
     private static final String PACKAGE = "com.qinggan.cluster";
+    private static final String ACTION = "com.qinggan.cluster.InstrumentClusterService";
+    private static final String SERVICE_CLASS = PACKAGE + ".service.InstrumentClusterService";
     private static final String DESCRIPTOR = "com.qinggan.cluster.IInstrumentClusterManagerService";
     private final Context context;
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -42,6 +45,7 @@ final class ClusterNavigationController {
     private boolean ownsOutput;
     private boolean watching;
     private ClusterNavigationLease.Maneuver applied;
+    private Boolean clusterConnected;
     private long nextBind;
     private final ContentObserver settingsObserver =
             new ContentObserver(main) {
@@ -77,6 +81,7 @@ final class ClusterNavigationController {
 
     private ClusterNavigationController(Context context) {
         this.context = context.getApplicationContext();
+        Log.i(TAG, "platform=" + Build.PRODUCT + " presentation=" + property("ro.qg.presentation"));
         this.context
                 .getContentResolver()
                 .registerContentObserver(
@@ -96,6 +101,17 @@ final class ClusterNavigationController {
                         false,
                         settingsObserver);
         refreshEnabled();
+    }
+
+    private static String property(String name) {
+        try {
+            Method get =
+                    Class.forName("android.os.SystemProperties").getMethod("get", String.class);
+            Object value = get.invoke(null, name);
+            return value instanceof String ? (String) value : "";
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError unavailable) {
+            return "";
+        }
     }
 
     private void refreshEnabled() {
@@ -171,8 +187,10 @@ final class ClusterNavigationController {
                 () -> {
                     Exception failure = null;
                     boolean attempted = false;
+                    Boolean connected = null;
                     try {
                         OemWriter writer = new OemWriter(context, target);
+                        connected = writer.connected();
                         if (target == binder && Objects.equals(wanted, requested)) {
                             attempted = true;
                             writer.send(wanted);
@@ -182,12 +200,21 @@ final class ClusterNavigationController {
                     }
                     Exception result = failure;
                     boolean mayHaveWritten = attempted;
+                    Boolean link = connected;
                     main.post(
                             () -> {
                                 busy = false;
                                 // A failed Binder call may have reached the service before it
                                 // disconnected.
                                 ownsOutput |= mayHaveWritten;
+                                if (link != null && !link.equals(clusterConnected)) {
+                                    clusterConnected = link;
+                                    if (link) {
+                                        Log.i(TAG, "Cluster link with the IPK is up");
+                                    } else {
+                                        Log.w(TAG, "No IPK link reported; the maneuver may be dropped");
+                                    }
+                                }
                                 if (target == binder) {
                                     if (result == null && mayHaveWritten) {
                                         applied = wanted;
@@ -249,11 +276,15 @@ final class ClusterNavigationController {
 
                     @Override
                     public void onBindingDied(ComponentName name) {
+                        Log.w(TAG, "Cluster binding died: " + name);
                         failed();
                     }
 
                     @Override
                     public void onNullBinding(ComponentName name) {
+                        // The service only publishes its binder when ro.qg.presentation is
+                        // VirtualDisplay; otherwise Android reports a null binding.
+                        Log.w(TAG, "Cluster returned a null binder: " + name);
                         failed();
                     }
 
@@ -267,14 +298,20 @@ final class ClusterNavigationController {
                 };
         connection = next;
         try {
-            Intent intent =
-                    new Intent("com.qinggan.cluster.InstrumentClusterService")
-                            .setClassName(PACKAGE, PACKAGE + ".service.InstrumentClusterService");
+            // The OEM manager binds by action; the class name is only a fallback for builds
+            // whose intent filter is missing.
+            Intent intent = new Intent(ACTION).setPackage(PACKAGE);
+            boolean byAction = context.getPackageManager().resolveService(intent, 0) != null;
+            if (!byAction) {
+                intent = new Intent(ACTION).setClassName(PACKAGE, SERVICE_CLASS);
+            }
+            Log.i(TAG, "Binding cluster service by " + (byAction ? "action" : "class"));
             if (context.bindService(intent, next, Context.BIND_AUTO_CREATE)) {
                 main.postDelayed(bindTimeout, 5000);
             } else {
                 connection = null;
                 nextBind = SystemClock.elapsedRealtime() + 5000;
+                Log.w(TAG, "Cluster service rejected the binding request");
             }
         } catch (RuntimeException error) {
             connection = null;
@@ -303,10 +340,12 @@ final class ClusterNavigationController {
         private final Class<?> info;
         private final Class<?> guide;
         private final Method update;
+        private final Method connect;
 
         OemWriter(Context context, IBinder binder) throws Exception {
-            if (!DESCRIPTOR.equals(binder.getInterfaceDescriptor())) {
-                throw new IllegalStateException("Wrong cluster interface");
+            String descriptor = binder.getInterfaceDescriptor();
+            if (!DESCRIPTOR.equals(descriptor)) {
+                throw new IllegalStateException("Wrong cluster interface: " + descriptor);
             }
             ApplicationInfo application =
                     context.getPackageManager().getApplicationInfo(PACKAGE, 0);
@@ -329,6 +368,26 @@ final class ClusterNavigationController {
             info = loader.loadClass("com.qinggan.cluster.info.NaviInfo");
             guide = loader.loadClass("com.qinggan.cluster.info.GuideState");
             update = contract.getMethod("updateNaviInfo", info);
+            Method clusterConnect = null;
+            try {
+                clusterConnect = contract.getMethod("getClusterConnect");
+            } catch (NoSuchMethodException absent) {
+                // Older builds may not expose the IPK connection state.
+            }
+            connect = clusterConnect;
+        }
+
+        /** Reports the OEM link to the cluster display; null when the build cannot answer. */
+        Boolean connected() {
+            if (connect == null) {
+                return null;
+            }
+            try {
+                Object value = connect.invoke(proxy);
+                return value instanceof Boolean ? (Boolean) value : null;
+            } catch (Exception unavailable) {
+                return null;
+            }
         }
 
         void send(ClusterNavigationLease.Maneuver maneuver) throws Exception {

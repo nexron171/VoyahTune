@@ -21,11 +21,22 @@ public class VehiclePlatformTest {
         for (String type : new String[] {"134", "type=134", "0", "", null}) {
             assertEquals(VehiclePlatform.H97X, VehiclePlatform.detect(type, "f6811", ""));
             assertEquals(VehiclePlatform.H97Y, VehiclePlatform.detect(type, "f6802h", "f6805h"));
+            assertEquals(VehiclePlatform.H97D, VehiclePlatform.detect(type, "f6808", ""));
         }
         assertEquals(VehiclePlatform.H97C, VehiclePlatform.detect("134", "", ""));
         assertEquals(VehiclePlatform.H97C, VehiclePlatform.detect("", "f6802h", ""));
+        assertEquals(VehiclePlatform.H97D, VehiclePlatform.detect("134", "f6802h", "f6808"));
         assertEquals(VehiclePlatform.OTHER, VehiclePlatform.detect(null, null, null));
         assertEquals(VehiclePlatform.OTHER, VehiclePlatform.detect("", "not-f6811", ""));
+    }
+
+    @Test
+    public void onlyXAndYReuseAccFirmwareBehaviour() {
+        for (VehiclePlatform platform : VehiclePlatform.values()) {
+            assertEquals(
+                    platform == VehiclePlatform.H97X || platform == VehiclePlatform.H97Y,
+                    platform.isH97XY());
+        }
     }
 
     @Test
