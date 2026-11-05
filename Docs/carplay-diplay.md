@@ -7,7 +7,7 @@
 
 
 Этот документ — контракт адаптации, по которому восстанавливают интеграцию после
-полной замены исходников DiPlay. Он описывает исходники на **27 октября 2026**;
+полной замены исходников DiPlay. Он описывает исходники с выборочным переносом DiPlay на **5 ноября 2026**;
 состав конкретного опубликованного релиза определяется его manifest и revision.
 Имена upstream-классов могут измениться: при обновлении сохранять поведение
 и границы ответственности, а не только переносить строки патча.
@@ -27,6 +27,11 @@
   часов и запас после rebuffer. Возврат задержки заменён собственной плавной
   реализацией, UDP reorder/resend добавлен отдельно (§9). Он не входит
   в зафиксированный main; его адаптации и проверки описаны в §9/10/12.
+- Поверх базы выборочно перенесены исправления из main **`615b32ce0b40cd0b99ce94ba23a512001553684f`**
+  (0.2.22), 5 ноября 2026: #1148, #1122, #1123, #1125, #1126, #1128, #1129,
+  #1131–1134, #1138, #1139, #1141, #1144, #1057, #1058, #1060, #1062, #1066,
+  #1097. Это **не полное обновление baseline**; clock trim #1070/#1080,
+  OEM-функции и standalone updater не импортированы. Контракты и карта — §9.1/10.1.
 - Копия [RestoreMode/diplay](../RestoreMode/diplay/README.md) — vendored source,
   не submodule. Модули `common` и `shared` импортированы; `mobile` не используется.
 - Иконка `ic_car_home.png` и таблица манёвров взяты/адаптированы из VoyahPlay,
@@ -627,7 +632,10 @@ USB, settings, back, choosePhone, disconnect, setAutoConnect, hotspotSettings. �
 `DiPlayActivity.render()` создаёт этот Screen **только для page=home**, вставляет его
 непосредственно в безопасную область без ScrollView; остальные страницы DiPlay штатные. Каждый render сбрасывает
 старую ссылку Screen. `refreshStatus()` обновляет home и штатные controls, включая
-ошибки auth/hotspot, выбранный телефон, подключение и наличие сессии.
+ошибку authentication, последнюю подтверждённую ошибку подключения, выбранный телефон
+и наличие сессии. Последняя ошибка с локальным временем передаётся через `Screen.update`
+в существующую нижнюю строку; authentication имеет приоритет. Установленная сессия
+скрывает и очищает запись. Штатное предупреждение BYD о выключенном хотспоте не возвращать.
 
 `CarPlayHomeScreen` использует SettingsComponents и ресурсы
 `settings_*`: Arimo, цвета карточек, скругления, ripple/focus. Фон всего home задаётся
@@ -1997,6 +2005,48 @@ DEFAULT_OEM_LABEL в AirPlayPersistence — **Voyah Free**, в том числе
 классов, протоколов, технические логи и лицензии/атрибуция upstream сохраняются.
 При обновлении повторить проверку текстов всех локалей и placeholders.
 
+### 9.1. Выборочные исправления 0.2.22, 5 ноября 2026
+
+Источник — [сравнение исходной базы с 615b32ce](https://github.com/shihabal3amri/DiPlay/compare/143f4674b60b564a16baae5110b3b90fb7277631...615b32ce0b40cd0b99ce94ba23a512001553684f).
+При последующем обновлении сохранять следующие контракты вместе с адаптациями выше:
+
+- **Микрофон:** без явного `framesPerPacket` PCM выбирает 20/10/5 мс так, чтобы
+  RTP + AEAD + PCM + IPv6/UDP помещались в MTU 1500. Для mono 48 кГц — 10 мс,
+  24/16 кГц — 20 мс; stereo 48 кГц — 5 мс. Явное согласование телефона и Opus
+  сохраняются. Маршрутизация, источники микрофона и наш clock trim не меняются.
+- **Границы протоколов:** RTSP header ≤16 KiB, body ≤1 MiB; iAP package ≤4 MiB;
+  Bonjour status line ограничена. Bplist проверяет смещения, длины, число объектов,
+  глубину и бюджет раскрытия ссылок; NCM NTB16 ограничивает цепочки NDP, повторные
+  ссылки и пересекающиеся datagram. Неверные данные завершают обработку исключением.
+- **Адреса каналов:** event, screen, iAP tunnel и VideoSettingsChannel принимают TCP
+  только с IP управляющего соединения; NTP принимает ответы ожидаемого peer/порта.
+  Это проверка адреса в дополнение к существующему шифрованию, не новая аутентификация.
+  Собственные Ultra/RCS/VSP остаются на своих путях; тест Ultra проверяет совместимость.
+- **Android entry points:** динамические USB receivers на Android ≤12 требуют
+  `${applicationId}.USB_PERMISSION_RESULT` уровня `signature`, на Android ≥13 —
+  `RECEIVER_NOT_EXPORTED`. Внешний `page` допускает только безопасные страницы;
+  `backup` не запускает сервер через Intent. Bluetooth wake использует process token,
+  но остаётся выключенным политикой VoyahTune даже с корректным token.
+- **Касания и логи:** очередь объединяет только MOVE одинакового набора пальцев;
+  DOWN/UP сохраняют порядок. История MOVE привязана к AirPlay-сессии: первое нажатие
+  после её смены не объединяется с движением даже при заблокированной старой записи. TRACE строится только по запросу listener/logcat.
+  `SessionLogFile` редактирует и пишет строки в фоне, очередь ограничена 4096 строками,
+  потери отмечаются; close ждёт не более 250 мс. `AsyncDiagnosticLog` использует
+  `appendNow` на своём worker. SYN/FIN/RST остаются видимыми при ограничении ACK-логов.
+  На экране отчёта показываются заголовок до 20 тысяч символов и последние 200 тысяч;
+  экспорт сохраняет полный отчёт. UDID с дефисами маскируется, созданный SSID не логируется.
+- **USB recovery:** первая 30-секундная граница однократно отодвигается до 45 секунд,
+  если повторный start-session ещё может быть отправлен. Сам повторный запрос получает
+  собственные 30 секунд. Поколение таймера, остановка и успешная сессия отменяют ожидание.
+- **Диагностика:** причины выбора iPhone, P2P-канала и хотспота передаются типизированно,
+  отдельно от retry policy. Через 20 секунд USB-ожидания различаются отсутствие устройств
+  и наличие устройства, не являющегося iPhone; hub сам по себе не считается устройством.
+  Re-enumeration показывает подготовку CarPlay. `diplay_last_problem` хранит последнюю
+  известную причину и время вне backup настроек; произвольный текст исключения не становится
+  подтверждённой причиной. Ошибка cleanup после исчерпания retries не затирает диагноз.
+  Открытый основной screen stream без единого видеокадра за 10 секунд предлагает
+  перезапустить iPhone; неподвижное изображение после первого кадра не считается ошибкой.
+
 ## 10. Полная карта адаптаций
 
 ### 10.1. Изменённые файлы vendored upstream
@@ -2111,6 +2161,21 @@ Kotlin/Java/JNI-файлы baseline импортированы.
 В `docs/` сохранены THIRD_PARTY_NOTICES, исходный `UPSTREAM-README.md` и
 `licenses/` (AGPL DiAuto и лицензии зависимостей). При следующем импорте сохранять
 эти документы вместе с исходниками, не ограничиваться ссылками в notices.
+
+#### Карта выборочного переноса 0.2.22
+
+Пути относительно `RestoreMode/diplay`; поведение — §9.1. Форматирование затронутых
+Kotlin-файлов выровнено целиком; собственные адаптации не заменены upstream-файлами.
+
+| Файлы | Контракт |
+| --- | --- |
+| `shared/airplay/{MicrophonePacketizer,CarPlayMediaEngine}.kt` | PCM MTU и ожидаемый адрес каналов; сохранить собственные buffered audio, Ultra и VSP. |
+| `shared/airplay/{RtspMessage,BplistCodec,IapTunnel,AirPlayTcpAccepted,AirPlaySession,ScreenStream,VideoSettingsChannel,NtpClock}.kt`, `shared/network/CarPlayBonjour.kt`, `shared/transport/Ntb16Codec.kt` | Ограничения парсеров, peer checks и ленивый TRACE. Здесь и ниже `shared/` обозначает `shared/src/main/java/com/shilapi/xcertplay/`. |
+| `shared/transport/{UsbPermissionBroadcast,IphoneUsbHost,Ch341UsbHost,Iap2UsbMuxHost}.kt`, `shared/src/main/AndroidManifest.xml` | Защита результата USB permission и ограничение usbmux-лога. |
+| `shared/orchestration/{CarPlayController,WiredStartWatchdog,ConnectionFailureCause}.kt`, `shared/network/{ManualHotspotManager,ManualHotspotReadiness,WifiP2pChannels,WirelessStartupPolicy}.kt` | MOVE, USB deadline и типизированные ошибки; сохранить поколения и владельца Voyah. |
+| `shared/media/AndroidMediaSink.kt`, `common/CarPlayHostActivity.kt` | Получение первого видеокадра, отсутствие изображения, диагностика и сохранение собственной отмены/переноса сессии. Здесь и ниже `common/` обозначает `common/src/main/java/com/shilapi/xcertplay/`. |
+| `common/{DiPlayActivity,LastConnectionProblem,ConnectionFailureGuidance,PhoneBluetoothReceiver}.kt`, девять основных `values*/strings.xml` | Безопасные Intent, последнее подключение и подсказки; app-owned home получает ошибку через существующий facade. |
+| `common/{SessionLogFile,AsyncDiagnosticLog,DiagnosticRedactor}.kt` | Асинхронная запись, ограничение отображения отчёта и маскирование данных. |
 
 ### 10.2. Собственные файлы внутри DiPlay
 
@@ -2439,6 +2504,18 @@ SWReason управляет только проекцией в режиме VEHI
 
 ## 12. Критерии восстановления и проверки
 
+Для выборочного переноса 0.2.22 используются `MicrophonePacketizerTest`,
+`ControlReceiveBoundsTest`, `BplistCodecHostileInputTest`, `IapPackageBoundsTest`,
+`CarPlayBonjourProbeLineTest`, `Ntb16CodecTest`, пять `*PeerTest`,
+`UsbPermissionReceiverTest`, `ExternalIntentExtrasTest`, `CarPlayControllerTouchQueueTest`,
+`AirPlayTouchTraceCostTest`, `CarPlayControllerTraceWantedTest`, `UsbMuxLogFloodTest`,
+`SessionLogFileLatencyTest`, `DiagnosticReportViewTest`, `DiagnosticRedactorTest`,
+`WiredStartWatchdogTest`, тесты причин подключения/последней ошибки и `CarPlayNoPictureTest`.
+Сохранять проверки Voyah owner/session transfer и выключенных OEM/ADB/boot features.
+Upstream-тесты, ожидающие Bluetooth wake или OEM-включение хотспота, адаптированы
+к запрету этих действий; проверки событий сессии устанавливают актуального владельца.
+
+
 Тесты проверяют выполнение рабочей реализации на разных входах, включая границы
 и ошибки. По правилам корневого `AGENTS.md` удалены проверки текста и структуры
 исходников, XML-объявлений и отдельных констант: `SettingsLayoutSourceRulesTest`,
@@ -2579,6 +2656,19 @@ IPC/CAN/cluster/запуска нужен согласованный Native APK.
 автоматически из задачи обновления библиотеки.
 
 ## 13. Подтверждённое состояние и ограничения
+
+### Выборочные исправления 0.2.22, 5 ноября 2026
+
+Перенесены перечисленные в §1 исправления с сохранением исходной базы и адаптаций
+VoyahTune. Дополнительно регрессионным тестом воспроизведена потеря первого DOWN
+новой сессии при занятой старой записи; история MOVE теперь привязана к сессии.
+Компиляция common/shared, их JVM-тестов и app прошла. Целевые проверки протоколов,
+USB, касаний/логов, recovery и диагностики прошли; отдельно проверены Ultra и
+собственный home, включая приоритет authentication и скрытие последней ошибки.
+`git diff --check` прошёл; новые локальные ссылки документа корректны. Расширенный набор,
+сборка APK/payload, установка и проверка на автомобиле не выполнялись.
+Для доставки переноса требуется обновлённый APK RestoreMode; он не меняет Native и Installer,
+пересборка Installer не требуется, установочный контракт прежний.
 
 ### Выбор тем и OEM-панели, 27 октября 2026
 
