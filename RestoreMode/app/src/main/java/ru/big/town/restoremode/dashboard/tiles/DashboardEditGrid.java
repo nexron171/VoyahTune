@@ -15,8 +15,6 @@ import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.widget.GridLayout;
 
-import ru.big.town.restoremode.R;
-
 import java.util.HashMap;
 import java.util.Map;
 
@@ -57,8 +55,7 @@ public final class DashboardEditGrid extends GridLayout {
         BACKGROUND,
         BODY,
         REMOVE,
-        RESIZE,
-        WINDOW_CONTROL
+        RESIZE
     }
 
     private static final float SNAP_RADIUS_CELLS = 0.125f;
@@ -67,7 +64,6 @@ public final class DashboardEditGrid extends GridLayout {
     private final Map<View, Item> items = new HashMap<>();
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path corner = new Path();
-    private final Path buttonOutline = new Path();
     private final Rect original = new Rect();
     private final Rect viewport = new Rect();
     private final Rect sizeLimits = new Rect();
@@ -160,8 +156,7 @@ public final class DashboardEditGrid extends GridLayout {
             }
         }
         boolean background = gesture == Gesture.BACKGROUND;
-        boolean consume =
-                inWallpaperMargin || background || (editing && gesture != Gesture.WINDOW_CONTROL);
+        boolean consume = inWallpaperMargin || background || editing;
         if (action == MotionEvent.ACTION_UP
                 && background
                 && editing
@@ -205,14 +200,19 @@ public final class DashboardEditGrid extends GridLayout {
             postDelayed(hold, ViewConfiguration.getLongPressTimeout());
             return;
         }
-        View handler = touchTarget(pressed, downX - pressed.getX(), downY - pressed.getY());
-        if (editing && isWindowControl(handler)) {
-            gesture = Gesture.WINDOW_CONTROL;
-            return;
-        }
         gesture = editing ? controlAt(pressed, downX, downY) : Gesture.BODY;
         if (gesture == Gesture.BODY) {
-            if (editing || handler == null || handler == pressed || !handler.isLongClickable()) {
+            View handler =
+                    editing
+                            ? null
+                            : touchTarget(pressed, downX - pressed.getX(), downY - pressed.getY());
+            boolean childHandlesHold =
+                    handler != null
+                            && handler != pressed
+                            && (handler.isLongClickable()
+                                    || TileOrderStore.Tile.TYPE_APP_WIDGET.equals(
+                                            items.get(pressed).tile.type));
+            if (!childHandlesHold) {
                 postDelayed(hold, ViewConfiguration.getLongPressTimeout());
             }
         } else if (gesture == Gesture.RESIZE) {
@@ -277,20 +277,6 @@ public final class DashboardEditGrid extends GridLayout {
             }
         }
         return view.isClickable() || view.isLongClickable() ? view : null;
-    }
-
-    private static final int[] WINDOW_CONTROL_GROUPS = {
-        R.id.appWidgetOverlayControls, R.id.appWidgetLauncherControls
-    };
-
-    private boolean isWindowControl(View view) {
-        while (view != null && view != this) {
-            for (int groupId : WINDOW_CONTROL_GROUPS) {
-                if (view.getId() == groupId) return true;
-            }
-            view = view.getParent() instanceof View ? (View) view.getParent() : null;
-        }
-        return false;
     }
 
     private View tileAt(float x, float y) {
@@ -449,17 +435,7 @@ public final class DashboardEditGrid extends GridLayout {
         float width = child.getWidth(), height = child.getHeight();
         paint.setStyle(Paint.Style.FILL);
         paint.setColor(0x99000000);
-        canvas.save();
-        if (TileOrderStore.Tile.TYPE_APP_WIDGET.equals(item.tile.type)) {
-            for (int groupId : WINDOW_CONTROL_GROUPS) {
-                View controls = child.findViewById(groupId);
-                if (controls != null && controls.getVisibility() == VISIBLE) {
-                    excludeButtons(canvas, controls, controls.getLeft(), controls.getTop());
-                }
-            }
-        }
         canvas.drawRoundRect(0, 0, width, height, 12 * density, 12 * density, paint);
-        canvas.restore();
         if (item.removable()) {
             float center = 21 * density;
             paint.setColor(0xff422329);
@@ -508,22 +484,6 @@ public final class DashboardEditGrid extends GridLayout {
                     label, centerX, centerY - (paint.ascent() + paint.descent()) / 2, paint);
         }
         canvas.restore();
-    }
-
-    private void excludeButtons(Canvas canvas, View view, int left, int top) {
-        if (view.getVisibility() != VISIBLE) return;
-        if (view.isClickable() || view.isLongClickable()) {
-            buttonOutline.reset();
-            buttonOutline.addOval(
-                    left, top, left + view.getWidth(), top + view.getHeight(), Path.Direction.CW);
-            canvas.clipOutPath(buttonOutline);
-        } else if (view instanceof ViewGroup) {
-            ViewGroup group = (ViewGroup) view;
-            for (int index = 0; index < group.getChildCount(); index++) {
-                View child = group.getChildAt(index);
-                excludeButtons(canvas, child, left + child.getLeft(), top + child.getTop());
-            }
-        }
     }
 
     @Override

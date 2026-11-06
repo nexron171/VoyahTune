@@ -88,15 +88,15 @@
             android:contentDescription="Обмен приложениями" />
 
         <ImageButton
-            android:id="@+id/appWidgetDragHandleLauncher"
+            android:id="@+id/appWidgetEditDesktopLauncher"
             android:layout_width="80dp"
             android:layout_height="80dp"
             android:background="@drawable/nav_back_circle_bg"
-            android:src="@drawable/ic_drag_handle"
+            android:src="@drawable/ic_edit_desktop"
             android:padding="12dp"
             android:scaleType="fitCenter"
             android:alpha="0.85"
-            android:contentDescription="Перетащить" />
+            android:contentDescription="Редактировать рабочий стол" />
 
     </LinearLayout>
 
@@ -117,16 +117,16 @@
             android:orientation="horizontal">
 
             <ImageButton
-                android:id="@+id/appWidgetDragHandle"
+                android:id="@+id/appWidgetEditDesktop"
                 android:layout_width="80dp"
                 android:layout_height="80dp"
                 android:layout_marginEnd="8dp"
                 android:background="@drawable/nav_back_circle_bg"
-                android:src="@drawable/ic_drag_handle"
+                android:src="@drawable/ic_edit_desktop"
                 android:padding="12dp"
                 android:scaleType="fitCenter"
                 android:alpha="0.95"
-                android:contentDescription="Перетащить" />
+                android:contentDescription="Редактировать рабочий стол" />
 
             <ImageButton
                 android:id="@+id/appWidgetExpand"

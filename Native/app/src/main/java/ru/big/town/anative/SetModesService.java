@@ -26,6 +26,7 @@ import android.os.PowerManager;
 import android.os.RemoteException;
 import android.os.SystemClock;
 import android.util.Log;
+import android.util.Size;
 import android.view.InputEvent;
 import android.view.MotionEvent;
 import android.view.Surface;
@@ -49,6 +50,7 @@ public class SetModesService extends Service {
     private final Map<String, VirtualDisplay> embeddedDisplays = new HashMap<>();
     private final Map<VirtualDisplay, EmbeddedWidgetSurface> embeddedParkedOutputs =
             new HashMap<>();
+    private final Map<String, Size> embeddedGridSizes = new HashMap<>();
     private final Map<String, String> embeddedPackages = new HashMap<>();
     private final Map<String, Boolean> embeddedLaunched = new HashMap<>();
     // Время последнего запуска приложения в виджет: задача создаётся не мгновенно, и без этой паузы
@@ -371,7 +373,8 @@ public class SetModesService extends Service {
                                     surface,
                                     d.getInt("width", 0),
                                     d.getInt("height", 0),
-                                    lDpi);
+                                    lDpi,
+                                    d.getSize(CarPlayWidgetProtocol.GRID_SIZE));
                         } else if (d != null && d.getBoolean("embeddedTouch", false)) {
                             injectEmbeddedTouch(
                                     d.getString("widgetId", ""), d.getParcelable("event"));
@@ -1325,20 +1328,13 @@ public class SetModesService extends Service {
         }
     }
 
-    /**
-     * Есть ли у пакета задача на указанном дисплее. Защёлка embeddedLaunched экономит перезапуск,
-     * но врёт, когда приложение покинуло дисплей виджета (развернули на весь экран, запустили
-     * обычным способом из дока, приложение закрылось): поверхность остаётся без окна, и плитка
-     * показывает чёрный квадрат. При ошибке считаем, что задача на месте: ложный перезапуск хуже,
-     * чем неперерисованный виджет.
-     */
-    private boolean hasTaskOnDisplay(String pkg, int displayId) {
+    private boolean hasTaskOnDisplay(String pkg, int displayId, boolean ifUnknown) {
         try {
             android.app.ActivityManager am =
                     (android.app.ActivityManager) getSystemService(ACTIVITY_SERVICE);
-            if (am == null) return true;
+            if (am == null) return ifUnknown;
             List<android.app.ActivityManager.RunningTaskInfo> tasks = am.getRunningTasks(100);
-            if (tasks == null) return true;
+            if (tasks == null) return ifUnknown;
             for (android.app.ActivityManager.RunningTaskInfo task : tasks) {
                 android.content.ComponentName component =
                         task.baseActivity != null ? task.baseActivity : task.topActivity;
@@ -1353,13 +1349,19 @@ public class SetModesService extends Service {
             }
         } catch (Exception e) {
             Log.w(TAG, "hasTaskOnDisplay: " + e.getMessage());
-            return true;
+            return ifUnknown;
         }
         return false;
     }
 
     protected void startEmbeddedDisplay(
-            String widgetId, String packageName, Surface surface, int width, int height, int dpi) {
+            String widgetId,
+            String packageName,
+            Surface surface,
+            int width,
+            int height,
+            int dpi,
+            Size gridSize) {
         if (CarPlayTarget.isCarPlay(packageName) && !CarPlayTarget.isEnabled(this)) return;
         if (widgetId == null
                 || widgetId.isEmpty()
@@ -1370,30 +1372,7 @@ public class SetModesService extends Service {
                 || width <= 0
                 || height <= 0) return;
         try {
-            VirtualDisplay display = embeddedDisplays.get(widgetId);
-            // Виджет переподключает Surface при каждом рендере главного экрана. Если приложение уже
-            // ушло с дисплея виджета, старая защёлка embeddedLaunched запрещала повторный запуск и
-            // плитка оставалась чёрным квадратом. Пересоздаём дисплей и запускаем заново — ровно
-            // то,
-            // что вручную делают крестиком и повторным тапом по иконке приложения.
-            Long launchedAt = embeddedLaunchAt.get(widgetId);
-            boolean launchSettled =
-                    launchedAt == null
-                            || SystemClock.elapsedRealtime() - launchedAt
-                                    > EMBEDDED_LAUNCH_GRACE_MS;
-            if (display != null
-                    && launchSettled
-                    && !hasTaskOnDisplay(packageName, display.getDisplay().getDisplayId())) {
-                Log.i(
-                        TAG,
-                        "embedded VD stale widget="
-                                + widgetId
-                                + " pkg="
-                                + packageName
-                                + " — пересоздаём дисплей");
-                releaseEmbeddedDisplay(widgetId);
-                display = null;
-            }
+            VirtualDisplay display = retainEmbeddedDisplay(widgetId, packageName, gridSize);
             if (display != null) {
                 boolean parked = embeddedParkedOutputs.containsKey(display);
                 display.setSurface(surface);
@@ -1447,6 +1426,9 @@ public class SetModesService extends Service {
                                 + "x"
                                 + height);
             }
+            if (gridSize != null) {
+                embeddedGridSizes.put(widgetId, gridSize);
+            }
             registerEmbeddedWindow(widgetId);
             if (!Boolean.TRUE.equals(embeddedLaunched.get(widgetId))) {
                 // Запускаем в дисплей виджета тем же путём, что и любой запуск на конкретный
@@ -1477,6 +1459,42 @@ public class SetModesService extends Service {
         }
     }
 
+    private VirtualDisplay retainEmbeddedDisplay(
+            String widgetId, String packageName, Size gridSize) {
+        VirtualDisplay display = embeddedDisplays.get(widgetId);
+        if (display == null) return null;
+
+        int displayId = display.getDisplay().getDisplayId();
+        Size previousSize = embeddedGridSizes.get(widgetId);
+        if (gridSize != null && previousSize != null && !gridSize.equals(previousSize)) {
+            Log.i(
+                    TAG,
+                    "Resizing embedded widget "
+                            + widgetId
+                            + " from "
+                            + previousSize
+                            + " to "
+                            + gridSize);
+            if (packageName.equals(embeddedPackages.get(widgetId))
+                    && hasTaskOnDisplay(packageName, displayId, false)) {
+                // System and dashboard-owned targets restart their window without stopping the
+                // host.
+                WidgetSupport.stopApp(this, packageName);
+            }
+        } else {
+            Long launchedAt = embeddedLaunchAt.get(widgetId);
+            boolean launching =
+                    launchedAt != null
+                            && SystemClock.elapsedRealtime() - launchedAt
+                                    <= EMBEDDED_LAUNCH_GRACE_MS;
+            if (launching || hasTaskOnDisplay(packageName, displayId, true)) {
+                return display;
+            }
+        }
+        releaseEmbeddedDisplay(widgetId);
+        return null;
+    }
+
     private void registerEmbeddedWindow(String widgetId) {
         VirtualDisplay display = embeddedDisplays.get(widgetId);
         String packageName = embeddedPackages.get(widgetId);
@@ -1503,6 +1521,7 @@ public class SetModesService extends Service {
         EmbeddedAppWindows.remove(widgetId);
         VirtualDisplay display = embeddedDisplays.remove(widgetId);
         embeddedPackages.remove(widgetId);
+        embeddedGridSizes.remove(widgetId);
         embeddedLaunched.remove(widgetId);
         embeddedLaunchAt.remove(widgetId);
         if (display != null) {
@@ -1577,7 +1596,7 @@ public class SetModesService extends Service {
             boolean settled =
                     launchAt == null
                             || SystemClock.elapsedRealtime() - launchAt > EMBEDDED_LAUNCH_GRACE_MS;
-            if (settled && !hasTaskOnDisplay(CarPlayTarget.ID, display.getDisplayId())) {
+            if (settled && !hasTaskOnDisplay(CarPlayTarget.ID, display.getDisplayId(), true)) {
                 releaseEmbeddedDisplay(
                         id); // An explicit task transfer/close has removed this host.
                 continue;
@@ -1611,6 +1630,7 @@ public class SetModesService extends Service {
         int width = d.getInt("width", 0);
         int height = d.getInt("height", 0);
         int dpi = d.getInt("dpi", 0);
+        Size gridSize = d.getSize(CarPlayWidgetProtocol.GRID_SIZE);
         if (toWidgetId == null || toWidgetId.isEmpty()) return;
         try {
             VirtualDisplay display =
@@ -1620,6 +1640,7 @@ public class SetModesService extends Service {
             if (display != null) {
                 EmbeddedAppWindows.remove(fromWidgetId);
                 embeddedPackages.remove(fromWidgetId);
+                embeddedGridSizes.remove(fromWidgetId);
                 embeddedLaunched.remove(fromWidgetId);
                 embeddedLaunchAt.remove(fromWidgetId);
             }
@@ -1627,7 +1648,8 @@ public class SetModesService extends Service {
                 // Источник уже освобождён — запускаем заново в целевом виджете: лучше, чем чёрный
                 // квадрат.
                 Log.i(TAG, "embedded move: нет источника, запуск заново в " + toWidgetId);
-                startEmbeddedDisplay(toWidgetId, packageName, surface, width, height, dpi);
+                startEmbeddedDisplay(
+                        toWidgetId, packageName, surface, width, height, dpi, gridSize);
                 return;
             }
             VirtualDisplay stale = embeddedDisplays.get(toWidgetId);
@@ -1635,6 +1657,7 @@ public class SetModesService extends Service {
                 releaseEmbeddedDisplay(toWidgetId);
             }
             embeddedDisplays.put(toWidgetId, display);
+            embeddedGridSizes.put(toWidgetId, gridSize);
             embeddedPackages.put(toWidgetId, packageName);
             embeddedLaunched.put(toWidgetId, true);
             embeddedLaunchAt.put(toWidgetId, SystemClock.elapsedRealtime());

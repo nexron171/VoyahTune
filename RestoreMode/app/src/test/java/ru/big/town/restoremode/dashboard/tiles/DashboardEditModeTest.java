@@ -1,14 +1,22 @@
 package ru.big.town.restoremode.dashboard.tiles;
 
 import static org.junit.Assert.*;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.robolectric.Shadows.shadowOf;
 
 import android.app.Application;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.graphics.SurfaceTexture;
+import android.os.Bundle;
+import android.os.Handler;
 import android.os.Looper;
+import android.os.Messenger;
 import android.os.SystemClock;
 import android.view.MotionEvent;
+import android.util.Size;
+import android.view.TextureView;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.ViewGroup;
@@ -29,6 +37,8 @@ import ru.big.town.restoremode.widgets.apps.AppWidgetStore;
 import ru.big.town.restoremode.widgets.energy.VehicleWidgets;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = 33, qualifiers = "w1920dp-h720dp-land-mdpi", application = Application.class)
@@ -136,41 +146,45 @@ public class DashboardEditModeTest {
             touch(grid, MotionEvent.ACTION_UP, settings.getLeft() + 16, settings.getTop() + 16);
             assertNotNull(tileOrNull(grid, "widget:cardSettings"));
             View appTile = tile(grid, "appWidget:" + app.id);
-            assertControlReceivesTap(grid, appTile.findViewById(R.id.appWidgetSwapLauncher));
-            assertControlReceivesHold(grid, appTile.findViewById(R.id.appWidgetDragHandleLauncher));
+            assertNull(appTile.findViewById(R.id.appWidgetList));
             controller.get().findViewById(R.id.dashboardEditDone).performClick();
+            layout(grid);
+            appTile = tile(grid, "appWidget:" + app.id);
+            tapControl(grid, appTile.findViewById(R.id.appWidgetEditDesktopLauncher));
+            assertTrue(grid.isEditing());
+            controller.get().findViewById(R.id.dashboardEditDone).performClick();
+            appTile = tile(grid, "appWidget:" + app.id);
             ViewGroup profiles = appTile.findViewById(R.id.appWidgetList);
             profiles.getChildAt(0).performClick();
             layout(grid);
-            float windowX = appTile.getLeft() + appTile.getWidth() / 2f;
-            float windowY = appTile.getTop() + appTile.getHeight() / 2f;
-            touch(grid, MotionEvent.ACTION_DOWN, windowX, windowY);
-            shadowOf(Looper.getMainLooper())
-                    .idleFor(Duration.ofMillis(ViewConfiguration.getLongPressTimeout() + 1));
-            touch(grid, MotionEvent.ACTION_UP, windowX, windowY);
-            assertTrue(grid.isEditing());
-            assertEquals(
-                    View.VISIBLE,
-                    appTile.findViewById(R.id.appWidgetOverlayControls).getVisibility());
+            View controls = appTile.findViewById(R.id.appWidgetOverlayControls);
+            holdWidget(grid, appTile);
+            assertFalse(grid.isEditing());
+            assertEquals(View.VISIBLE, controls.getVisibility());
             layout(grid);
-            assertControlReceivesHold(grid, appTile.findViewById(R.id.appWidgetDragHandle));
-            assertControlReceivesTap(grid, appTile.findViewById(R.id.appWidgetSwap));
-            assertControlReceivesTap(grid, appTile.findViewById(R.id.appWidgetExpand));
             int originalDpi = AppWidgetStore.find(prefs, app.id).selected().dpi;
-            tapControl(grid, appTile.findViewById(R.id.appWidgetDpiPlus), false);
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2));
+            tapControl(grid, appTile.findViewById(R.id.appWidgetDpiPlus));
             assertTrue(AppWidgetStore.find(prefs, app.id).selected().dpi > originalDpi);
-            tapControl(grid, appTile.findViewById(R.id.appWidgetDpiMinus), false);
-            assertEquals(originalDpi, AppWidgetStore.find(prefs, app.id).selected().dpi);
-            View close = appTile.findViewById(R.id.appWidgetClose);
-            android.graphics.Rect closeBounds =
-                    new android.graphics.Rect(0, 0, close.getWidth(), close.getHeight());
-            grid.offsetDescendantRectToMyCoords(close, closeBounds);
-            touch(grid, MotionEvent.ACTION_DOWN, closeBounds.centerX(), closeBounds.centerY());
-            touch(grid, MotionEvent.ACTION_UP, closeBounds.centerX(), closeBounds.centerY());
-            shadowOf(Looper.getMainLooper()).idle();
-            assertEquals(
-                    View.GONE, appTile.findViewById(R.id.appWidgetOverlayControls).getVisibility());
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2));
+            assertEquals(View.VISIBLE, controls.getVisibility());
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(1));
+            assertEquals(View.GONE, controls.getVisibility());
+
+            holdWidget(grid, appTile);
+            layout(grid);
+            tapControl(grid, appTile.findViewById(R.id.appWidgetClose));
+            assertEquals(View.GONE, controls.getVisibility());
             assertNotNull(AppWidgetStore.find(prefs, app.id));
+            profiles.getChildAt(0).performClick();
+            layout(grid);
+            holdWidget(grid, appTile);
+            layout(grid);
+            tapControl(grid, appTile.findViewById(R.id.appWidgetEditDesktop));
+            assertTrue(grid.isEditing());
+            layout(grid);
+            appTile = tile(grid, "appWidget:" + app.id);
+            assertNull(appTile.findViewById(R.id.appWidgetOverlayControls));
             touch(grid, MotionEvent.ACTION_DOWN, appTile.getLeft() + 16, appTile.getTop() + 16);
             touch(grid, MotionEvent.ACTION_UP, appTile.getLeft() + 16, appTile.getTop() + 16);
             assertNull(AppWidgetStore.find(prefs, app.id));
@@ -186,13 +200,126 @@ public class DashboardEditModeTest {
         }
     }
 
-    private static void bindNativeService() {
+    @Test
+    public void holdingAppWidgetBodyRequestsMove() {
+        Context context = RuntimeEnvironment.getApplication();
+        SharedPreferences preferences = context.getSharedPreferences("DrivePreferences", 0);
+        AppWidgetStore.Entry app = AppWidgetStore.add(preferences, context.getPackageName(), "");
+        bindNativeService();
+        try (ActivityController<MainActivity> controller =
+                Robolectric.buildActivity(MainActivity.class).setup()) {
+            DashboardEditGrid grid = controller.get().findViewById(R.id.splitTilesGrid);
+            shadowOf(Looper.getMainLooper()).idle();
+            grid.setEditing(true);
+            layout(grid);
+            View window = tile(grid, "appWidget:" + app.id);
+            DashboardEditGrid.Actions actions = mock(DashboardEditGrid.Actions.class);
+            grid.setActions(actions);
+            holdWidget(grid, window);
+            verify(actions).move(window);
+        }
+    }
+
+    @Test
+    public void appWindowReattachesOnlyAfterEditingWithFinalSize() {
+        Context context = RuntimeEnvironment.getApplication();
+        SharedPreferences preferences = context.getSharedPreferences("DrivePreferences", 0);
+        AppWidgetStore.Entry app = AppWidgetStore.add(preferences, context.getPackageName(), "");
+        app.width = 4;
+        AppWidgetStore.update(preferences, app);
+        List<Bundle> requests = bindNativeService();
+        try (ActivityController<MainActivity> controller =
+                Robolectric.buildActivity(MainActivity.class).setup()) {
+            DashboardEditGrid grid = controller.get().findViewById(R.id.splitTilesGrid);
+            shadowOf(Looper.getMainLooper()).idle();
+            layout(grid);
+            View window = tile(grid, "appWidget:" + app.id);
+            ((ViewGroup) window.findViewById(R.id.appWidgetList)).getChildAt(0).performClick();
+            attachSurface(grid, window);
+            assertEquals(
+                    new Size(4, app.height),
+                    requests.get(requests.size() - 1).getSize("widgetGridSize"));
+
+            grid.setEditing(true);
+            shadowOf(Looper.getMainLooper()).idle();
+            assertTrue(requests.get(requests.size() - 1).getBoolean("embeddedDetach"));
+            int parkedRequestCount = requests.size();
+            layout(grid);
+            window = tile(grid, "appWidget:" + app.id);
+            float centerX = window.getX() + window.getWidth() / 2f;
+            float centerY = window.getY() + window.getHeight() / 2f;
+            touch(grid, MotionEvent.ACTION_DOWN, centerX, centerY);
+            touch(grid, MotionEvent.ACTION_UP, centerX, centerY);
+            shadowOf(Looper.getMainLooper()).idle();
+            assertEquals(parkedRequestCount, requests.size());
+            for (int columns = 4; columns < 6; columns++) {
+                layout(grid);
+                window = tile(grid, "appWidget:" + app.id);
+                float x = window.getRight() - 8;
+                float y = window.getBottom() - 8;
+                float column = (window.getWidth() + 8f) / columns;
+                touch(grid, MotionEvent.ACTION_DOWN, x, y);
+                touch(grid, MotionEvent.ACTION_MOVE, x + column, y);
+                touch(grid, MotionEvent.ACTION_UP, x + column, y);
+                shadowOf(Looper.getMainLooper()).idle();
+                assertEquals(columns + 1, AppWidgetStore.find(preferences, app.id).width);
+                assertEquals(parkedRequestCount, requests.size());
+            }
+            controller.get().getOnBackPressedDispatcher().onBackPressed();
+            shadowOf(Looper.getMainLooper()).idle();
+            window = tile(grid, "appWidget:" + app.id);
+            attachSurface(grid, window);
+            assertEquals(parkedRequestCount + 1, requests.size());
+            Bundle attached = requests.get(requests.size() - 1);
+            assertEquals(new Size(6, app.height), attached.getSize("widgetGridSize"));
+            assertEquals(context.getPackageName(), attached.getString("left"));
+            assertEquals(
+                    window.getWidth() - window.getPaddingLeft() - window.getPaddingRight(),
+                    attached.getInt("width"));
+            assertEquals(
+                    window.getHeight() - window.getPaddingTop() - window.getPaddingBottom(),
+                    attached.getInt("height"));
+        }
+    }
+
+    private static void attachSurface(DashboardEditGrid grid, View window) {
+        layout(grid);
+        ViewGroup root = window.findViewById(R.id.appWidgetRoot);
+        for (int index = 0; index < root.getChildCount(); index++) {
+            if (root.getChildAt(index) instanceof TextureView) {
+                TextureView view = (TextureView) root.getChildAt(index);
+                SurfaceTexture texture = new SurfaceTexture(0);
+                view.getSurfaceTextureListener()
+                        .onSurfaceTextureAvailable(texture, view.getWidth(), view.getHeight());
+                shadowOf(Looper.getMainLooper()).idle();
+                texture.release();
+                return;
+            }
+        }
+        fail("Expected the running app to have a window surface");
+    }
+
+    private static List<Bundle> bindNativeService() {
+        List<Bundle> requests = new ArrayList<>();
+        Messenger service =
+                new Messenger(
+                        new Handler(
+                                Looper.getMainLooper(),
+                                message -> {
+                                    Bundle data = message.getData();
+                                    if (data.getBoolean("embeddedSurface")
+                                            || data.getBoolean("embeddedDetach")
+                                            || data.getBoolean("embeddedTouch")) {
+                                        requests.add(new Bundle(data));
+                                    }
+                                    return true;
+                                }));
         shadowOf(RuntimeEnvironment.getApplication())
                 .setComponentNameAndServiceForBindService(
                         new android.content.ComponentName(
                                 "ru.big.town.anative", "ru.big.town.anative.MyService"),
-                        new android.os.Messenger(new android.os.Handler(Looper.getMainLooper()))
-                                .getBinder());
+                        service.getBinder());
+        return requests;
     }
 
     @Test
@@ -241,33 +368,20 @@ public class DashboardEditModeTest {
         }
     }
 
-    private static void assertControlReceivesTap(DashboardEditGrid grid, View control) {
-        boolean[] clicked = {false};
-        control.setOnClickListener(view -> clicked[0] = true);
-        tapControl(grid, control, false);
-        assertTrue(control.getResources().getResourceEntryName(control.getId()), clicked[0]);
+    private static void holdWidget(DashboardEditGrid grid, View widget) {
+        float x = widget.getX() + widget.getWidth() / 2f;
+        float y = widget.getY() + widget.getHeight() / 2f;
+        touch(grid, MotionEvent.ACTION_DOWN, x, y);
+        shadowOf(Looper.getMainLooper())
+                .idleFor(Duration.ofMillis(ViewConfiguration.getLongPressTimeout() + 1));
+        touch(grid, MotionEvent.ACTION_UP, x, y);
     }
 
-    private static void assertControlReceivesHold(DashboardEditGrid grid, View control) {
-        boolean[] held = {false};
-        control.setOnLongClickListener(
-                view -> {
-                    held[0] = true;
-                    return true;
-                });
-        tapControl(grid, control, true);
-        assertTrue(control.getResources().getResourceEntryName(control.getId()), held[0]);
-    }
-
-    private static void tapControl(DashboardEditGrid grid, View control, boolean longPress) {
+    private static void tapControl(DashboardEditGrid grid, View control) {
         android.graphics.Rect bounds =
                 new android.graphics.Rect(0, 0, control.getWidth(), control.getHeight());
         grid.offsetDescendantRectToMyCoords(control, bounds);
         touch(grid, MotionEvent.ACTION_DOWN, bounds.centerX(), bounds.centerY());
-        if (longPress) {
-            shadowOf(Looper.getMainLooper())
-                    .idleFor(Duration.ofMillis(ViewConfiguration.getLongPressTimeout() + 1));
-        }
         touch(grid, MotionEvent.ACTION_UP, bounds.centerX(), bounds.centerY());
         shadowOf(Looper.getMainLooper()).idle();
     }

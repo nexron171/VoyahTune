@@ -2,6 +2,7 @@ package ru.big.town.anative;
 
 import android.content.Intent;
 import android.os.*;
+import android.util.Size;
 import android.view.*;
 
 import ru.big.town.common.*;
@@ -341,7 +342,7 @@ public final class NativeContractService extends SetModesService {
 
     @Override
     protected void startEmbeddedDisplay(
-            String id, String pkg, Surface surface, int width, int height, int dpi) {
+            String id, String pkg, Surface surface, int width, int height, int dpi, Size gridSize) {
         operation("surface", id, surface != null && surface.isValid() ? width : -1);
     }
 

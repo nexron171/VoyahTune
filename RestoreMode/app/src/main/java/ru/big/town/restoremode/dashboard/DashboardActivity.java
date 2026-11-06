@@ -32,6 +32,7 @@ import android.transition.ChangeBounds;
 import android.transition.TransitionManager;
 import android.util.DisplayMetrics;
 import android.util.Log;
+import android.util.Size;
 import android.view.GestureDetector;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
@@ -313,6 +314,9 @@ public class DashboardActivity extends AppCompatActivity {
     private final Set<String> embeddedSuppressRelease = new HashSet<>();
     // View плиток app_widget по id записи: нужен, чтобы запустить приложение в первом виджете.
     private final Map<String, View> appWidgetTileViews = new HashMap<>();
+    private static final long WINDOW_CONTROLS_TIMEOUT_MS = 3_000L;
+    private View windowControlsTile;
+    private final Runnable hideWindowControls = this::dismissWindowControls;
     private long carPlayWidgetGeneration;
     private final Messenger carPlayWidgetClient = new Messenger(new IncomingHandler());
     // Replies from Native must return to this screen only; GlobalVars holds the last dashboard,
@@ -2533,9 +2537,15 @@ public class DashboardActivity extends AppCompatActivity {
                 if (entry == null) {
                     continue;
                 }
-                View appWidgetView = inf.inflate(R.layout.tile_embedded_app, splitTilesGrid, false);
-                appWidgetTileViews.put(entry.id, appWidgetView);
-                populateAppWidgetLauncher(appWidgetView, entry);
+                View appWidgetView;
+                if (splitTilesGrid.isEditing()) {
+                    appWidgetView = new FrameLayout(this);
+                    appWidgetView.setBackgroundResource(R.drawable.card_dark_ripple);
+                } else {
+                    appWidgetView = inf.inflate(R.layout.tile_embedded_app, splitTilesGrid, false);
+                    appWidgetTileViews.put(entry.id, appWidgetView);
+                    populateAppWidgetLauncher(appWidgetView, entry);
+                }
 
                 int widgetWidth = AppWidgetStore.clampWidth(entry.width);
                 int widgetHeight = AppWidgetStore.clampHeight(entry.height);
@@ -2557,11 +2567,13 @@ public class DashboardActivity extends AppCompatActivity {
                 appWidgetView.setLayoutParams(lp);
                 splitTilesGrid.addView(appWidgetView);
                 bindEditableTile(appWidgetView, tile, tilePos, widgetWidth, widgetHeight);
-                if (!CarPlayTarget.isCarPlay(entry.packageName)) {
+                if (!splitTilesGrid.isEditing()) {
                     AppWidgetSessionStore.Launch sessionLaunch =
                             AppWidgetSessionStore.findLaunch(
                                     sharedPreferences, widgetSessionId, entry.id);
-                    if (firstOpening && entry.autoStart) {
+                    if (firstOpening
+                            && entry.autoStart
+                            && !CarPlayTarget.isCarPlay(entry.packageName)) {
                         scheduleEmbeddedLaunch(appWidgetView, entry, null, entry.autoStartDelay);
                     } else if (!pendingAutoStartWidgets.contains(entry.id)
                             && sessionLaunch != null) {
@@ -3027,9 +3039,6 @@ public class DashboardActivity extends AppCompatActivity {
                     public void editingChanged(boolean editing) {
                         cancelGridSnap();
                         editBack.setEnabled(editing);
-                        for (String id : embeddedWidgetSurfaces.keySet()) {
-                            showWindowControls(appWidgetTileViews.get(id), editing);
-                        }
                         FrameLayout root = findViewById(android.R.id.content);
                         if (editing) {
                             finishEditing =
@@ -3049,6 +3058,10 @@ public class DashboardActivity extends AppCompatActivity {
                             if (tileDragController != null) tileDragController.cancel();
                             root.removeView(finishEditing);
                             finishEditing = null;
+                        }
+                        if (suspensionScreenResumed) {
+                            TransitionManager.endTransitions(splitTilesGrid);
+                            renderSplitTiles();
                         }
                     }
 
@@ -3222,16 +3235,16 @@ public class DashboardActivity extends AppCompatActivity {
         LayoutInflater inf = LayoutInflater.from(this);
         entry.ensureProfiles();
         // Child launchers consume holds before the tile root.
-        View.OnLongClickListener dragLauncher =
+        View.OnLongClickListener editLauncher =
                 v -> {
                     splitTilesGrid.setEditing(true);
                     return true;
                 };
-        widgetView.setOnLongClickListener(dragLauncher);
-        list.setOnLongClickListener(dragLauncher);
+        widgetView.setOnLongClickListener(editLauncher);
+        list.setOnLongClickListener(editLauncher);
 
         if (CarPlayWidgetPlaceholder.show(
-                widgetView, entry, () -> showEmbeddedAppWidget(widgetView, entry), dragLauncher)) {
+                widgetView, entry, () -> showEmbeddedAppWidget(widgetView, entry), editLauncher)) {
             appearance.styleTile(widgetView);
             return;
         }
@@ -3263,14 +3276,14 @@ public class DashboardActivity extends AppCompatActivity {
                         launchEmbeddedAppWidget(
                                 widgetView, entry, profile.packageName, profile.dpi);
                     });
-            item.setOnLongClickListener(dragLauncher);
+            item.setOnLongClickListener(editLauncher);
             list.addView(item);
         }
 
         View scroll = widgetView.findViewById(R.id.appWidgetLauncherScroll);
         if (scroll != null) {
             scroll.setVisibility(View.VISIBLE);
-            scroll.setOnLongClickListener(dragLauncher);
+            scroll.setOnLongClickListener(editLauncher);
         }
 
         View controls = widgetView.findViewById(R.id.appWidgetOverlayControls);
@@ -3278,16 +3291,9 @@ public class DashboardActivity extends AppCompatActivity {
             controls.setVisibility(View.GONE);
         }
 
-        View dragHandleLauncher = widgetView.findViewById(R.id.appWidgetDragHandleLauncher);
-        if (dragHandleLauncher != null) {
-            dragHandleLauncher.setOnLongClickListener(
-                    view -> {
-                        if (splitTilesGrid.isEditing()) {
-                            return tileDragController.start(widgetView);
-                        }
-                        return dragLauncher.onLongClick(view);
-                    });
-        }
+        widgetView
+                .findViewById(R.id.appWidgetEditDesktopLauncher)
+                .setOnClickListener(view -> splitTilesGrid.setEditing(true));
         View launcherControls = widgetView.findViewById(R.id.appWidgetLauncherControls);
         if (launcherControls != null) {
             launcherControls.setVisibility(View.VISIBLE);
@@ -3295,7 +3301,7 @@ public class DashboardActivity extends AppCompatActivity {
         }
         View swapLauncher = widgetView.findViewById(R.id.appWidgetSwapLauncher);
         if (swapLauncher != null) {
-            swapLauncher.setOnLongClickListener(dragLauncher);
+            swapLauncher.setOnLongClickListener(editLauncher);
             final String widgetId = entry.id;
             swapLauncher.setOnClickListener(v -> showSwapAppWidgetMenu(swapLauncher, widgetId));
         }
@@ -3322,7 +3328,22 @@ public class DashboardActivity extends AppCompatActivity {
         }
     }
 
-    /** Badge is only shown together with the controls that operate the embedded tile. */
+    private void revealWindowControls(View widget) {
+        if (windowControlsTile != widget) {
+            dismissWindowControls();
+            windowControlsTile = widget;
+            showWindowControls(widget, true);
+        }
+        uiHandler.removeCallbacks(hideWindowControls);
+        uiHandler.postDelayed(hideWindowControls, WINDOW_CONTROLS_TIMEOUT_MS);
+    }
+
+    private void dismissWindowControls() {
+        uiHandler.removeCallbacks(hideWindowControls);
+        showWindowControls(windowControlsTile, false);
+        windowControlsTile = null;
+    }
+
     private void showWindowControls(View widget, boolean visible) {
         if (widget == null) return;
         View controls = widget.findViewById(R.id.appWidgetOverlayControls);
@@ -3331,6 +3352,24 @@ public class DashboardActivity extends AppCompatActivity {
             if (visible) controls.bringToFront();
         }
         setAppWidgetBadgeVisible(widget, visible);
+    }
+
+    private void bindWindowAction(View widget, int buttonId, View.OnClickListener action) {
+        View button = widget.findViewById(buttonId);
+        button.setVisibility(View.VISIBLE);
+        button.setOnTouchListener(
+                (view, event) -> {
+                    if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+                        uiHandler.removeCallbacks(hideWindowControls);
+                    } else if (event.getActionMasked() == MotionEvent.ACTION_UP
+                            || event.getActionMasked() == MotionEvent.ACTION_CANCEL) {
+                        if (windowControlsTile == widget) {
+                            revealWindowControls(widget);
+                        }
+                    }
+                    return false;
+                });
+        button.setOnClickListener(action);
     }
 
     private void setAppWidgetBadgeVisible(View widgetView, boolean visible) {
@@ -3343,6 +3382,9 @@ public class DashboardActivity extends AppCompatActivity {
         }
         boolean hasDesignation = badge.getText() != null && badge.getText().length() > 0;
         badge.setVisibility(visible && hasDesignation ? View.VISIBLE : View.GONE);
+        if (visible && hasDesignation) {
+            badge.bringToFront();
+        }
     }
 
     /** Переключить карточку в режим embedded VirtualDisplay (пакет из настроек виджета). */
@@ -3416,62 +3458,35 @@ public class DashboardActivity extends AppCompatActivity {
             launcherControls.setVisibility(View.GONE);
         }
 
-        View controls = widgetView.findViewById(R.id.appWidgetOverlayControls);
-        if (controls != null) {
-            controls.setVisibility(View.GONE);
-            View closeBtn = widgetView.findViewById(R.id.appWidgetClose);
-            if (closeBtn != null) {
-                closeBtn.setVisibility(View.VISIBLE);
-                closeBtn.setOnClickListener(
-                        v -> {
-                            AppWidgetSessionStore.forgetLaunch(
-                                    sharedPreferences, currentWidgetSessionId(), widgetId);
+        bindWindowAction(
+                widgetView, R.id.appWidgetEditDesktop, view -> splitTilesGrid.setEditing(true));
+        bindWindowAction(
+                widgetView,
+                R.id.appWidgetClose,
+                view -> {
+                    AppWidgetSessionStore.forgetLaunch(
+                            sharedPreferences, currentWidgetSessionId(), widgetId);
+                    releaseEmbeddedWidget(widgetId, widgetView);
+                });
+        bindWindowAction(
+                widgetView,
+                R.id.appWidgetExpand,
+                view -> {
+                    String running = embeddedWidgetPackages.get(widgetId);
+                    if (running != null) {
+                        // Native retires the CarPlay task before releasing its display.
+                        if (!CarPlayTarget.isCarPlay(running)) {
                             releaseEmbeddedWidget(widgetId, widgetView);
-                        });
-            }
-            View dragBtn = widgetView.findViewById(R.id.appWidgetDragHandle);
-            if (dragBtn != null) {
-                dragBtn.setVisibility(View.VISIBLE);
-                dragBtn.setOnLongClickListener(
-                        v -> {
-                            if (splitTilesGrid.isEditing()) tileDragController.start(widgetView);
-                            else splitTilesGrid.setEditing(true);
-                            return true;
-                        });
-            }
-
-            View expandBtn = widgetView.findViewById(R.id.appWidgetExpand);
-            if (expandBtn != null) {
-                expandBtn.setVisibility(View.VISIBLE);
-                expandBtn.setOnClickListener(
-                        v -> {
-                            // Развернуть текущее приложение на весь экран (simpleLaunch)
-                            String running = embeddedWidgetPackages.get(widgetId);
-                            if (running == null) {
-                                return;
-                            }
-                            // Native retires CarPlay tasks before releasing their VD.
-                            if (!CarPlayTarget.isCarPlay(running))
-                                releaseEmbeddedWidget(widgetId, widgetView);
-                            openAppOnDashboardDisplay(running);
-                        });
-            }
-
-            View swapBtn = widgetView.findViewById(R.id.appWidgetSwap);
-            if (swapBtn != null) {
-                swapBtn.setVisibility(View.VISIBLE);
-                swapBtn.setOnClickListener(v -> showSwapAppWidgetMenu(swapBtn, widgetId));
-            }
-
-            View dpiPlus = widgetView.findViewById(R.id.appWidgetDpiPlus);
-            if (dpiPlus != null) {
-                dpiPlus.setOnClickListener(v -> changeAppWidgetDpi(widgetId, 1));
-            }
-            View dpiMinus = widgetView.findViewById(R.id.appWidgetDpiMinus);
-            if (dpiMinus != null) {
-                dpiMinus.setOnClickListener(v -> changeAppWidgetDpi(widgetId, -1));
-            }
-        }
+                        }
+                        openAppOnDashboardDisplay(running);
+                    }
+                });
+        bindWindowAction(
+                widgetView, R.id.appWidgetSwap, view -> showSwapAppWidgetMenu(view, widgetId));
+        bindWindowAction(
+                widgetView, R.id.appWidgetDpiPlus, view -> changeAppWidgetDpi(widgetId, 1));
+        bindWindowAction(
+                widgetView, R.id.appWidgetDpiMinus, view -> changeAppWidgetDpi(widgetId, -1));
 
         ViewGroup container = widgetView.findViewById(R.id.appWidgetRoot);
         if (container == null) {
@@ -3517,22 +3532,12 @@ public class DashboardActivity extends AppCompatActivity {
                 new ViewGroup.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         embeddedWidgetSurfaces.put(widgetId, textureView);
-        showWindowControls(widgetView, splitTilesGrid.isEditing());
+        showWindowControls(widgetView, false);
         textureView.setOnLongClickListener(
                 view -> {
-                    splitTilesGrid.setEditing(true);
+                    revealWindowControls(widgetView);
                     return true;
                 });
-        GestureDetector longClickDetector =
-                new GestureDetector(
-                        this,
-                        new GestureDetector.SimpleOnGestureListener() {
-                            @Override
-                            public void onLongPress(MotionEvent event) {
-                                textureView.performLongClick();
-                            }
-                        });
-
         textureView.setSurfaceTextureListener(
                 new TextureView.SurfaceTextureListener() {
                     @Override
@@ -3548,14 +3553,14 @@ public class DashboardActivity extends AppCompatActivity {
                             pendingMoveFrom[0] = null;
                             sendEmbeddedMove(
                                     from,
-                                    widgetId,
+                                    entry,
                                     embeddedWidgetPackages.get(widgetId),
                                     output,
                                     width,
                                     height);
                         } else {
                             sendEmbeddedSurface(
-                                    widgetId,
+                                    entry,
                                     embeddedWidgetPackages.get(widgetId),
                                     runningDpi(widgetId),
                                     output,
@@ -3574,7 +3579,7 @@ public class DashboardActivity extends AppCompatActivity {
                         if (output != null) {
                             // Пакет берём из карты: после обмена экземплярами он мог смениться.
                             sendEmbeddedSurface(
-                                    widgetId,
+                                    entry,
                                     embeddedWidgetPackages.get(widgetId),
                                     runningDpi(widgetId),
                                     output,
@@ -3605,32 +3610,48 @@ public class DashboardActivity extends AppCompatActivity {
                     public void onSurfaceTextureUpdated(SurfaceTexture texture) {}
                 });
         View.OnTouchListener embeddedTouchListener =
-                (v, event) -> {
-                    longClickDetector.onTouchEvent(event);
+                new View.OnTouchListener() {
+                    private boolean handlingWindowHold;
+                    private final GestureDetector holds =
+                            new GestureDetector(
+                                    DashboardActivity.this,
+                                    new GestureDetector.SimpleOnGestureListener() {
+                                        @Override
+                                        public void onLongPress(MotionEvent event) {
+                                            if (embeddedWidgetSurfaces.get(widgetId) != textureView)
+                                                return;
+                                            handlingWindowHold = true;
+                                            MotionEvent cancel = MotionEvent.obtain(event);
+                                            cancel.setAction(MotionEvent.ACTION_CANCEL);
+                                            sendEmbeddedTouch(widgetId, cancel);
+                                            cancel.recycle();
+                                            textureView.performLongClick();
+                                        }
+                                    });
 
-                    // Проверяем, попал ли touch в область кнопок управления
-                    if (event.getActionMasked() != MotionEvent.ACTION_CANCEL
-                            && controls != null
-                            && controls.getVisibility() == View.VISIBLE) {
-                        int[] location = new int[2];
-                        controls.getLocationOnScreen(location);
-                        int touchX = (int) event.getRawX();
-                        int touchY = (int) event.getRawY();
-                        if (touchX >= location[0]
-                                && touchX < location[0] + controls.getWidth()
-                                && touchY >= location[1]
-                                && touchY < location[1] + controls.getHeight()) {
-                            // Touch попал в область кнопок - пропускаем дальше
-                            return false;
+                    @Override
+                    public boolean onTouch(View view, MotionEvent event) {
+                        int action = event.getActionMasked();
+                        if (action == MotionEvent.ACTION_DOWN) {
+                            handlingWindowHold = false;
                         }
+                        holds.onTouchEvent(event);
+                        boolean finished =
+                                action == MotionEvent.ACTION_UP
+                                        || action == MotionEvent.ACTION_CANCEL;
+                        if (windowControlsTile == widgetView) {
+                            if (finished) {
+                                revealWindowControls(widgetView);
+                            } else if (action == MotionEvent.ACTION_DOWN) {
+                                uiHandler.removeCallbacks(hideWindowControls);
+                            }
+                        }
+                        view.getParent().requestDisallowInterceptTouchEvent(!finished);
+                        if (!handlingWindowHold) {
+                            sendEmbeddedTouch(widgetId, event);
+                        }
+                        return true;
                     }
-
-                    boolean gestureFinished =
-                            event.getActionMasked() == MotionEvent.ACTION_UP
-                                    || event.getActionMasked() == MotionEvent.ACTION_CANCEL;
-                    v.getParent().requestDisallowInterceptTouchEvent(!gestureFinished);
-                    sendEmbeddedTouch(widgetId, event);
-                    return true;
                 };
         textureView.setOnTouchListener(
                 new ru.big.town.restoremode.carplay.CarPlayDashboardScrollTouchListener(
@@ -3639,10 +3660,6 @@ public class DashboardActivity extends AppCompatActivity {
                         embeddedTouchListener,
                         this::stopGridSnapAnimation,
                         () -> contentScroll.post(this::snapPageOnRelease)));
-
-        if (controls != null) {
-            controls.bringToFront();
-        }
     }
 
     /** DPI запущенного в виджете приложения (0 — «Авто»). */
@@ -3688,7 +3705,7 @@ public class DashboardActivity extends AppCompatActivity {
         Surface output = embeddedWidgetOutputs.get(widgetId);
         if (output != null) {
             sendEmbeddedSurface(
-                    widgetId,
+                    entry,
                     runningPackage,
                     value,
                     output,
@@ -3714,6 +3731,9 @@ public class DashboardActivity extends AppCompatActivity {
 
     /** Убрать TextureView виджета и вернуть его лончер; очистить карты запущенного состояния. */
     private void removeEmbeddedSurface(String widgetId, View widgetView) {
+        if (windowControlsTile == widgetView) {
+            dismissWindowControls();
+        }
         embeddedWidgetSurfaces.remove(widgetId);
         Surface output = embeddedWidgetOutputs.remove(widgetId);
         if (output != null) {
@@ -3816,7 +3836,7 @@ public class DashboardActivity extends AppCompatActivity {
             }
         }
         DashboardActivity other = otherScreen();
-        if (other != null) {
+        if (other != null && other.splitTilesGrid != null && !other.splitTilesGrid.isEditing()) {
             String suffix = " (" + other.screenLabel() + " экран)";
             for (AppWidgetStore.Entry entry : AppWidgetStore.load(other.sharedPreferences)) {
                 // CarPlay widgets are not created on the passenger screen.
@@ -3875,6 +3895,10 @@ public class DashboardActivity extends AppCompatActivity {
 
     /** Второй экран должен быть открыт: его плитки создают поверхности для обмена. */
     private boolean checkOtherScreenReady(DashboardActivity screen) {
+        if (screen != null && screen.splitTilesGrid != null && screen.splitTilesGrid.isEditing()) {
+            showSnack("Завершите редактирование на другом экране");
+            return false;
+        }
         if (screen != null
                 && !screen.isFinishing()
                 && !screen.isDestroyed()
@@ -4049,7 +4073,13 @@ public class DashboardActivity extends AppCompatActivity {
     }
 
     private void sendEmbeddedSurface(
-            String widgetId, String pkg, int dpi, Surface surface, int width, int height) {
+            AppWidgetStore.Entry entry,
+            String pkg,
+            int dpi,
+            Surface surface,
+            int width,
+            int height) {
+        String widgetId = entry.id;
         if (!GlobalVars.isBound || GlobalVars.serviceMessenger == null || surface == null) {
             return;
         }
@@ -4062,6 +4092,7 @@ public class DashboardActivity extends AppCompatActivity {
             data.putString("left", pkg);
             data.putString("widgetId", widgetId);
             data.putBoolean("embeddedSurface", true);
+            data.putSize(CarPlayWidgetProtocol.GRID_SIZE, new Size(entry.width, entry.height));
             data.putParcelable("surface", surface);
             data.putInt("width", width);
             data.putInt("height", height);
@@ -4090,11 +4121,12 @@ public class DashboardActivity extends AppCompatActivity {
      */
     private void sendEmbeddedMove(
             String fromWidgetId,
-            String toWidgetId,
+            AppWidgetStore.Entry destination,
             String pkg,
             Surface surface,
             int width,
             int height) {
+        String toWidgetId = destination.id;
         if (!GlobalVars.isBound
                 || GlobalVars.serviceMessenger == null
                 || surface == null
@@ -4106,6 +4138,9 @@ public class DashboardActivity extends AppCompatActivity {
             Message message = Message.obtain(null, MSG_EMBEDDED_TRANSFER, 1, 0);
             Bundle data = new Bundle();
             data.putBoolean("embeddedMove", true);
+            data.putSize(
+                    CarPlayWidgetProtocol.GRID_SIZE,
+                    new Size(destination.width, destination.height));
             data.putString("fromWidgetId", fromWidgetId);
             data.putString("widgetId", toWidgetId);
             data.putString("package", pkg);
@@ -4241,6 +4276,7 @@ public class DashboardActivity extends AppCompatActivity {
     }
 
     private void detachEmbeddedSurfaces() {
+        dismissWindowControls();
         for (String widgetId : new ArrayList<>(embeddedWidgetSurfaces.keySet())) {
             sendEmbeddedDetach(widgetId);
         }
@@ -4253,7 +4289,9 @@ public class DashboardActivity extends AppCompatActivity {
     }
 
     private void requestCarPlayWidgets() {
-        if (!suspensionScreenResumed
+        if (splitTilesGrid == null
+                || splitTilesGrid.isEditing()
+                || !suspensionScreenResumed
                 || destroyed
                 || !ru.big.town.restoremode.carplay.CarPlayFeature.isEnabled(this)
                 || !GlobalVars.isBound
@@ -4420,10 +4458,10 @@ public class DashboardActivity extends AppCompatActivity {
     @Override
     protected void onPause() {
         super.onPause();
+        suspensionScreenResumed = false;
         splitTilesGrid.setEditing(false);
         cancelGridSnap();
         dashboardOpening = false;
-        suspensionScreenResumed = false;
         if (carPlayFeatureReceiverRegistered) {
             unregisterReceiver(carPlayFeatureReceiver);
             carPlayFeatureReceiverRegistered = false;
