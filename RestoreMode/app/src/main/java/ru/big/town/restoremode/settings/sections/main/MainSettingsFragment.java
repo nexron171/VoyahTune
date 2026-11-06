@@ -280,8 +280,8 @@ public class MainSettingsFragment extends SettingsSectionFragment {
                 R.id.EnergyTripSettingWidth,
                 R.id.EnergyTripSettingHeight,
                 "energyTripWidget",
-                8,
-                2);
+                2,
+                3);
         bindShowSwitch(
                 R.id.switchShowTirePressure,
                 "show_tirePressureWidget",

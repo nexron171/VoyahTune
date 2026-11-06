@@ -30,7 +30,7 @@ public final class VehicleWidgets {
             return new int[] {2, 2};
         }
         if (TRIP.equals(id)) {
-            return new int[] {8, 2};
+            return new int[] {2, 3};
         }
         if (TIRES.equals(id)) {
             return new int[] {2, 4};

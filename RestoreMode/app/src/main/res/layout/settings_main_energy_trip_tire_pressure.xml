@@ -149,8 +149,8 @@
                         android:layout_marginBottom="12dp"
                         app:settingsPreviewKind="grid"
                         app:settingsTileKey="energyTripWidget"
-                        app:settingsTileWidth="8"
-                        app:settingsTileHeight="2"
+                        app:settingsTileWidth="2"
+                        app:settingsTileHeight="3"
                         android:tag="settings.cell-grid" />
                 </LinearLayout>
                 <TextView

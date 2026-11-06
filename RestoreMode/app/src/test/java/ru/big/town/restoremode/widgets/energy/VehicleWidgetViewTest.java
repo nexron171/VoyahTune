@@ -7,7 +7,10 @@ import static org.junit.Assert.assertTrue;
 import android.app.Application;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.graphics.Bitmap;
 import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.Rect;
 import android.os.Bundle;
 import android.os.SystemClock;
 import android.view.MotionEvent;
@@ -69,8 +72,10 @@ public class VehicleWidgetViewTest {
                     assertEquals(classes[index], widget.getClass());
                     widget.update(telemetry());
                     List<String> text = render(widget);
-                    String title = VehicleWidgets.TIRES.equals(widgetId) && columns == 1
-                            ? "Дав-е, bar" : titles[index];
+                    String title =
+                            VehicleWidgets.TIRES.equals(widgetId) && columns == 1
+                                    ? "Дав-е, bar"
+                                    : titles[index];
                     assertTrue(widgetId + " " + columns + "×" + rows, text.contains(title));
                     for (int other = 0; other < titles.length; other++) {
                         if (other != index) {
@@ -90,12 +95,10 @@ public class VehicleWidgetViewTest {
         Bundle data = telemetry();
         widget.update(data);
         assertEquals(
-                java.util.Arrays.asList("Дав-е, bar", "2,6", "2,7", "2,8", "2,9"),
-                render(widget));
+                java.util.Arrays.asList("Дав-е, bar", "2,6", "2,7", "2,8", "2,9"), render(widget));
         data.putBoolean(EnergyWidgetProtocol.CONNECTED, false);
         widget.update(data);
-        assertEquals(
-                java.util.Arrays.asList("Дав-е, bar", "—", "—", "—", "—"), render(widget));
+        assertEquals(java.util.Arrays.asList("Дав-е, bar", "—", "—", "—", "—"), render(widget));
     }
 
     @Test
@@ -154,6 +157,79 @@ public class VehicleWidgetViewTest {
         widget.showTripHistory(false);
         render(widget);
         assertEquals(fullHeight, widget.contentHeight, .01f);
+    }
+
+    @Test
+    public void smallTripShowsReadingsAndUnitsWhileReservingTheHistoryFooter() {
+        TripWidgetView widget = new TripWidgetView(context, 2, 3);
+        Bundle data = telemetry();
+        data.putFloatArray(EnergyWidgetProtocol.TRIP_OBSERVED_KM, new float[] {0, 0});
+        widget.update(data);
+        widget.timer(3_723_000);
+        widget.showTripHistory(true);
+        List<String> text = render(widget);
+        assertTrue(
+                text.containsAll(
+                        java.util.Arrays.asList(
+                                "01:02:03",
+                                "42,5",
+                                "км",
+                                "~18,2",
+                                "кВт·ч/100 км",
+                                "~6,1",
+                                "л/100 км",
+                                "Средние после 1 км")));
+        assertFalse(text.contains("Электричество"));
+        assertFalse(text.contains("Бензин"));
+        assertEquals(3 * 127 - 72, widget.contentHeight, .01f);
+        widget.timer(-1);
+        widget.update(null);
+        assertTrue(
+                render(widget)
+                        .containsAll(
+                                java.util.Arrays.asList(
+                                        "Ожидание статуса", "Нет связи с автомобилем")));
+    }
+
+    @Test
+    @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    public void compactTripFitsLongReadingsAndSeparateDistancesAboveHistory() {
+        TripWidgetView widget = new TripWidgetView(context, 2, 3);
+        Bundle data = telemetry();
+        data.putFloatArray(EnergyWidgetProtocol.TRIP, new float[] {12345.6f, 123.4f, 15.6f});
+        data.putFloatArray(EnergyWidgetProtocol.TRIP_OBSERVED_KM, new float[] {12345.6f, 9876.5f});
+        widget.update(data);
+        widget.timer(372_300_000);
+        float density = context.getResources().getDisplayMetrics().density;
+        int width = Math.round(286 * density);
+        int height = Math.round(373 * density);
+        widget.layout(0, 0, width, height);
+        for (boolean history : new boolean[] {false, true}) {
+            widget.showTripHistory(history);
+            List<Rect> readings = new ArrayList<>();
+            Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+            widget.draw(
+                    new Canvas(bitmap) {
+                        @Override
+                        public void drawText(String text, float x, float y, Paint paint) {
+                            Rect bounds = new Rect();
+                            paint.getTextBounds(text, 0, text.length(), bounds);
+                            bounds.offset(Math.round(x), Math.round(y));
+                            assertTrue(
+                                    text + " " + bounds,
+                                    bounds.left >= 0
+                                            && bounds.top >= 0
+                                            && bounds.right <= widget.contentWidth
+                                            && bounds.bottom <= widget.contentHeight);
+                            for (Rect reading : readings) {
+                                assertFalse(text, Rect.intersects(reading, bounds));
+                            }
+                            readings.add(bounds);
+                            super.drawText(text, x, y, paint);
+                        }
+                    });
+            assertTrue(readings.size() >= 9);
+        }
     }
 
     @Test

@@ -210,6 +210,7 @@ public abstract class VehicleWidgetView extends View {
         return EnergyWidgetStyle.estimate(value);
     }
 
+    // A null canvas measures the final baseline with the same line breaks.
     protected final float drawWrappedText(
             Canvas canvas,
             String value,
@@ -222,14 +223,16 @@ public abstract class VehicleWidgetView extends View {
         for (String word : value.split(" ")) {
             String next = lineText.isEmpty() ? word : lineText + " " + word;
             if (!lineText.isEmpty() && measureText(next, size) > width) {
-                drawText(canvas, lineText, x, baseline, size, color, false);
+                if (canvas != null) {
+                    drawText(canvas, lineText, x, baseline, size, color, false);
+                }
                 baseline += size * 1.25f;
                 lineText = word;
             } else {
                 lineText = next;
             }
         }
-        if (!lineText.isEmpty()) {
+        if (canvas != null && !lineText.isEmpty()) {
             drawText(canvas, lineText, x, baseline, size, color, false);
         }
         return baseline;
