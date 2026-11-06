@@ -91,6 +91,20 @@
   );
   let completed = $state<string[]>([]),
     current = $state<string | undefined>();
+  const stepNoticeTypes = new Set([
+    "package-reset",
+    "signing-reset-reboot",
+    "canbus-removal-started",
+    "canbus-backup",
+    "canbus-removal-reboot",
+    "canbus-conflict-resolved",
+  ]);
+  const latestStepNotice = $derived.by(() => {
+    for (let index = events.length - 1; index >= 0; index--) {
+      const event = events[index];
+      if (event.stepId === current && stepNoticeTypes.has(event.type)) return event;
+    }
+  });
   const operationProgress = $derived(
     getOperationProgress(
       plan?.steps ?? [],
@@ -1437,24 +1451,9 @@
                 ><span>{stage.title}</span>
               </li>{/each}
           </ol>
-          {#if events
-            .filter((e) => e.stepId === current && ["package-reset", "signing-reset-reboot", "canbus-removal-started", "canbus-backup", "canbus-removal-reboot", "canbus-conflict-resolved"].includes(e.type))
-            .at(-1)}<p class="info-note" role="status">
-              {events
-                .filter(
-                  (e) =>
-                    e.stepId === current &&
-                    [
-                      "package-reset",
-                      "signing-reset-reboot",
-                      "canbus-removal-started",
-                      "canbus-backup",
-                      "canbus-removal-reboot",
-                      "canbus-conflict-resolved",
-                    ].includes(e.type),
-                )
-                .at(-1)?.message}
-            </p>{/if}
+          {#if latestStepNotice}
+            <p class="info-note" role="status">{latestStepNotice.message}</p>
+          {/if}
           {#if stopRequested}<p class="info-note">
               Остановка запрошена. Текущий шаг завершится, затем операция
               остановится.

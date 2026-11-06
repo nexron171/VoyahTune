@@ -87,7 +87,7 @@ export function getOperationProgress(
       stage.stepIds.includes(step.id),
     );
     const id = definition?.id ?? `step:${step.id}`;
-    const previous = groups.at(-1);
+    const previous = groups[groups.length - 1];
     if (previous?.id === id) {
       previous.stepIds = [...previous.stepIds, step.id];
     } else {
