@@ -3271,7 +3271,13 @@ public class DashboardActivity extends AppCompatActivity {
 
         View dragHandleLauncher = widgetView.findViewById(R.id.appWidgetDragHandleLauncher);
         if (dragHandleLauncher != null) {
-            dragHandleLauncher.setOnLongClickListener(dragLauncher);
+            dragHandleLauncher.setOnLongClickListener(
+                    view -> {
+                        if (splitTilesGrid.isEditing()) {
+                            return tileDragController.start(widgetView);
+                        }
+                        return dragLauncher.onLongClick(view);
+                    });
         }
         View launcherControls = widgetView.findViewById(R.id.appWidgetLauncherControls);
         if (launcherControls != null) {

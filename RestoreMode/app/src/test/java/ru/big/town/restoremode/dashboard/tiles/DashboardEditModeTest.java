@@ -141,6 +141,8 @@ public class DashboardEditModeTest {
             touch(grid, MotionEvent.ACTION_UP, settings.getLeft() + 16, settings.getTop() + 16);
             assertNotNull(tileOrNull(grid, "widget:cardSettings"));
             View appTile = tile(grid, "appWidget:" + app.id);
+            assertControlReceivesTap(grid, appTile.findViewById(R.id.appWidgetSwapLauncher));
+            assertControlReceivesHold(grid, appTile.findViewById(R.id.appWidgetDragHandleLauncher));
             controller.get().findViewById(R.id.dashboardEditDone).performClick();
             ViewGroup profiles = appTile.findViewById(R.id.appWidgetList);
             profiles.getChildAt(0).performClick();
@@ -156,6 +158,14 @@ public class DashboardEditModeTest {
                     View.VISIBLE,
                     appTile.findViewById(R.id.appWidgetOverlayControls).getVisibility());
             layout(grid);
+            assertControlReceivesHold(grid, appTile.findViewById(R.id.appWidgetDragHandle));
+            assertControlReceivesTap(grid, appTile.findViewById(R.id.appWidgetSwap));
+            assertControlReceivesTap(grid, appTile.findViewById(R.id.appWidgetExpand));
+            int originalDpi = AppWidgetStore.find(prefs, app.id).selected().dpi;
+            tapControl(grid, appTile.findViewById(R.id.appWidgetDpiPlus), false);
+            assertTrue(AppWidgetStore.find(prefs, app.id).selected().dpi > originalDpi);
+            tapControl(grid, appTile.findViewById(R.id.appWidgetDpiMinus), false);
+            assertEquals(originalDpi, AppWidgetStore.find(prefs, app.id).selected().dpi);
             View close = appTile.findViewById(R.id.appWidgetClose);
             android.graphics.Rect closeBounds =
                     new android.graphics.Rect(0, 0, close.getWidth(), close.getHeight());
@@ -179,6 +189,37 @@ public class DashboardEditModeTest {
         } finally {
             controller.pause().stop().destroy();
         }
+    }
+
+    private static void assertControlReceivesTap(DashboardEditGrid grid, View control) {
+        boolean[] clicked = {false};
+        control.setOnClickListener(view -> clicked[0] = true);
+        tapControl(grid, control, false);
+        assertTrue(control.getResources().getResourceEntryName(control.getId()), clicked[0]);
+    }
+
+    private static void assertControlReceivesHold(DashboardEditGrid grid, View control) {
+        boolean[] held = {false};
+        control.setOnLongClickListener(
+                view -> {
+                    held[0] = true;
+                    return true;
+                });
+        tapControl(grid, control, true);
+        assertTrue(control.getResources().getResourceEntryName(control.getId()), held[0]);
+    }
+
+    private static void tapControl(DashboardEditGrid grid, View control, boolean longPress) {
+        android.graphics.Rect bounds =
+                new android.graphics.Rect(0, 0, control.getWidth(), control.getHeight());
+        grid.offsetDescendantRectToMyCoords(control, bounds);
+        touch(grid, MotionEvent.ACTION_DOWN, bounds.centerX(), bounds.centerY());
+        if (longPress) {
+            shadowOf(Looper.getMainLooper())
+                    .idleFor(Duration.ofMillis(ViewConfiguration.getLongPressTimeout() + 1));
+        }
+        touch(grid, MotionEvent.ACTION_UP, bounds.centerX(), bounds.centerY());
+        shadowOf(Looper.getMainLooper()).idle();
     }
 
     private static void layout(DashboardEditGrid grid) {
