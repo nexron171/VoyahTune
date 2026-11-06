@@ -25,7 +25,11 @@ final class WidgetSurfaceDrawable extends Drawable {
     private final float stroke;
     private int alpha = 255;
 
-    WidgetSurfaceDrawable(View tile, View wallpaperView, AppearanceSettings settings, WallpaperDrawable blurredWallpaper) {
+    WidgetSurfaceDrawable(
+            View tile,
+            View wallpaperView,
+            AppearanceSettings settings,
+            WallpaperDrawable blurredWallpaper) {
         this.tile = tile;
         this.wallpaperView = wallpaperView;
         this.settings = settings;
@@ -45,14 +49,19 @@ final class WidgetSurfaceDrawable extends Drawable {
 
     @Override
     public void draw(Canvas canvas) {
-        if (settings.transparencyEnabled && settings.blurEnabled && settings.blurAmount > 0
+        if (settings.transparencyEnabled
+                && settings.blurEnabled
+                && settings.blurAmount > 0
                 && blurredWallpaper != null) {
             tile.getLocationOnScreen(tilePosition);
             wallpaperView.getLocationOnScreen(wallpaperPosition);
             canvas.save();
             canvas.clipPath(clip);
-            canvas.translate(wallpaperPosition[0] - tilePosition[0],
-                    wallpaperPosition[1] - tilePosition[1]);
+            if (tile.getScaleX() > 0 && tile.getScaleY() > 0) {
+                canvas.scale(1f / tile.getScaleX(), 1f / tile.getScaleY());
+            }
+            canvas.translate(
+                    wallpaperPosition[0] - tilePosition[0], wallpaperPosition[1] - tilePosition[1]);
             blurredWallpaper.drawInto(canvas, wallpaperView.getWidth(), wallpaperView.getHeight());
             canvas.restore();
         }

@@ -21,7 +21,8 @@ import org.robolectric.annotation.Config;
 public class VisibleTileInvalidationTest {
     @Test
     public void viewportChangesInvalidateOnlyCurrentlyVisibleTilesIncludingPartialOnes() {
-        try (ActivityController<Activity> controller = Robolectric.buildActivity(Activity.class).setup().visible()) {
+        try (ActivityController<Activity> controller =
+                Robolectric.buildActivity(Activity.class).setup().visible()) {
             Activity activity = controller.get();
             FrameLayout viewport = new FrameLayout(activity);
             FrameLayout tiles = new FrameLayout(activity);
@@ -32,12 +33,15 @@ public class VisibleTileInvalidationTest {
             CountingView hidden = addTile(tiles, 10);
             hidden.setVisibility(View.INVISIBLE);
             activity.setContentView(viewport);
-            viewport.measure(View.MeasureSpec.makeMeasureSpec(100, View.MeasureSpec.EXACTLY),
+            viewport.measure(
+                    View.MeasureSpec.makeMeasureSpec(100, View.MeasureSpec.EXACTLY),
                     View.MeasureSpec.makeMeasureSpec(100, View.MeasureSpec.EXACTLY));
             viewport.layout(0, 0, 100, 100);
             tiles.layout(0, 0, 300, 100);
-            try (DashboardAppearance appearance = new DashboardAppearance(viewport,
-                    activity.getSharedPreferences("visible-tiles", Context.MODE_PRIVATE))) {
+            try (DashboardAppearance appearance =
+                    new DashboardAppearance(
+                            viewport,
+                            activity.getSharedPreferences("visible-tiles", Context.MODE_PRIVATE))) {
                 appearance.apply(tiles);
                 reset(first, partial, offscreen, hidden);
                 appearance.onViewportChanged();
@@ -67,6 +71,40 @@ public class VisibleTileInvalidationTest {
         }
     }
 
+    @Test
+    public void movingTileRefreshesOnlyItsWallpaperSample() {
+        try (ActivityController<Activity> controller =
+                Robolectric.buildActivity(Activity.class).setup().visible()) {
+            Activity activity = controller.get();
+            FrameLayout tiles = new FrameLayout(activity);
+            activity.setContentView(tiles);
+            CountingView moving = addTile(tiles, 0);
+            CountingView stationary = addTile(tiles, 50);
+            tiles.measure(
+                    View.MeasureSpec.makeMeasureSpec(240, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(100, View.MeasureSpec.EXACTLY));
+            tiles.layout(0, 0, 240, 100);
+            android.content.SharedPreferences prefs =
+                    activity.getSharedPreferences("moving-blur", Context.MODE_PRIVATE);
+            prefs.edit()
+                    .putString(AppearanceSettings.WALLPAPER, AppearanceSettings.Wallpaper.GREEN.key)
+                    .putBoolean(AppearanceSettings.TRANSPARENCY_ENABLED, true)
+                    .putBoolean(AppearanceSettings.BLUR_ENABLED, true)
+                    .apply();
+            try (DashboardAppearance appearance = new DashboardAppearance(tiles, prefs)) {
+                appearance.apply(tiles);
+                tiles.getViewTreeObserver().dispatchOnPreDraw();
+                moving.sampleInvalidations = stationary.sampleInvalidations = 0;
+                moving.setTranslationX(80);
+                tiles.getViewTreeObserver().dispatchOnPreDraw();
+                assertEquals(1, moving.sampleInvalidations);
+                assertEquals(0, stationary.sampleInvalidations);
+                tiles.getViewTreeObserver().dispatchOnPreDraw();
+                assertEquals(1, moving.sampleInvalidations);
+            }
+        }
+    }
+
     private static CountingView addTile(FrameLayout tiles, int left) {
         CountingView tile = new CountingView(tiles.getContext());
         FrameLayout.LayoutParams layout = new FrameLayout.LayoutParams(50, 100);
@@ -84,6 +122,13 @@ public class VisibleTileInvalidationTest {
 
     private static final class CountingView extends View {
         int invalidations;
+        int sampleInvalidations;
+
+        @Override
+        public void invalidateDrawable(android.graphics.drawable.Drawable drawable) {
+            if (drawable == getBackground()) sampleInvalidations++;
+            super.invalidateDrawable(drawable);
+        }
 
         CountingView(Context context) {
             super(context);

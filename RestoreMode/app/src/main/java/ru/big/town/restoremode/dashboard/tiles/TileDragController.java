@@ -91,11 +91,17 @@ public final class TileDragController {
         }
         originalMinimumWidth = grid.getMinimumWidth();
         buildSlots();
-        if (!view.startDragAndDrop(null, new View.DragShadowBuilder(view), this, 0)) {
+        // A system drag shadow freezes the wallpaper sample at the pickup position.
+        View.DragShadowBuilder shadow =
+                new View.DragShadowBuilder(view) {
+                    @Override
+                    public void onDrawShadow(Canvas canvas) {}
+                };
+        if (!view.startDragAndDrop(null, shadow, this, 0)) {
             cancel();
             return false;
         }
-        view.setAlpha(0f);
+        view.setTranslationZ(8 * grid.getResources().getDisplayMetrics().density);
         overlay.setBounds(0, 0, grid.getWidth(), grid.getHeight());
         grid.getOverlay().add(overlay);
         return true;
@@ -175,6 +181,7 @@ public final class TileDragController {
                 return true;
             case DragEvent.ACTION_DRAG_LOCATION:
                 if (!settling) {
+                    positionDraggedView(x, y);
                     select(x, y);
                     scrollAtEdge(x);
                 }
@@ -229,6 +236,8 @@ public final class TileDragController {
                 .scaleY(bounds.height() / view.getHeight())
                 .setInterpolator(new DecelerateInterpolator())
                 .setDuration(duration)
+                // Keep the wallpaper crop in step with transforms, including on hardware canvases.
+                .setUpdateListener(animation -> grid.invalidate())
                 .start();
     }
 
@@ -239,9 +248,7 @@ public final class TileDragController {
         }
         settling = true;
         View view = dragged.view;
-        view.setTranslationX(x - view.getLeft() - view.getWidth() / 2f);
-        view.setTranslationY(y - view.getTop() - view.getHeight() / 2f);
-        view.setAlpha(1f);
+        positionDraggedView(x, y);
         view.animate()
                 .withEndAction(
                         () -> {
@@ -250,6 +257,12 @@ public final class TileDragController {
                             commit.move(from, before);
                         });
         animateTo(view, selected.target, 260);
+    }
+
+    private void positionDraggedView(float x, float y) {
+        View view = dragged.view;
+        view.setX(x - view.getWidth() / 2f);
+        view.setY(y - view.getHeight() / 2f);
     }
 
     private void scrollAtEdge(float x) {
@@ -270,6 +283,7 @@ public final class TileDragController {
     public void cancel() {
         grid.getOverlay().remove(overlay);
         if (dragged != null) {
+            dragged.view.setTranslationZ(0);
             grid.setMinimumWidth(originalMinimumWidth);
         }
         for (Item item : items) {
