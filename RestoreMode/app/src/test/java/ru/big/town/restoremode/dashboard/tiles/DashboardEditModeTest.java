@@ -81,7 +81,21 @@ public class DashboardEditModeTest {
             float y = trip.getBottom() - 8;
             float step = (trip.getWidth() + 8) / 2f;
             touch(grid, MotionEvent.ACTION_DOWN, x, y);
+            int initialWidth = trip.getWidth();
+            int dragDistance = Math.round(step / 4);
+            touch(grid, MotionEvent.ACTION_MOVE, x + dragDistance, y);
+            assertEquals(initialWidth + dragDistance, trip.getWidth());
             touch(grid, MotionEvent.ACTION_MOVE, x + step, y);
+            int heldWidth = trip.getWidth();
+            grid.requestLayout();
+            layout(grid);
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(900));
+            assertEquals(heldWidth, trip.getWidth());
+            touch(grid, MotionEvent.ACTION_MOVE, x + step, y);
+            assertEquals(
+                    "A layout pass while holding must keep the preview",
+                    heldWidth,
+                    trip.getWidth());
             assertTrue(trip.getWidth() > 2 * step);
             assertArrayEquals(
                     new int[] {2, 3}, TileSizeStore.dimensions(prefs, VehicleWidgets.TRIP, 2, 3));

@@ -65,10 +65,8 @@ public final class DashboardEditGrid extends GridLayout {
     private final Path corner = new Path();
     private final Rect original = new Rect();
     private final Rect viewport = new Rect();
-    private final Runnable extendAtEdge = this::extendAtEdge;
-    private float pointerX, pointerY;
-    private int extraColumns, extraRows;
-    private boolean extendRight, extendDown;
+    private final Rect sizeLimits = new Rect();
+    private int previewWidth, previewHeight;
     private final Runnable hold = this::longPress;
     private final float density = getResources().getDisplayMetrics().density;
     private final int slop = ViewConfiguration.get(getContext()).getScaledTouchSlop();
@@ -158,8 +156,9 @@ public final class DashboardEditGrid extends GridLayout {
             } else if (gesture == Gesture.RESIZE) {
                 previewSize(event);
                 Size size = preview;
-                resetGesture();
-                if (size.getWidth() != item.columns || size.getHeight() != item.rows) {
+                boolean changed = size.getWidth() != item.columns || size.getHeight() != item.rows;
+                resetGesture(!changed);
+                if (changed) {
                     actions.resize(item.tile, size.getWidth(), size.getHeight());
                 }
             }
@@ -194,7 +193,19 @@ public final class DashboardEditGrid extends GridLayout {
             preview = new Size(item.columns, item.rows);
             original.set(
                     pressed.getLeft(), pressed.getTop(), pressed.getRight(), pressed.getBottom());
+            previewWidth = original.width();
+            previewHeight = original.height();
+            getLocalVisibleRect(viewport);
+            sizeLimits.set(item.columns, item.rows, item.columns, item.rows);
+            for (int width = 1; width <= 12; width++) {
+                for (int height = 1; height <= 5; height++) {
+                    if (item.sizes.allows(width, height)) {
+                        sizeLimits.union(width, height);
+                    }
+                }
+            }
             pressed.setTranslationZ(8 * density);
+            invalidate();
             getParent().requestDisallowInterceptTouchEvent(true);
         }
     }
@@ -271,57 +282,25 @@ public final class DashboardEditGrid extends GridLayout {
     }
 
     private void previewSize(MotionEvent event) {
-        pointerX = event.getX();
-        pointerY = event.getY();
-        if (getLocalVisibleRect(viewport)) {
-            boolean right =
-                    pointerX > downX + density * 2 && pointerX >= viewport.right - 12 * density;
-            boolean bottom =
-                    pointerY > downY + density * 2 && pointerY >= viewport.bottom - 12 * density;
-            if (right != extendRight || bottom != extendDown) {
-                extendRight = right;
-                extendDown = bottom;
-                removeCallbacks(extendAtEdge);
-                if (right || bottom) postDelayed(extendAtEdge, 450);
-            }
-        }
-        updatePreview();
-    }
-
-    // Holding at the viewport edge lets a tile in the last visible row or column grow.
-    private void extendAtEdge() {
-        if (preview == null) return;
-        Sizes sizes = items.get(pressed).sizes;
-        boolean horizontal =
-                extendRight
-                        && extraColumns < 12
-                        && preview.getWidth()
-                                < nearestSize(sizes, 12, preview.getHeight(), preview).getWidth();
-        boolean vertical =
-                extendDown
-                        && extraRows < 5
-                        && preview.getHeight()
-                                < nearestSize(sizes, preview.getWidth(), 5, preview).getHeight();
-        if (!horizontal && !vertical) return;
-        if (horizontal) extraColumns++;
-        if (vertical) extraRows++;
-        updatePreview();
-        postDelayed(extendAtEdge, 280);
-    }
-
-    private void updatePreview() {
         Item item = items.get(pressed);
-        float columns = item.columns + (pointerX - downX) / columnPitch + extraColumns;
-        float rows = item.rows + (pointerY - downY) / rowPitch + extraRows;
-        Size size = nearestSize(item.sizes, columns, rows, preview);
-        if (size.equals(preview)) {
-            return;
-        }
-        preview = size;
-        layoutPressed(
-                original.width() + (size.getWidth() - item.columns) * columnPitch,
-                original.height() + (size.getHeight() - item.rows) * rowPitch);
+        float columns = item.columns + (event.getX() - downX) / columnPitch;
+        float rows = item.rows + (event.getY() - downY) / rowPitch;
+        columns = Math.max(sizeLimits.left, Math.min(sizeLimits.right, columns));
+        rows = Math.max(sizeLimits.top, Math.min(sizeLimits.bottom, rows));
+        preview = nearestSize(item.sizes, columns, rows, preview);
+        previewWidth = original.width() + Math.round((columns - item.columns) * columnPitch);
+        previewHeight = original.height() + Math.round((rows - item.rows) * rowPitch);
+        layoutPressed(previewWidth, previewHeight);
         invalidate();
+    }
+
+    @Override
+    protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
+        super.onLayout(changed, left, top, right, bottom);
+        // GridLayout restores cell bounds when another widget requests layout during the drag.
+        if (preview != null) {
+            layoutPressed(previewWidth, previewHeight);
+        }
     }
 
     static Size nearestSize(Sizes sizes, float columns, float rows, Size current) {
@@ -362,13 +341,16 @@ public final class DashboardEditGrid extends GridLayout {
     }
 
     private void resetGesture() {
+        resetGesture(true);
+    }
+
+    private void resetGesture(boolean restoreBounds) {
         removeCallbacks(hold);
-        removeCallbacks(extendAtEdge);
-        extendRight = extendDown = false;
-        extraColumns = extraRows = 0;
         viewport.setEmpty();
         if (pressed != null && preview != null) {
-            layoutPressed(original.width(), original.height());
+            if (restoreBounds) {
+                layoutPressed(original.width(), original.height());
+            }
             pressed.setTranslationZ(0);
             if (getParent() != null) {
                 getParent().requestDisallowInterceptTouchEvent(false);
@@ -448,14 +430,24 @@ public final class DashboardEditGrid extends GridLayout {
         }
         if (child == pressed && preview != null) {
             paint.setStyle(Paint.Style.FILL);
+            paint.setTextSize(19 * density);
+            String label = preview.getWidth() + " × " + preview.getHeight();
+            float halfWidth = paint.measureText(label) / 2 + 8 * density;
+            float halfHeight = (paint.descent() - paint.ascent()) / 2 + 3 * density;
+            float centerX = width / 2, centerY = height / 2;
+            paint.setColor(0xe6222830);
+            canvas.drawRoundRect(
+                    centerX - halfWidth,
+                    centerY - halfHeight,
+                    centerX + halfWidth,
+                    centerY + halfHeight,
+                    8 * density,
+                    8 * density,
+                    paint);
             paint.setColor(0xffffffff);
             paint.setTextAlign(Paint.Align.CENTER);
-            paint.setTextSize(19 * density);
             canvas.drawText(
-                    preview.getWidth() + " × " + preview.getHeight(),
-                    width / 2,
-                    height / 2 - (paint.ascent() + paint.descent()) / 2,
-                    paint);
+                    label, centerX, centerY - (paint.ascent() + paint.descent()) / 2, paint);
         }
         canvas.restore();
     }
