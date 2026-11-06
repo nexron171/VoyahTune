@@ -44,12 +44,13 @@
         <attr name="settingsMinimumColumnWidth" format="dimension" />
         <attr name="settingsEndColumnWeight" format="float" />
     </declare-styleable>
-    <declare-styleable name="SettingsPreviewView">
+    <declare-styleable name="WidgetSizeGrid">
         <attr name="settingsTileKey" format="string" />
         <attr name="settingsTileWidth" format="integer" />
         <attr name="settingsTileHeight" format="integer" />
+    </declare-styleable>
+    <declare-styleable name="SettingsPreviewView">
         <attr name="settingsPreviewKind" format="enum">
-            <enum name="grid" value="0" />
             <enum name="split" value="1" />
             <enum name="dock" value="2" />
             <enum name="fullscreen" value="3" />

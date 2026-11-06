@@ -5,10 +5,7 @@ import android.content.SharedPreferences;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.AdapterView;
-import android.widget.ArrayAdapter;
 import android.widget.RadioGroup;
-import android.widget.Spinner;
 import android.widget.Switch;
 import android.widget.TextView;
 
@@ -17,12 +14,11 @@ import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.dashboard.DashboardProfile;
 import ru.big.town.restoremode.dashboard.tiles.TileOrderStore;
 import ru.big.town.restoremode.dashboard.tiles.TileSizeStore;
-import ru.big.town.restoremode.settings.ui.preview.SettingsPreviewView;
+import ru.big.town.restoremode.settings.ui.preview.WidgetSizeGrid;
 import ru.big.town.restoremode.settings.ui.style.SettingsDesign;
 import ru.big.town.restoremode.widgets.apps.AppWidgetStore;
 
 import java.util.function.BooleanSupplier;
-import java.util.function.IntConsumer;
 
 final class CarPlayWidgetSettings {
     private final Context context;
@@ -141,8 +137,7 @@ final class CarPlayWidgetSettings {
     }
 
     private void rememberWindowSize() {
-        TileSizeStore.setWidth(preferences, windowSizeKey(), entry.width);
-        TileSizeStore.setHeight(preferences, windowSizeKey(), entry.height);
+        TileSizeStore.setSize(preferences, windowSizeKey(), entry.width, entry.height);
     }
 
     private void saveEntry() {
@@ -175,16 +170,12 @@ final class CarPlayWidgetSettings {
                     entry.autoStart = checked;
                     saveEntry();
                 });
-        bindDimension(
-                R.id.carPlayWidgetWidth, 1, 12, entry.width, width -> resize(width, entry.height));
-        bindDimension(
-                R.id.carPlayWidgetHeight,
-                minimumWindowHeight(),
-                5,
+        WidgetSizeGrid preview = root.findViewById(R.id.carPlayWidgetGrid);
+        preview.bind(
+                entry.width,
                 entry.height,
-                height -> resize(entry.width, height));
-        SettingsPreviewView preview = root.findViewById(R.id.carPlayWidgetGrid);
-        preview.setCells(entry.width, entry.height);
+                (columns, rows) -> !CarPlayTarget.opensActivity(entry.packageName, columns, rows),
+                this::resize);
         TextView summary = root.findViewById(R.id.carPlayWidgetSizeSummary);
         summary.setText(
                 context.getString(
@@ -204,34 +195,5 @@ final class CarPlayWidgetSettings {
         rememberWindowSize();
         saveEntry();
         updateWindowControls();
-    }
-
-    private void bindDimension(
-            int viewId, int minimum, int maximum, int selected, IntConsumer onChanged) {
-        Spinner spinner = root.findViewById(viewId);
-        spinner.setOnItemSelectedListener(null);
-        String[] values = new String[maximum - minimum + 1];
-        for (int index = 0; index < values.length; index++) {
-            int cells = minimum + index;
-            values[index] = cells + (cells == 1 ? " ячейка" : cells < 5 ? " ячейки" : " ячеек");
-        }
-        ArrayAdapter<String> adapter =
-                new ArrayAdapter<>(context, R.layout.settings_spinner_item, values);
-        adapter.setDropDownViewResource(R.layout.settings_spinner_dropdown);
-        spinner.setAdapter(adapter);
-        spinner.setSelection(selected - minimum);
-        spinner.setOnItemSelectedListener(
-                new AdapterView.OnItemSelectedListener() {
-                    @Override
-                    public void onItemSelected(
-                            AdapterView<?> parent, View view, int position, long id) {
-                        if (position == parent.getSelectedItemPosition()) {
-                            onChanged.accept(position + minimum);
-                        }
-                    }
-
-                    @Override
-                    public void onNothingSelected(AdapterView<?> parent) {}
-                });
     }
 }

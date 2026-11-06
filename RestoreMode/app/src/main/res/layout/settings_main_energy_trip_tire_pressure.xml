@@ -95,63 +95,14 @@
                         android:includeFontPadding="false"
                         android:letterSpacing="0.077"
                         android:layout_marginBottom="12dp" />
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical">
-                        <LinearLayout
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:orientation="vertical"
-                            android:layout_weight="1"
-                            android:layout_marginEnd="10dp">
-                            <TextView
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:text="Ширина"
-                                android:textSize="15sp"
-                                android:textColor="#a6b5c9"
-                                android:includeFontPadding="false"
-                                android:layout_marginBottom="8dp" />
-                            <Spinner
-                                android:id="@+id/EnergyTripSettingWidth"
-                                android:layout_width="match_parent"
-                                android:layout_height="48dp"
-                                android:popupBackground="@color/settings_inset"
-                                android:background="@drawable/settings_field" />
-                        </LinearLayout>
-                        <LinearLayout
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:orientation="vertical"
-                            android:layout_weight="1">
-                            <TextView
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:text="Высота"
-                                android:textSize="15sp"
-                                android:textColor="#a6b5c9"
-                                android:includeFontPadding="false"
-                                android:layout_marginBottom="8dp" />
-                            <Spinner
-                                android:id="@+id/EnergyTripSettingHeight"
-                                android:layout_width="match_parent"
-                                android:layout_height="48dp"
-                                android:popupBackground="@color/settings_inset"
-                                android:background="@drawable/settings_field" />
-                        </LinearLayout>
-                    </LinearLayout>
-                    <ru.big.town.restoremode.settings.ui.preview.SettingsPreviewView
+                    <ru.big.town.restoremode.settings.ui.preview.WidgetSizeGrid
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="16dp"
                         android:layout_marginBottom="12dp"
-                        app:settingsPreviewKind="grid"
                         app:settingsTileKey="energyTripWidget"
                         app:settingsTileWidth="2"
-                        app:settingsTileHeight="3"
-                        android:tag="settings.cell-grid" />
+                        app:settingsTileHeight="3" />
                 </LinearLayout>
                 <TextView
                     android:layout_width="match_parent"
@@ -252,63 +203,14 @@
                         android:includeFontPadding="false"
                         android:letterSpacing="0.077"
                         android:layout_marginBottom="12dp" />
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical">
-                        <LinearLayout
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:orientation="vertical"
-                            android:layout_weight="1"
-                            android:layout_marginEnd="10dp">
-                            <TextView
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:text="Ширина"
-                                android:textSize="15sp"
-                                android:textColor="#a6b5c9"
-                                android:includeFontPadding="false"
-                                android:layout_marginBottom="8dp" />
-                            <Spinner
-                                android:id="@+id/TirePressureSettingWidth"
-                                android:layout_width="match_parent"
-                                android:layout_height="48dp"
-                                android:popupBackground="@color/settings_inset"
-                                android:background="@drawable/settings_field" />
-                        </LinearLayout>
-                        <LinearLayout
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:orientation="vertical"
-                            android:layout_weight="1">
-                            <TextView
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:text="Высота"
-                                android:textSize="15sp"
-                                android:textColor="#a6b5c9"
-                                android:includeFontPadding="false"
-                                android:layout_marginBottom="8dp" />
-                            <Spinner
-                                android:id="@+id/TirePressureSettingHeight"
-                                android:layout_width="match_parent"
-                                android:layout_height="48dp"
-                                android:popupBackground="@color/settings_inset"
-                                android:background="@drawable/settings_field" />
-                        </LinearLayout>
-                    </LinearLayout>
-                    <ru.big.town.restoremode.settings.ui.preview.SettingsPreviewView
+                    <ru.big.town.restoremode.settings.ui.preview.WidgetSizeGrid
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="16dp"
                         android:layout_marginBottom="12dp"
-                        app:settingsPreviewKind="grid"
                         app:settingsTileKey="tirePressureWidget"
                         app:settingsTileWidth="4"
-                        app:settingsTileHeight="4"
-                        android:tag="settings.cell-grid" />
+                        app:settingsTileHeight="4" />
                 </LinearLayout>
                 <TextView
                     android:layout_width="match_parent"

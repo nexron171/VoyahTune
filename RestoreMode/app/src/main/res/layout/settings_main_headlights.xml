@@ -89,23 +89,14 @@
                     android:includeFontPadding="false"
                     android:letterSpacing="0.077"
                     android:layout_marginBottom="12dp" />
-                <Spinner
-                    android:id="@+id/headlightSettingSize"
-                    android:layout_width="match_parent"
-                    android:layout_height="48dp"
-                    android:contentDescription="Размер виджета фар: ширина на высоту"
-                    android:popupBackground="@color/settings_inset"
-                    android:background="@drawable/settings_field" />
-                <ru.big.town.restoremode.settings.ui.preview.SettingsPreviewView
+                <ru.big.town.restoremode.settings.ui.preview.WidgetSizeGrid
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="16dp"
                     android:layout_marginBottom="12dp"
-                    app:settingsPreviewKind="grid"
                     app:settingsTileKey="headlightWidget"
                     app:settingsTileWidth="4"
-                    app:settingsTileHeight="1"
-                    android:tag="settings.cell-grid" />
+                    app:settingsTileHeight="1" />
             </LinearLayout>
             <TextView
                 android:layout_width="match_parent"

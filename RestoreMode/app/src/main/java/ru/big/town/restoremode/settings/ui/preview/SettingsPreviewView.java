@@ -1,7 +1,6 @@
 package ru.big.town.restoremode.settings.ui.preview;
 
 import android.content.Context;
-import android.content.SharedPreferences;
 import android.content.res.TypedArray;
 import android.graphics.Canvas;
 import android.graphics.Paint;
@@ -10,55 +9,21 @@ import android.view.View;
 
 import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.apps.split.SplitStore;
-import ru.big.town.restoremode.dashboard.tiles.TileSizeStore;
 import ru.big.town.restoremode.settings.ui.style.SettingsDesign;
-import ru.big.town.restoremode.widgets.apps.AppWidgetStore;
 
 /** Abstract display diagrams, never simulated telemetry or application artwork. */
-public final class SettingsPreviewView extends View
-        implements SharedPreferences.OnSharedPreferenceChangeListener {
+public final class SettingsPreviewView extends View {
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private SharedPreferences prefs;
-    private final String tileKey;
     private final int kind;
-    private int tileWidth, tileHeight;
     private float fraction = .5f;
 
     public SettingsPreviewView(Context context, AttributeSet attrs) {
         super(context, attrs);
         TypedArray a = context.obtainStyledAttributes(attrs, R.styleable.SettingsPreviewView);
-        tileKey = a.getString(R.styleable.SettingsPreviewView_settingsTileKey);
-        tileWidth = a.getInt(R.styleable.SettingsPreviewView_settingsTileWidth, 2);
-        tileHeight = a.getInt(R.styleable.SettingsPreviewView_settingsTileHeight, 1);
         kind = a.getInt(R.styleable.SettingsPreviewView_settingsPreviewKind, 0);
         a.recycle();
-        prefs = context.getSharedPreferences("DrivePreferences", Context.MODE_PRIVATE);
         setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_YES);
         updateDescription();
-    }
-
-    public void setCells(int width, int height) {
-        tileWidth = AppWidgetStore.clampWidth(width);
-        tileHeight = AppWidgetStore.clampHeight(height);
-        updateDescription();
-        invalidate();
-    }
-
-    /** Settings pages for another dashboard profile pass their own preferences. */
-    public void usePreferences(SharedPreferences next) {
-        if (next == null || next == prefs) {
-            return;
-        }
-        boolean attached = isAttachedToWindow();
-        if (attached) {
-            prefs.unregisterOnSharedPreferenceChangeListener(this);
-        }
-        prefs = next;
-        if (attached) {
-            prefs.registerOnSharedPreferenceChangeListener(this);
-        }
-        updateDescription();
-        invalidate();
     }
 
     public void setSplit(SplitStore.Preset preset) {
@@ -69,42 +34,9 @@ public final class SettingsPreviewView extends View
 
     private void updateDescription() {
         setContentDescription(
-                kind == 0
-                        ? "Место в сетке: "
-                                + TileSizeStore.width(prefs, tileKey, tileWidth)
-                                + " на "
-                                + TileSizeStore.height(prefs, tileKey, tileHeight)
-                                + " ячеек"
-                        : kind == 1
-                                ? "Разделение экрана: слева " + Math.round(fraction * 100) + "%"
-                                : kind == 2
-                                        ? "Схема системного дока"
-                                        : "Схема полноэкранного приложения");
-    }
-
-    @Override
-    protected void onAttachedToWindow() {
-        super.onAttachedToWindow();
-        prefs.registerOnSharedPreferenceChangeListener(this);
-        updateDescription();
-        invalidate();
-    }
-
-    @Override
-    protected void onDetachedFromWindow() {
-        prefs.unregisterOnSharedPreferenceChangeListener(this);
-        super.onDetachedFromWindow();
-    }
-
-    @Override
-    public void onSharedPreferenceChanged(SharedPreferences p, String key) {
-        if (tileKey != null
-                && (key == null
-                        || key.equals("tileWidth_" + tileKey)
-                        || key.equals("tileHeight_" + tileKey))) {
-            updateDescription();
-            invalidate();
-        }
+                kind == 1
+                        ? "Разделение экрана: слева " + Math.round(fraction * 100) + "%"
+                        : kind == 2 ? "Схема системного дока" : "Схема полноэкранного приложения");
     }
 
     @Override
@@ -123,28 +55,6 @@ public final class SettingsPreviewView extends View
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
-        if ("settings.cell-grid".equals(getTag())) {
-            float gap = SettingsDesign.dp(this, 3),
-                    cw = (getWidth() - gap * 11) / 12f,
-                    ch = (getHeight() - gap * 4) / 5f;
-            int columns = TileSizeStore.width(prefs, tileKey, tileWidth),
-                    rows = TileSizeStore.height(prefs, tileKey, tileHeight);
-            paint.setStyle(Paint.Style.FILL);
-            for (int y = 0; y < 5; y++) {
-                for (int x = 0; x < 12; x++) {
-                    paint.setColor(x < columns && y < rows ? 0xffa1c5fa : 0xff3c485b);
-                    canvas.drawRoundRect(
-                            x * (cw + gap),
-                            y * (ch + gap),
-                            x * (cw + gap) + cw,
-                            y * (ch + gap) + ch,
-                            2,
-                            2,
-                            paint);
-                }
-            }
-            return;
-        }
         if (kind == 1) {
             float density = getResources().getDisplayMetrics().density,
                     w = getWidth() / density,
@@ -166,31 +76,10 @@ public final class SettingsPreviewView extends View
         canvas.scale(scale, scale);
         box(canvas, 1, 1, 383, 143, 0xff1c2531, false);
         box(canvas, 1, 1, 383, 143, 0xff384457, true);
-        if (kind == 0) {
-            int columns = TileSizeStore.width(prefs, tileKey, tileWidth),
-                    rows = TileSizeStore.height(prefs, tileKey, tileHeight);
-            for (int y = 0; y < 5; y++) {
-                for (int x = 0; x < 12; x++) {
-                    box(
-                            canvas,
-                            12 + x * 30,
-                            12 + y * 24,
-                            38 + x * 30,
-                            32 + y * 24,
-                            x < columns && y < rows ? 0xffa5c8ff : 0xff303e51,
-                            false);
-                }
-            }
-        } else if (kind == 1) {
-            float divider = 12 + 360 * fraction;
-            pane(canvas, 12, 12, divider - 4, 132);
-            pane(canvas, divider + 4, 12, 372, 132);
-        } else {
-            pane(canvas, kind == 2 ? 54 : 12, 12, 372, 132);
-            if (kind == 2) {
-                for (int i = 0; i < 4; i++) {
-                    box(canvas, 16, 17 + i * 29, 40, 39 + i * 29, 0xff607795, true);
-                }
+        pane(canvas, kind == 2 ? 54 : 12, 12, 372, 132);
+        if (kind == 2) {
+            for (int i = 0; i < 4; i++) {
+                box(canvas, 16, 17 + i * 29, 40, 39 + i * 29, 0xff607795, true);
             }
         }
         canvas.restore();
