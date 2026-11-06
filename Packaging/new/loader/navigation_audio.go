@@ -13,12 +13,29 @@ import (
 
 var navigationAudioPackageName = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$`)
 
+func navigationAudioAgent(target string) (nativeAgentConfig, bool) {
+	packageName, suffix, child := strings.Cut(target, ":")
+	if !navigationAudioPackageName.MatchString(packageName) || strings.HasPrefix(packageName, "ru.big.town.") || (child && suffix == "") {
+		return nativeAgentConfig{}, false
+	}
+	module := "navigation-audio." + packageName
+	id := module
+	if child {
+		digest := sha256.Sum256([]byte(target))
+		id += fmt.Sprintf(".process.%x", digest[:8])
+	}
+	return nativeAgentConfig{
+		ID: id, Target: target, Modules: []string{module}, Dynamic: true,
+		MaxAttempts: 1, TimeoutSeconds: 35, CrashLimit: 2,
+	}, true
+}
+
 func navigationAudioAgents(packagesCSV string) []nativeAgentConfig {
-	packages := map[string]bool{}
+	packages := map[string]nativeAgentConfig{}
 	for _, entry := range strings.Split(packagesCSV, ",") {
 		name := strings.TrimSpace(entry)
-		if navigationAudioPackageName.MatchString(name) && !strings.HasPrefix(name, "ru.big.town.") {
-			packages[name] = true
+		if agent, valid := navigationAudioAgent(name); valid && !strings.Contains(name, ":") {
+			packages[name] = agent
 		}
 	}
 	names := make([]string, 0, len(packages))
@@ -28,19 +45,15 @@ func navigationAudioAgents(packagesCSV string) []nativeAgentConfig {
 	sort.Strings(names)
 	agents := make([]nativeAgentConfig, 0, len(names))
 	for _, name := range names {
-		id := "navigation-audio." + name
-		agents = append(agents, nativeAgentConfig{
-			ID: id, Target: name, Modules: []string{id}, Dynamic: true,
-			MaxAttempts: 1, TimeoutSeconds: 35, CrashLimit: 2,
-		})
+		agents = append(agents, packages[name])
 	}
 	return agents
 }
 
 func navigationAudioProcesses(procRoot string, agents []nativeAgentConfig) []nativeAgentConfig {
-	selected := make(map[string]nativeAgentConfig, len(agents))
+	selected := make(map[string]bool, len(agents))
 	for _, agent := range agents {
-		selected[agent.Target] = agent
+		selected[agent.Target] = true
 	}
 	if len(selected) == 0 {
 		return agents
@@ -60,15 +73,15 @@ func navigationAudioProcesses(procRoot string, agents []nativeAgentConfig) []nat
 			continue
 		}
 		name, _, _ := strings.Cut(string(command), "\x00")
-		packageName, suffix, child := strings.Cut(name, ":")
-		agent, wanted := selected[packageName]
-		if !child || suffix == "" || !wanted || seen[name] {
+		packageName, _, child := strings.Cut(name, ":")
+		if !child || !selected[packageName] || seen[name] {
+			continue
+		}
+		agent, valid := navigationAudioAgent(name)
+		if !valid {
 			continue
 		}
 		seen[name] = true
-		digest := sha256.Sum256([]byte(name))
-		agent.ID += fmt.Sprintf(".process.%x", digest[:8])
-		agent.Target = name
 		agents = append(agents, agent)
 	}
 	return agents

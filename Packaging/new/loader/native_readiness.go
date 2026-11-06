@@ -12,6 +12,8 @@ import (
 
 type nativeStatusInspector func(context.Context, agentwire.Target) (agentwire.Status, error)
 
+const installationStabilitySeconds = 10
+
 func inspectNativeStatus(ctx context.Context, target agentwire.Target) (agentwire.Status, error) {
 	client, err := agentwire.NewClient(target)
 	if err != nil {
@@ -21,33 +23,70 @@ func inspectNativeStatus(ctx context.Context, target agentwire.Target) (agentwir
 }
 
 func checkNativeHooks(statusPath, procRoot string, config nativeLoaderConfig) error {
-	return checkNativeHooksWithInspector(statusPath, procRoot, config, inspectNativeStatus)
-}
-
-func checkNativeHooksWithInspector(statusPath, procRoot string, config nativeLoaderConfig, inspect nativeStatusInspector) error {
 	snapshot, err := healthyStatus(statusPath, procRoot)
 	if err != nil {
 		return err
 	}
+	if snapshot.StableSinceUptime <= 0 || snapshot.UpdatedUptime-snapshot.StableSinceUptime < installationStabilitySeconds {
+		return fmt.Errorf("waiting for %d seconds of stable loader and hook target PIDs", installationStabilitySeconds)
+	}
+	agents, err := registeredNativeAgents(config, snapshot)
+	if err != nil {
+		return err
+	}
+	for id, agent := range agents {
+		status := snapshot.Agents[id]
+		if status.Identity.PID == 0 {
+			if err := checkAgentStatus(procRoot, agent, status); err != nil {
+				return err
+			}
+			continue
+		}
+		identity, err := readIdentity(procRoot, status.Identity.PID, agent.Target)
+		if err != nil || identity != status.Identity {
+			return fmt.Errorf("hook %s target PID %d changed or exited", id, status.Identity.PID)
+		}
+	}
+	return nil
+}
+
+func registeredNativeAgents(config nativeLoaderConfig, snapshot loaderStatus) (map[string]nativeAgentConfig, error) {
 	definitions := map[string]nativeAgentConfig{}
 	for _, agent := range config.Agents {
+		status, present := snapshot.Agents[agent.ID]
+		if !present || status.Target != agent.Target {
+			return nil, fmt.Errorf("native module %s has no target status", agent.ID)
+		}
 		definitions[agent.ID] = agent
 	}
 	for id, status := range snapshot.Agents {
 		if _, known := definitions[id]; known {
 			continue
 		}
+		if agent, valid := navigationAudioAgent(status.Target); valid && id == agent.ID {
+			definitions[id] = agent
+			continue
+		}
 		if id != "client."+status.Target || !safeName(status.Target) {
-			return fmt.Errorf("unknown native agent %s", id)
+			return nil, fmt.Errorf("unknown native agent %s", id)
 		}
 		definitions[id] = nativeAgentConfig{ID: id, Target: status.Target, Modules: []string{id}, Dynamic: true}
 	}
+	return definitions, nil
+}
+
+func checkNativeHookAcks(statusPath, procRoot string, config nativeLoaderConfig, inspect nativeStatusInspector) error {
+	snapshot, err := healthyStatus(statusPath, procRoot)
+	if err != nil {
+		return err
+	}
+	definitions, err := registeredNativeAgents(config, snapshot)
+	if err != nil {
+		return err
+	}
 	observed := map[processIdentity]agentwire.Status{}
 	for id, agent := range definitions {
-		status, present := snapshot.Agents[id]
-		if !present || status.Target != agent.Target {
-			return fmt.Errorf("native module %s has no target status", id)
-		}
+		status := snapshot.Agents[id]
 		if err := checkAgentStatus(procRoot, agent, status); err != nil {
 			return err
 		}

@@ -17,7 +17,8 @@ func main() {
 	stateDirectory := flag.String("state-dir", "/data/local/tmp/voyahtune-new", "Private resident journals and control endpoint")
 	check := flag.Bool("check", false, "Validate native components without injection")
 	health := flag.Bool("health", false, "Check the supervisor heartbeat")
-	hooks := flag.Bool("check-hooks", false, "Check current process identities and complete live Java module ACKs")
+	hooks := flag.Bool("check-hooks", false, "Check loader and hook target process stability after installation")
+	hookAcks := flag.Bool("check-hook-acks", false, "Verify live acknowledgements from active Java modules")
 	quiesce := flag.Bool("quiesce", false, "Close admission and wait for helpers and target workers to drain")
 	controlStatus := flag.Bool("control-status", false, "Read authenticated runtime admission state")
 	timeout := flag.Duration("control-timeout", 60*time.Second, "Control wait deadline; cancellation does not reopen admission")
@@ -40,19 +41,24 @@ func main() {
 		}
 		return
 	}
-	if *health && !*hooks {
+	if *health && !*hooks && !*hookAcks {
 		if err := checkHealth(currentStatusPath(*stateDirectory), "/proc"); err != nil {
 			log.Fatal(err)
 		}
 		return
 	}
 	config, configurationError := loadNativeConfig(*runtimeDirectory)
-	if *check || *hooks {
+	if *check || *hooks || *hookAcks {
 		if configurationError != nil {
 			log.Fatal(configurationError)
 		}
 		if *hooks {
 			if err := checkNativeHooks(currentStatusPath(*stateDirectory), "/proc", config); err != nil {
+				log.Fatal(err)
+			}
+		}
+		if *hookAcks {
+			if err := checkNativeHookAcks(currentStatusPath(*stateDirectory), "/proc", config, inspectNativeStatus); err != nil {
 				log.Fatal(err)
 			}
 		}

@@ -3,11 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 )
+
+const maxHeartbeatAgeSeconds = 15
 
 type agentStatus struct {
 	UpdatedUptime int64           `json:"updatedUptime"`
@@ -24,12 +27,13 @@ type agentStatus struct {
 }
 
 type loaderStatus struct {
-	Schema        int                    `json:"schema"`
-	Boot          string                 `json:"boot"`
-	Loader        processIdentity        `json:"loader"`
-	UpdatedUptime int64                  `json:"updatedUptime"`
-	State         string                 `json:"state"`
-	Agents        map[string]agentStatus `json:"agents"`
+	Schema            int                    `json:"schema"`
+	Boot              string                 `json:"boot"`
+	Loader            processIdentity        `json:"loader"`
+	UpdatedUptime     int64                  `json:"updatedUptime"`
+	StableSinceUptime int64                  `json:"stableSinceUptime,omitempty"`
+	State             string                 `json:"state"`
+	Agents            map[string]agentStatus `json:"agents"`
 }
 
 type statusStore struct {
@@ -89,15 +93,34 @@ func publicStatus(snapshot loaderStatus) string {
 type statusPublisher struct {
 	path        string
 	publicPath  string
+	previous    loaderStatus
 	lastPayload string
 	delivered   string
 	attempts    int
 }
 
+func (snapshot loaderStatus) stableSince(previous loaderStatus) int64 {
+	if snapshot.State != "running" {
+		return 0
+	}
+	gap := snapshot.UpdatedUptime - previous.UpdatedUptime
+	if previous.StableSinceUptime == 0 || previous.Boot != snapshot.Boot || previous.Loader != snapshot.Loader || gap < 0 || gap > maxHeartbeatAgeSeconds {
+		return snapshot.UpdatedUptime
+	}
+	if !maps.EqualFunc(previous.Agents, snapshot.Agents, func(a, b agentStatus) bool {
+		return a.Target == b.Target && a.Identity == b.Identity
+	}) {
+		return snapshot.UpdatedUptime
+	}
+	return previous.StableSinceUptime
+}
+
 func (publisher *statusPublisher) publish(ctx context.Context, snapshot loaderStatus) error {
+	snapshot.StableSinceUptime = snapshot.stableSince(publisher.previous)
 	if err := writeAtomic(publisher.path, snapshot); err != nil {
 		return err
 	}
+	publisher.previous = snapshot
 	payload := publicStatus(snapshot)
 	if payload != publisher.lastPayload {
 		if err := writeAtomicBytes(publisher.publicPath, []byte(payload+"\n"), 0644); err != nil {
@@ -135,7 +158,7 @@ func healthyStatus(statusPath, procRoot string) (loaderStatus, error) {
 	if err != nil {
 		return snapshot, err
 	}
-	if snapshot.Schema != 1 || snapshot.State != "running" || snapshot.Boot != boot || snapshot.UpdatedUptime > now || now-snapshot.UpdatedUptime > 15 {
+	if snapshot.Schema != 1 || snapshot.State != "running" || snapshot.Boot != boot || snapshot.UpdatedUptime > now || now-snapshot.UpdatedUptime > maxHeartbeatAgeSeconds {
 		return snapshot, fmt.Errorf("stale or invalid supervisor heartbeat")
 	}
 	command, err := os.ReadFile(filepath.Join(procRoot, fmt.Sprint(snapshot.Loader.PID), "cmdline"))

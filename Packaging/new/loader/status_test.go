@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
+	"maps"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -44,7 +47,7 @@ func TestNativeHealthRequiresCurrentSupervisorAndAgentState(t *testing.T) {
 			if err := writeAtomic(path, snapshot); err != nil {
 				t.Fatal(err)
 			}
-			err := checkNativeHooksWithInspector(path, root, config, func(context.Context, agentwire.Target) (agentwire.Status, error) { return ack, nil })
+			err := checkNativeHookAcks(path, root, config, func(context.Context, agentwire.Target) (agentwire.Status, error) { return ack, nil })
 			if (err == nil) != scenario.accepted {
 				t.Fatalf("accepted=%t: %v", scenario.accepted, err)
 			}
@@ -59,7 +62,7 @@ func TestNativeHealthRequiresCurrentSupervisorAndAgentState(t *testing.T) {
 			if err := writeAtomic(path, snapshot); err != nil {
 				t.Fatal(err)
 			}
-			if err := checkNativeHooksWithInspector(path, root, config, func(context.Context, agentwire.Target) (agentwire.Status, error) { return ack, nil }); err == nil {
+			if err := checkNativeHookAcks(path, root, config, func(context.Context, agentwire.Target) (agentwire.Status, error) { return ack, nil }); err == nil {
 				t.Fatal("Unready mandatory agent accepted")
 			}
 		})
@@ -86,7 +89,7 @@ func TestNativeHealthRequiresFullLiveAcknowledgement(t *testing.T) {
 			if err := writeAtomic(path, snapshot); err != nil {
 				t.Fatal(err)
 			}
-			if err := checkNativeHooksWithInspector(path, root, config, func(context.Context, agentwire.Target) (agentwire.Status, error) { return ack, nil }); err == nil {
+			if err := checkNativeHookAcks(path, root, config, func(context.Context, agentwire.Target) (agentwire.Status, error) { return ack, nil }); err == nil {
 				t.Fatal("Invalid live acknowledgement accepted")
 			}
 		})
@@ -95,7 +98,7 @@ func TestNativeHealthRequiresFullLiveAcknowledgement(t *testing.T) {
 	if err := writeAtomic(path, snapshot); err != nil {
 		t.Fatal(err)
 	}
-	err := checkNativeHooksWithInspector(path, root, config, func(context.Context, agentwire.Target) (agentwire.Status, error) {
+	err := checkNativeHookAcks(path, root, config, func(context.Context, agentwire.Target) (agentwire.Status, error) {
 		return agentwire.Status{}, errors.New("endpoint unavailable")
 	})
 	if err == nil || !strings.Contains(err.Error(), "endpoint unavailable") {
@@ -119,5 +122,117 @@ func TestNativeHealthAllowsAbsentAndConditionallyDisabledAgents(t *testing.T) {
 	status.Identity.StartTicks = "199"
 	if err := checkAgentStatus(root, agent, status); err == nil {
 		t.Fatal("Stale disabled identity accepted")
+	}
+}
+
+func TestInstallationReadinessAfterHookErrorsAndRestarts(t *testing.T) {
+	path, root, config, snapshot, _ := nativeHealthFixture(t)
+	publisher := statusPublisher{path: path, publicPath: filepath.Join(root, "hook-status.v1")}
+	publish := func(second int64, wantReady bool) {
+		t.Helper()
+		snapshot.UpdatedUptime = second
+		testFile(t, filepath.Join(root, "uptime"), fmt.Sprintf("%d.00 0.00", second), 0600)
+		if err := publisher.publish(context.Background(), snapshot); err != nil {
+			t.Fatal(err)
+		}
+		err := checkNativeHooks(path, root, config)
+		if (err == nil) != wantReady {
+			t.Fatalf("second %d: want ready=%t, got %v", second, wantReady, err)
+		}
+	}
+	changeAgent := func(state string, identity processIdentity) {
+		snapshot.Agents = maps.Clone(snapshot.Agents)
+		agent := snapshot.Agents["acc"]
+		agent.State, agent.Identity, agent.Reason = state, identity, "previous attach attempt failed"
+		snapshot.Agents["acc"] = agent
+	}
+	identity := snapshot.Agents["acc"].Identity
+	changeAgent("failed", identity)
+	publish(100, false)
+	publish(109, false)
+	changeAgent("injecting", identity)
+	publish(110, true)
+
+	fakeProcess(t, root, 20, config.Agents[0].Target, "300")
+	if err := checkNativeHooks(path, root, config); err == nil {
+		t.Fatal("accepted recycled agent PID")
+	}
+	changeAgent("failed", processIdentity{20, "300"})
+	publish(111, false)
+	publish(120, false)
+	publish(121, true)
+
+	fakeProcess(t, root, 10, "/data/local/bin/voyahtune-new/voyahtune-loader", "400")
+	if err := checkNativeHooks(path, root, config); err == nil {
+		t.Fatal("accepted recycled loader PID")
+	}
+	snapshot.Loader.StartTicks = "400"
+	publish(122, false)
+	publish(132, true)
+	publish(160, false)
+	for restart := 1; restart <= 3; restart++ {
+		second := int64(160 + restart*8)
+		previousPID := snapshot.Agents["acc"].Identity.PID
+		if err := os.Remove(filepath.Join(root, fmt.Sprint(previousPID), "cmdline")); err != nil {
+			t.Fatal(err)
+		}
+		identity := processIdentity{PID: 30 + restart, StartTicks: fmt.Sprint(second * 100)}
+		fakeProcess(t, root, identity.PID, config.Agents[0].Target, identity.StartTicks)
+		changeAgent("active", identity)
+		publish(second, false)
+	}
+	publish(194, true)
+}
+
+func TestInstallationReadinessChecksWaitingTargets(t *testing.T) {
+	path, root, config, snapshot, _ := nativeHealthFixture(t)
+	snapshot.StableSinceUptime = 99
+	target := nativeAgentConfig{ID: "extra", Target: "com.example.extra"}
+	config.Agents = append(config.Agents, target)
+	check := func(wantReady bool) {
+		t.Helper()
+		if err := writeAtomic(path, snapshot); err != nil {
+			t.Fatal(err)
+		}
+		if err := checkNativeHooks(path, root, config); (err == nil) != wantReady {
+			t.Fatalf("want ready=%t, got %v", wantReady, err)
+		}
+	}
+	check(false)
+	snapshot.Agents[target.ID] = agentStatus{State: "waiting", Target: target.Target}
+	check(true)
+	fakeProcess(t, root, 30, target.Target, "300")
+	check(false)
+	snapshot.Agents[target.ID] = agentStatus{State: "active", Target: target.Target, Identity: processIdentity{30, "300"}}
+	check(true)
+	fakeProcess(t, root, 30, "com.example.unrelated", "301")
+	check(false)
+}
+
+func TestInstallationReadinessRecognizesNavigationAudioProcesses(t *testing.T) {
+	path, root, config, snapshot, _ := nativeHealthFixture(t)
+	snapshot.StableSinceUptime = 99
+	name := "com.example.maps"
+	fakeProcess(t, root, 30, name+":audio", "300")
+	agents := navigationAudioProcesses(root, navigationAudioAgents(name))
+	for _, agent := range agents {
+		identity, err := findProcess(root, agent.Target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		snapshot.Agents[agent.ID] = agentStatus{Target: agent.Target, Identity: identity, State: "waiting"}
+	}
+	if err := writeAtomic(path, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkNativeHooks(path, root, config); err != nil {
+		t.Fatal(err)
+	}
+	snapshot.Agents["unknown"] = agentStatus{Target: name, State: "waiting"}
+	if err := writeAtomic(path, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkNativeHooks(path, root, config); err == nil {
+		t.Fatal("accepted unknown agent")
 	}
 }
