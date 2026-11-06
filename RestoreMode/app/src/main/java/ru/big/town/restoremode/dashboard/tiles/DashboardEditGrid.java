@@ -60,6 +60,9 @@ public final class DashboardEditGrid extends GridLayout {
         WINDOW_CONTROL
     }
 
+    private static final float SNAP_RADIUS_CELLS = 0.125f;
+    private static final float ATTRACTION_RADIUS_CELLS = 0.25f;
+
     private final Map<View, Item> items = new HashMap<>();
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path corner = new Path();
@@ -288,6 +291,8 @@ public final class DashboardEditGrid extends GridLayout {
         columns = Math.max(sizeLimits.left, Math.min(sizeLimits.right, columns));
         rows = Math.max(sizeLimits.top, Math.min(sizeLimits.bottom, rows));
         preview = nearestSize(item.sizes, columns, rows, preview);
+        columns = snapToGrid(columns, preview.getWidth());
+        rows = snapToGrid(rows, preview.getHeight());
         previewWidth = original.width() + Math.round((columns - item.columns) * columnPitch);
         previewHeight = original.height() + Math.round((rows - item.rows) * rowPitch);
         layoutPressed(previewWidth, previewHeight);
@@ -301,6 +306,18 @@ public final class DashboardEditGrid extends GridLayout {
         if (preview != null) {
             layoutPressed(previewWidth, previewHeight);
         }
+    }
+
+    private static float snapToGrid(float span, int target) {
+        float distance = Math.abs(span - target);
+        if (distance <= SNAP_RADIUS_CELLS) return target;
+        if (distance >= ATTRACTION_RADIUS_CELLS) return span;
+
+        // Fade the attraction so crossing the snap radius never jumps the handle.
+        float progress =
+                (distance - SNAP_RADIUS_CELLS) / (ATTRACTION_RADIUS_CELLS - SNAP_RADIUS_CELLS);
+        float weight = progress * progress * (3f - 2f * progress);
+        return target + (span - target) * weight;
     }
 
     static Size nearestSize(Sizes sizes, float columns, float rows, Size current) {

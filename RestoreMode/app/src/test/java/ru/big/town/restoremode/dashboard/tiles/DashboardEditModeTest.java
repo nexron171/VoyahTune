@@ -87,6 +87,17 @@ public class DashboardEditModeTest {
             assertEquals(initialWidth + dragDistance, trip.getWidth());
             touch(grid, MotionEvent.ACTION_MOVE, x + step, y);
             int heldWidth = trip.getWidth();
+            touch(grid, MotionEvent.ACTION_MOVE, x + step * 0.91f, y);
+            assertEquals("Snap when approaching the next column", heldWidth, trip.getWidth());
+            touch(grid, MotionEvent.ACTION_MOVE, x + step * 1.08f, y);
+            assertEquals("Keep the same column just beyond its edge", heldWidth, trip.getWidth());
+            float rowStep = (trip.getHeight() + 8) / 3f;
+            touch(grid, MotionEvent.ACTION_MOVE, x + step, y + rowStep);
+            int snappedHeight = trip.getHeight();
+            touch(grid, MotionEvent.ACTION_MOVE, x + step * 0.94f, y + rowStep * 0.92f);
+            assertEquals(heldWidth, trip.getWidth());
+            assertEquals(snappedHeight, trip.getHeight());
+            touch(grid, MotionEvent.ACTION_MOVE, x + step * 0.92f, y);
             grid.requestLayout();
             layout(grid);
             shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(900));
@@ -101,6 +112,16 @@ public class DashboardEditModeTest {
                     new int[] {2, 3}, TileSizeStore.dimensions(prefs, VehicleWidgets.TRIP, 2, 3));
             touch(grid, MotionEvent.ACTION_CANCEL, x + step, y);
             assertTrue(trip.getWidth() < 2 * step);
+            // The trip widget only supports two rows at wider spans.
+            int initialHeight = trip.getHeight();
+            int towardsTwoRows = Math.round(rowStep * 0.92f);
+            touch(grid, MotionEvent.ACTION_DOWN, x, y);
+            touch(grid, MotionEvent.ACTION_MOVE, x, y - towardsTwoRows);
+            assertEquals(initialHeight - towardsTwoRows, trip.getHeight());
+            touch(grid, MotionEvent.ACTION_UP, x, y - towardsTwoRows);
+            assertEquals(initialHeight, trip.getHeight());
+            assertArrayEquals(
+                    new int[] {2, 3}, TileSizeStore.dimensions(prefs, VehicleWidgets.TRIP, 2, 3));
             touch(grid, MotionEvent.ACTION_DOWN, x, y);
             touch(grid, MotionEvent.ACTION_UP, x + step, y);
             assertArrayEquals(
