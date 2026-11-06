@@ -39,11 +39,14 @@ public class FuelFlapWidgetTest {
             activity.setTheme(R.style.Theme_RestoreMode);
             controller.setup().visible();
             int[] requests = {0};
-            FuelFlapWidgetView card = new FuelFlapWidgetView(activity, () -> requests[0]++);
+            FuelFlapWidgetView card =
+                    new FuelFlapWidgetView(
+                            activity, () -> requests[0]++);
             activity.setContentView(card);
             card.update(state(true, 26));
+            assertEquals("Открыть лючок", card.getTooltipText());
 
-            assertEquals("Можно заправить ≈ 26 л", ((TextView) card.getChildAt(1)).getText());
+            assertTrue(card.getContentDescription().toString().contains("Можно заправить ≈ 26 л"));
             card.performClick();
             AlertDialog dialog = (AlertDialog) ShadowDialog.getLatestDialog();
             assertTrue(dialog.isShowing());
@@ -54,7 +57,7 @@ public class FuelFlapWidgetTest {
             shadowOf(Looper.getMainLooper()).idle();
             assertEquals(1, requests[0]);
             card.update(state(true, 0));
-            assertEquals("Можно заправить ≈ 0 л", ((TextView) card.getChildAt(1)).getText());
+            assertTrue(card.getContentDescription().toString().contains("Можно заправить ≈ 0 л"));
         }
     }
 
@@ -65,7 +68,9 @@ public class FuelFlapWidgetTest {
             activity.setTheme(R.style.Theme_RestoreMode);
             controller.setup().visible();
             int[] requests = {0};
-            FuelFlapWidgetView card = new FuelFlapWidgetView(activity, () -> requests[0]++);
+            FuelFlapWidgetView card =
+                    new FuelFlapWidgetView(
+                            activity, () -> requests[0]++);
             activity.setContentView(card);
             card.update(state(true, 26));
             card.performClick();
@@ -89,20 +94,43 @@ public class FuelFlapWidgetTest {
     @Test
     public void missingOrInvalidFuelNeverAppearsAsAFullTank() {
         FuelFlapWidgetView card =
-                new FuelFlapWidgetView(RuntimeEnvironment.getApplication(), () -> {});
+                new FuelFlapWidgetView(
+                        RuntimeEnvironment.getApplication(),
+                        () -> {});
         for (int liters : new int[] {-1, 201}) {
             Bundle state = state(false, liters);
             state.putString(FuelFlapWidgetProtocol.MESSAGE, "Переведите селектор в P");
             card.update(state);
-            assertEquals("Нет данных о топливе", ((TextView) card.getChildAt(1)).getText());
-            assertEquals("Переведите селектор в P", ((TextView) card.getChildAt(2)).getText());
+            assertTrue(card.getContentDescription().toString().contains("Нет данных о топливе"));
+            assertEquals("Переведите в P", card.getTooltipText());
         }
+    }
+
+    @Test
+    public void remainingVolumeUsesVehicleCapacityAndClearsOnLegacyOrInvalidReading() {
+        FuelFlapWidgetView card =
+                new FuelFlapWidgetView(
+                        RuntimeEnvironment.getApplication(),
+                        () -> {});
+        Bundle reading = state(true, 39);
+        reading.putInt(FuelFlapWidgetProtocol.CAPACITY_LITERS, 52);
+        reading.putFloat(FuelFlapWidgetProtocol.REMAINING_PERCENT, 25f);
+        card.update(reading);
+        assertTrue(card.getContentDescription().toString().contains("В баке ≈ 13 л"));
+        reading.putFloat(FuelFlapWidgetProtocol.REMAINING_PERCENT, Float.NaN);
+        card.update(reading);
+        assertFalse(card.getContentDescription().toString().contains("В баке"));
+        card.update(state(true, 39));
+        assertTrue(card.getContentDescription().toString().contains("Можно заправить ≈ 39 л"));
+        assertFalse(card.getContentDescription().toString().contains("В баке"));
     }
 
     @Test
     public void longPressRemainsAvailableWithoutVehicleConnection() {
         FuelFlapWidgetView card =
-                new FuelFlapWidgetView(RuntimeEnvironment.getApplication(), () -> {});
+                new FuelFlapWidgetView(
+                        RuntimeEnvironment.getApplication(),
+                        () -> {});
         boolean[] moved = {false};
         card.setOnLongClickListener(
                 view -> {
@@ -121,10 +149,12 @@ public class FuelFlapWidgetTest {
             activity.setTheme(R.style.Theme_RestoreMode);
             controller.setup().visible();
             int[] requests = {0};
-            FuelFlapWidgetView card = new FuelFlapWidgetView(activity, () -> requests[0]++);
+            FuelFlapWidgetView card =
+                    new FuelFlapWidgetView(
+                            activity, () -> requests[0]++);
             activity.setContentView(card);
             card.update(state(true, -1));
-            assertEquals("Нет данных о топливе", ((TextView) card.getChildAt(1)).getText());
+            assertTrue(card.getContentDescription().toString().contains("Нет данных о топливе"));
             card.performClick();
             AlertDialog dialog = (AlertDialog) ShadowDialog.getLatestDialog();
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick();

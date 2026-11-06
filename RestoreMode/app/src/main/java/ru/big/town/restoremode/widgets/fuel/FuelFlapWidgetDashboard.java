@@ -37,7 +37,7 @@ public final class FuelFlapWidgetDashboard {
                                 return;
                             if (send(FuelFlapWidgetProtocol.OPEN, 0)) {
                                 state.putBoolean(FuelFlapWidgetProtocol.CAN_OPEN, false);
-                                state.putString(FuelFlapWidgetProtocol.MESSAGE, "Отправка…");
+                                state.putString(FuelFlapWidgetProtocol.MESSAGE, "Открываем лючок…");
                                 view.update(state);
                                 handler.removeCallbacks(unavailable);
                                 handler.postDelayed(unavailable, 5000);

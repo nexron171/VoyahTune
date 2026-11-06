@@ -81,6 +81,7 @@ public class FuelFlapWidgetDashboardTest {
             AlertDialog dialog = (AlertDialog) ShadowDialog.getLatestDialog();
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
             shadowOf(Looper.getMainLooper()).idle();
+            assertEquals("Открываем лючок…", card.getTooltipText());
             assertEquals(2, requests.size());
             assertEquals(FuelFlapWidgetProtocol.OPEN, requests.get(1).what);
             card.performClick();
