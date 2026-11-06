@@ -175,28 +175,20 @@ public class EnergyWidgetTest {
     }
 
     @Test
-    public void narrowTripSupportsFourAndFiveRows() {
+    public void compactTripDefaultsToSmallestSizeAndRetainsExplicitSelection() {
         Map<String, Object> saved = new HashMap<>();
-        SharedPreferences prefs = prefs(saved);
-        for (int columns : new int[] {3}) {
-            TileSizeStore.setWidth(prefs, "energyTripWidget", columns);
-            assertArrayEquals(
-                    new int[] {columns, 4},
-                    TileSizeStore.dimensions(prefs(saved), "energyTripWidget", 8, 2));
-            TileSizeStore.setHeight(prefs, "energyTripWidget", 5);
-            TileSizeStore.setWidth(prefs, "energyTripWidget", columns == 2 ? 3 : 2);
-            assertArrayEquals(
-                    new int[] {3, 5},
-                    TileSizeStore.dimensions(prefs(saved), "energyTripWidget", 8, 2));
-            TileSizeStore.setHeight(prefs, "energyTripWidget", 3);
-            assertEquals(4, TileSizeStore.height(prefs(saved), "energyTripWidget", 2));
-            TileSizeStore.setHeight(prefs, "energyTripWidget", 8);
-            assertEquals(5, TileSizeStore.height(prefs(saved), "energyTripWidget", 2));
-            TileSizeStore.setWidth(prefs, "energyTripWidget", 6);
-            assertArrayEquals(
-                    new int[] {6, 5},
-                    TileSizeStore.dimensions(prefs(saved), "energyTripWidget", 8, 2));
-        }
+        SharedPreferences preferences = prefs(saved);
+        String id = VehicleWidgets.TRIP;
+        int[] defaults = VehicleWidgets.size(id);
+        assertArrayEquals(
+                new int[] {2, 3},
+                TileSizeStore.dimensions(preferences, id, defaults[0], defaults[1]));
+        TileSizeStore.setWidth(preferences, id, 2);
+        TileSizeStore.setHeight(preferences, id, 5);
+        TileSizeStore.setWidth(preferences, id, 3);
+        assertArrayEquals(new int[] {3, 5}, TileSizeStore.dimensions(prefs(saved), id, 2, 3));
+        TileSizeStore.setHeight(preferences, id, 2);
+        assertEquals(3, TileSizeStore.height(prefs(saved), id, 3));
     }
 
     @Test
@@ -205,10 +197,10 @@ public class EnergyWidgetTest {
         saved.put("tileWidth_energyTripWidget", 2);
         saved.put("tileHeight_energyTripWidget", 2);
         assertArrayEquals(
-                new int[] {3, 4}, TileSizeStore.dimensions(prefs(saved), "energyTripWidget", 8, 2));
+                new int[] {2, 3}, TileSizeStore.dimensions(prefs(saved), "energyTripWidget", 8, 2));
         saved.put("tileHeight_energyTripWidget", 5);
         assertArrayEquals(
-                new int[] {3, 5}, TileSizeStore.dimensions(prefs(saved), "energyTripWidget", 8, 2));
+                new int[] {2, 5}, TileSizeStore.dimensions(prefs(saved), "energyTripWidget", 8, 2));
         saved.put("tileWidth_energyTripWidget", 3);
         assertArrayEquals(
                 new int[] {3, 5}, TileSizeStore.dimensions(prefs(saved), "energyTripWidget", 8, 2));

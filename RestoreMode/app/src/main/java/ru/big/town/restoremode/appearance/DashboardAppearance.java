@@ -10,6 +10,7 @@ import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewTreeObserver;
 
 import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.widgets.brightness.BrightnessWidgetView;
@@ -29,7 +30,12 @@ public final class DashboardAppearance implements AutoCloseable {
     private final WallpaperDrawable wallpaperLayer = new WallpaperDrawable(null);
     private final WallpaperDrawable blurredLayer = new WallpaperDrawable(null);
     private final Rect visibleTileBounds = new Rect();
-    private final java.util.WeakHashMap<View, Boolean> styledTiles = new java.util.WeakHashMap<>();
+    private final java.util.WeakHashMap<View, Rect> styledTiles = new java.util.WeakHashMap<>();
+    private final int[] tilePosition = new int[2];
+    private final int[] wallpaperPosition = new int[2];
+    private final ViewTreeObserver.OnPreDrawListener trackWallpaperSamples =
+            this::refreshMovedTiles;
+    private boolean trackingSamples;
     private final ValueAnimator crossfade = ValueAnimator.ofFloat(0f, 1f);
     private final SharedPreferences.OnSharedPreferenceChangeListener wallpaperListener;
     private ViewGroup tiles;
@@ -48,46 +54,59 @@ public final class DashboardAppearance implements AutoCloseable {
         settings = AppearanceSettings.load(preferences);
         wallpaperView.setBackground(wallpaperLayer);
         crossfade.setDuration(400);
-        crossfade.addUpdateListener(animation -> {
-            float progress = (float) animation.getAnimatedValue();
-            wallpaperLayer.setProgress(progress);
-            blurredLayer.setProgress(progress);
-            invalidateTiles();
-        });
-        wallpaperListener = (saved, key) -> {
-            if (AppearanceSettings.WALLPAPER.equals(key)
-                    || AppearanceSettings.TRANSPARENCY_ENABLED.equals(key)
-                    || AppearanceSettings.TRANSPARENCY_PERCENT.equals(key)
-                    || AppearanceSettings.BACKGROUND_COLOR.equals(key)
-                    || AppearanceSettings.BLUR_ENABLED.equals(key)
-                    || AppearanceSettings.BLUR_AMOUNT.equals(key)
-                    || AppearanceSettings.TILE_BORDER.equals(key)
-                    || AppearanceSettings.TILE_CORNER_RADIUS.equals(key)) {
-                wallpaperView.post(() -> {
-                    if (!closed && tiles != null) {
-                        apply(tiles);
-                    }
+        crossfade.addUpdateListener(
+                animation -> {
+                    float progress = (float) animation.getAnimatedValue();
+                    wallpaperLayer.setProgress(progress);
+                    blurredLayer.setProgress(progress);
+                    invalidateTiles();
                 });
-            }
-        };
+        wallpaperListener =
+                (saved, key) -> {
+                    if (AppearanceSettings.WALLPAPER.equals(key)
+                            || AppearanceSettings.TRANSPARENCY_ENABLED.equals(key)
+                            || AppearanceSettings.TRANSPARENCY_PERCENT.equals(key)
+                            || AppearanceSettings.BACKGROUND_COLOR.equals(key)
+                            || AppearanceSettings.BLUR_ENABLED.equals(key)
+                            || AppearanceSettings.BLUR_AMOUNT.equals(key)
+                            || AppearanceSettings.TILE_BORDER.equals(key)
+                            || AppearanceSettings.TILE_CORNER_RADIUS.equals(key)) {
+                        wallpaperView.post(
+                                () -> {
+                                    if (!closed && tiles != null) {
+                                        apply(tiles);
+                                    }
+                                });
+                    }
+                };
         preferences.registerOnSharedPreferenceChangeListener(wallpaperListener);
     }
 
     public void apply(ViewGroup tiles) {
         AppearanceSettings updated = AppearanceSettings.load(preferences);
-        boolean restyle = this.tiles != tiles
-                || settings.backgroundColor != updated.backgroundColor
-                || settings.transparencyEnabled != updated.transparencyEnabled
-                || settings.transparencyPercent != updated.transparencyPercent
-                || settings.blurEnabled != updated.blurEnabled
-                || settings.blurAmount != updated.blurAmount
-                || settings.borderDp != updated.borderDp
-                || settings.cornerRadiusDp != updated.cornerRadiusDp;
+        boolean restyle =
+                this.tiles != tiles
+                        || settings.backgroundColor != updated.backgroundColor
+                        || settings.transparencyEnabled != updated.transparencyEnabled
+                        || settings.transparencyPercent != updated.transparencyPercent
+                        || settings.blurEnabled != updated.blurEnabled
+                        || settings.blurAmount != updated.blurAmount
+                        || settings.borderDp != updated.borderDp
+                        || settings.cornerRadiusDp != updated.cornerRadiusDp;
         this.tiles = tiles;
         settings = updated;
         int blurAmount = settings.blursWallpaper() ? settings.blurAmount : 0;
-        if (!java.util.Objects.equals(loadedWallpaper, settings.wallpaper) || loadedBlur != blurAmount) {
+        if (!java.util.Objects.equals(loadedWallpaper, settings.wallpaper)
+                || loadedBlur != blurAmount) {
             loadWallpaper(settings.wallpaper, blurAmount);
+        }
+        if (trackingSamples != settings.blursWallpaper()) {
+            trackingSamples = settings.blursWallpaper();
+            if (trackingSamples) {
+                wallpaperView.getViewTreeObserver().addOnPreDrawListener(trackWallpaperSamples);
+            } else {
+                wallpaperView.getViewTreeObserver().removeOnPreDrawListener(trackWallpaperSamples);
+            }
         }
         styleTiles(restyle);
         if (!restyle) {
@@ -111,30 +130,42 @@ public final class DashboardAppearance implements AutoCloseable {
             showWallpaper(selected, null, null);
             return;
         }
-        loading = worker.submit(() -> {
-            Bitmap image = previous != null ? previous
-                    : WallpaperStore.decode(wallpaperView.getContext(), selected, null);
-            if (image == null) {
-                wallpaperView.post(() -> {
-                    if (!closed && generation == request) {
-                        loadedWallpaper = null;
-                        android.widget.Toast.makeText(wallpaperView.getContext(),
-                                "Не удалось загрузить обои", android.widget.Toast.LENGTH_SHORT).show();
-                    }
-                });
-                return;
-            }
-            Bitmap blurred = blurAmount > 0 ? WallpaperBlur.create(image, blurAmount) : null;
-            wallpaperView.post(() -> {
-                if (closed || generation != request) {
-                    return;
-                }
-                showWallpaper(selected, image, blurred);
-            });
-        });
+        loading =
+                worker.submit(
+                        () -> {
+                            Bitmap image =
+                                    previous != null
+                                            ? previous
+                                            : WallpaperStore.decode(
+                                                    wallpaperView.getContext(), selected, null);
+                            if (image == null) {
+                                wallpaperView.post(
+                                        () -> {
+                                            if (!closed && generation == request) {
+                                                loadedWallpaper = null;
+                                                android.widget.Toast.makeText(
+                                                                wallpaperView.getContext(),
+                                                                "Не удалось загрузить обои",
+                                                                android.widget.Toast.LENGTH_SHORT)
+                                                        .show();
+                                            }
+                                        });
+                                return;
+                            }
+                            Bitmap blurred =
+                                    blurAmount > 0 ? WallpaperBlur.create(image, blurAmount) : null;
+                            wallpaperView.post(
+                                    () -> {
+                                        if (closed || generation != request) {
+                                            return;
+                                        }
+                                        showWallpaper(selected, image, blurred);
+                                    });
+                        });
     }
 
-    private void showWallpaper(AppearanceSettings.Wallpaper selected, Bitmap image, Bitmap blurred) {
+    private void showWallpaper(
+            AppearanceSettings.Wallpaper selected, Bitmap image, Bitmap blurred) {
         wallpaper = image;
         boolean animate = displayedWallpaper != null && !displayedWallpaper.equals(selected);
         displayedWallpaper = selected;
@@ -155,11 +186,38 @@ public final class DashboardAppearance implements AutoCloseable {
         invalidateTiles();
     }
 
+    private boolean refreshMovedTiles() {
+        wallpaperView.getLocationOnScreen(wallpaperPosition);
+        for (int index = 0; index < tiles.getChildCount(); index++) {
+            View tile = tiles.getChildAt(index);
+            Rect sample = styledTiles.get(tile);
+            if (sample == null || tile.getVisibility() != View.VISIBLE || tile.getAlpha() == 0f) {
+                continue;
+            }
+            tile.getLocationOnScreen(tilePosition);
+            int left = tilePosition[0] - wallpaperPosition[0];
+            int top = tilePosition[1] - wallpaperPosition[1];
+            int right = left + Math.round(tile.getWidth() * tile.getScaleX());
+            int bottom = top + Math.round(tile.getHeight() * tile.getScaleY());
+            if (sample.left != left
+                    || sample.top != top
+                    || sample.right != right
+                    || sample.bottom != bottom) {
+                sample.set(left, top, right, bottom);
+                if (tile.getGlobalVisibleRect(visibleTileBounds)) {
+                    tile.getBackground().invalidateSelf();
+                }
+            }
+        }
+        return true;
+    }
+
     private void invalidateTiles() {
         if (tiles != null) {
             for (int index = 0; index < tiles.getChildCount(); index++) {
                 View tile = tiles.getChildAt(index);
-                if (tile.isShown() && tile.getAlpha() > 0f
+                if (tile.isShown()
+                        && tile.getAlpha() > 0f
                         && tile.getGlobalVisibleRect(visibleTileBounds)) {
                     tile.invalidate();
                 }
@@ -203,29 +261,41 @@ public final class DashboardAppearance implements AutoCloseable {
         int bottom = tile.getPaddingBottom();
         GradientDrawable mask = new GradientDrawable();
         mask.setColor(0xffffffff);
-        mask.setCornerRadius(settings.cornerRadiusDp * tile.getResources().getDisplayMetrics().density);
-        tile.setBackground(new RippleDrawable(ColorStateList.valueOf(0x40ffffff),
-                new WidgetSurfaceDrawable(tile, wallpaperView, settings, blurredLayer), mask));
+        mask.setCornerRadius(
+                settings.cornerRadiusDp * tile.getResources().getDisplayMetrics().density);
+        tile.setBackground(
+                new RippleDrawable(
+                        ColorStateList.valueOf(0x40ffffff),
+                        new WidgetSurfaceDrawable(tile, wallpaperView, settings, blurredLayer),
+                        mask));
         tile.setPadding(left, top, right, bottom);
-        styledTiles.put(tile, Boolean.TRUE);
+        styledTiles.put(tile, new Rect());
     }
 
     public Runnable stylePopup(View popup) {
         AppearanceSettings popupSettings = AppearanceSettings.load(preferences);
         View scene = wallpaperView.getRootView();
         Bitmap blurred = null;
-        if (popupSettings.transparencyEnabled && popupSettings.blurEnabled
-                && popupSettings.blurAmount > 0 && scene.getWidth() > 0 && scene.getHeight() > 0) {
+        if (popupSettings.transparencyEnabled
+                && popupSettings.blurEnabled
+                && popupSettings.blurAmount > 0
+                && scene.getWidth() > 0
+                && scene.getHeight() > 0) {
             // Capture before attaching the popup so its own content stays sharp.
-            Bitmap snapshot = Bitmap.createBitmap(
-                    scene.getWidth(), scene.getHeight(), Bitmap.Config.ARGB_8888);
+            Bitmap snapshot =
+                    Bitmap.createBitmap(
+                            scene.getWidth(), scene.getHeight(), Bitmap.Config.ARGB_8888);
             scene.draw(new Canvas(snapshot));
             blurred = WallpaperBlur.create(snapshot, popupSettings.blurAmount);
             snapshot.recycle();
         }
         Bitmap backdrop = blurred;
-        popup.setBackground(new WidgetSurfaceDrawable(
-                popup, scene, popupSettings, backdrop == null ? null : new WallpaperDrawable(backdrop)));
+        popup.setBackground(
+                new WidgetSurfaceDrawable(
+                        popup,
+                        scene,
+                        popupSettings,
+                        backdrop == null ? null : new WallpaperDrawable(backdrop)));
         popup.setClipToOutline(true);
         return () -> {
             popup.setBackground(null);
@@ -257,6 +327,7 @@ public final class DashboardAppearance implements AutoCloseable {
     @Override
     public void close() {
         closed = true;
+        wallpaperView.getViewTreeObserver().removeOnPreDrawListener(trackWallpaperSamples);
         preferences.unregisterOnSharedPreferenceChangeListener(wallpaperListener);
         crossfade.cancel();
         ++generation;

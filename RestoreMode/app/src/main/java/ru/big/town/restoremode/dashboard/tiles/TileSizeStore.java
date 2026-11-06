@@ -34,16 +34,25 @@ public class TileSizeStore {
     /** Размер плитки {ширина, высота}: пользовательское значение либо дефолт. */
     public static int[] dimensions(
             SharedPreferences prefs, String widgetId, int defaultWidth, int defaultHeight) {
-        return new int[] {
-            width(prefs, widgetId, defaultWidth), height(prefs, widgetId, defaultHeight)
-        };
+        int columns = width(prefs, widgetId, defaultWidth);
+        int rows =
+                prefs == null || widgetId == null
+                        ? defaultHeight
+                        : clampHeight(
+                                widgetId,
+                                columns,
+                                prefs.getInt(HEIGHT_KEY_PREFIX + widgetId, defaultHeight));
+        return new int[] {columns, rows};
     }
 
     public static int width(SharedPreferences prefs, String widgetId, int defaultValue) {
         if (prefs == null || widgetId == null) {
             return defaultValue;
         }
-        int value = prefs.getInt(WIDTH_KEY_PREFIX + widgetId, defaultValue);
+        return clampWidth(widgetId, prefs.getInt(WIDTH_KEY_PREFIX + widgetId, defaultValue));
+    }
+
+    private static int clampWidth(String widgetId, int value) {
         if (ClockWidgetView.ID.equals(widgetId)) {
             return Math.max(1, Math.min(5, value));
         }
@@ -68,28 +77,70 @@ public class TileSizeStore {
         if (prefs == null || widgetId == null) {
             return defaultValue;
         }
+        int defaultColumns =
+                MediaWidgetLayout.isWidget(widgetId)
+                        ? MediaWidgetLayout.DEFAULT_WIDTH
+                        : HeadlightWidgetLayout.ID.equals(widgetId)
+                                ? HeadlightWidgetLayout.DEFAULT_WIDTH
+                                : 8;
+        return clampHeight(
+                widgetId,
+                width(prefs, widgetId, defaultColumns),
+                prefs.getInt(HEIGHT_KEY_PREFIX + widgetId, defaultValue));
+    }
+
+    private static int clampHeight(String widgetId, int columns, int value) {
         if (RadioWidgetLayout.ID.equals(widgetId)) {
-            return RadioWidgetLayout.height(
-                    prefs.getInt(HEIGHT_KEY_PREFIX + widgetId, defaultValue));
+            return RadioWidgetLayout.height(value);
         }
         if (HeadlightWidgetLayout.ID.equals(widgetId)) {
-            return HeadlightWidgetLayout.size(
-                            width(prefs, widgetId, HeadlightWidgetLayout.DEFAULT_WIDTH),
-                            prefs.getInt(
-                                    HEIGHT_KEY_PREFIX + widgetId,
-                                    HeadlightWidgetLayout.DEFAULT_HEIGHT))
-                    .height;
+            return HeadlightWidgetLayout.size(columns, value).height;
         }
         if (SystemWidgetLayout.isWidget(widgetId)) {
             return 1;
         }
-        int value = prefs.getInt(HEIGHT_KEY_PREFIX + widgetId, defaultValue);
         if (MediaWidgetLayout.isWidget(widgetId)) {
-            return MediaWidgetLayout.height(width(prefs, widgetId, defaultValue), value);
+            return MediaWidgetLayout.height(columns, value);
         }
         return EnergyWidgetLayout.isWidget(widgetId)
-                ? EnergyWidgetLayout.height(widgetId, width(prefs, widgetId, 8), value)
+                ? EnergyWidgetLayout.height(widgetId, columns, value)
                 : AppWidgetStore.clampHeight(value);
+    }
+
+    public static boolean isResizable(String widgetId) {
+        return EnergyWidgetLayout.isWidget(widgetId)
+                || MediaWidgetLayout.isWidget(widgetId)
+                || ClockWidgetView.ID.equals(widgetId)
+                || RadioWidgetLayout.ID.equals(widgetId)
+                || HeadlightWidgetLayout.ID.equals(widgetId)
+                || SystemWidgetLayout.CPU.equals(widgetId)
+                || SystemWidgetLayout.RAM.equals(widgetId)
+                || SUSPENSION_WIDGET_ID.equals(widgetId)
+                || LAUNCH_APPS_WIDGET_ID.equals(widgetId);
+    }
+
+    public static boolean supportsSize(String widgetId, int columns, int rows) {
+        return columns == clampWidth(widgetId, columns)
+                && rows == clampHeight(widgetId, columns, rows);
+    }
+
+    public static void clear(SharedPreferences preferences, String widgetId) {
+        preferences
+                .edit()
+                .remove(WIDTH_KEY_PREFIX + widgetId)
+                .remove(HEIGHT_KEY_PREFIX + widgetId)
+                .apply();
+    }
+
+    public static void setSize(
+            SharedPreferences preferences, String widgetId, int columns, int rows) {
+        if (widgetId != null && supportsSize(widgetId, columns, rows)) {
+            preferences
+                    .edit()
+                    .putInt(WIDTH_KEY_PREFIX + widgetId, columns)
+                    .putInt(HEIGHT_KEY_PREFIX + widgetId, rows)
+                    .apply();
+        }
     }
 
     public static void setWidth(SharedPreferences prefs, String widgetId, int value) {
@@ -168,7 +219,10 @@ public class TileSizeStore {
                                 ? 1
                                 : MediaWidgetLayout.isWidget(widgetId)
                                         ? MediaWidgetLayout.height(
-                                                width(prefs, widgetId, MediaWidgetLayout.DEFAULT_WIDTH),
+                                                width(
+                                                        prefs,
+                                                        widgetId,
+                                                        MediaWidgetLayout.DEFAULT_WIDTH),
                                                 value)
                                         : EnergyWidgetLayout.isWidget(widgetId)
                                                 ? EnergyWidgetLayout.height(

@@ -25,8 +25,8 @@ import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.dashboard.DashboardProfile;
 import ru.big.town.restoremode.dashboard.tiles.TileOrderStore;
 import ru.big.town.restoremode.dashboard.tiles.TileScrollSnap;
-import ru.big.town.restoremode.dashboard.tiles.TileSizeStore;
 import ru.big.town.restoremode.integration.GlobalVars;
+import ru.big.town.restoremode.scenarios.ScenarioStore;
 import ru.big.town.restoremode.settings.core.SettingsHost;
 import ru.big.town.restoremode.settings.core.SettingsSection;
 import ru.big.town.restoremode.settings.core.SettingsSectionFragment;
@@ -37,7 +37,7 @@ import ru.big.town.restoremode.settings.ui.layout.SettingsPanels;
 import ru.big.town.restoremode.settings.ui.layout.SettingsWidgetCard;
 import ru.big.town.restoremode.settings.ui.list.SettingsList;
 import ru.big.town.restoremode.settings.ui.preview.SettingsIllustration;
-import ru.big.town.restoremode.settings.ui.preview.SettingsPreviewView;
+import ru.big.town.restoremode.settings.ui.preview.WidgetSizeGrid;
 import ru.big.town.restoremode.settings.ui.style.SettingsDesign;
 import ru.big.town.restoremode.widgets.apps.AppShortcutStore;
 import ru.big.town.restoremode.widgets.apps.AppWidgetStore;
@@ -46,15 +46,12 @@ import ru.big.town.restoremode.widgets.climate.CabinTemperatureWidgetLayout;
 import ru.big.town.restoremode.widgets.climate.RecirculationWidgetLayout;
 import ru.big.town.restoremode.widgets.clock.ClockWidgetView;
 import ru.big.town.restoremode.widgets.dials.DialWidgetStore;
-import ru.big.town.restoremode.widgets.energy.EnergyWidgetLayout;
 import ru.big.town.restoremode.widgets.energy.EnergyWidgetPreferences;
 import ru.big.town.restoremode.widgets.fuel.FuelFlapWidgetLayout;
 import ru.big.town.restoremode.widgets.headlights.HeadlightWidgetLayout;
 import ru.big.town.restoremode.widgets.links.LinkBrowserPicker;
 import ru.big.town.restoremode.widgets.links.LinkShortcutStore;
-import ru.big.town.restoremode.widgets.media.MediaWidgetLayout;
 import ru.big.town.restoremode.widgets.radio.RadioWidgetLayout;
-import ru.big.town.restoremode.widgets.system.SystemWidgetLayout;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -65,6 +62,30 @@ public class MainSettingsFragment extends SettingsSectionFragment {
     private SharedPreferences globalPreferences;
     private MainSettingsCategory category;
     private Parcelable menuScroll;
+
+    private final SharedPreferences.OnSharedPreferenceChangeListener orderChanged =
+            (prefs, key) -> {
+                if (TileOrderStore.ORDER_KEY.equals(key)) refreshDynamicTiles();
+            };
+
+    private void refreshDynamicTiles() {
+        if (category == MainSettingsCategory.APPLICATIONS
+                || category == MainSettingsCategory.CARPLAY
+                || category == MainSettingsCategory.LINKS) refreshSettingsRows();
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        preferences.registerOnSharedPreferenceChangeListener(orderChanged);
+        refreshDynamicTiles();
+    }
+
+    @Override
+    public void onPause() {
+        preferences.unregisterOnSharedPreferenceChangeListener(orderChanged);
+        super.onPause();
+    }
 
     @Override
     public void onCreate(Bundle state) {
@@ -211,130 +232,42 @@ public class MainSettingsFragment extends SettingsSectionFragment {
                 "showLaunchAppsWidget",
                 false,
                 R.id.launchAppsSizeRow);
-        bindTileSizeSpinners(
-                R.id.launchAppsSettingWidth,
-                R.id.launchAppsSettingHeight,
-                TileSizeStore.LAUNCH_APPS_WIDGET_ID,
-                TileSizeStore.LAUNCH_APPS_DEFAULT_WIDTH,
-                TileSizeStore.LAUNCH_APPS_DEFAULT_HEIGHT);
         bindShowSwitch(
                 R.id.switchShowSuspensionWidget,
                 "showSuspensionWidget",
                 false,
                 R.id.suspensionSizeRow);
-        bindTileSizeSpinners(
-                R.id.suspensionSettingWidth,
-                R.id.suspensionSettingHeight,
-                TileSizeStore.SUSPENSION_WIDGET_ID,
-                TileSizeStore.SUSPENSION_DEFAULT_WIDTH,
-                TileSizeStore.SUSPENSION_DEFAULT_HEIGHT);
         bindShowSwitch(
                 R.id.switchShowHeadlights,
                 HeadlightWidgetLayout.VISIBLE,
                 false,
                 R.id.headlightSizeRow);
-        bindHeadlightSize();
         bindShowSwitch(R.id.switchShowRecirculation, RecirculationWidgetLayout.VISIBLE, false);
         bindShowSwitch(R.id.switchShowFuelFlap, FuelFlapWidgetLayout.VISIBLE, false);
         bindShowSwitch(R.id.switchShowBrightness, BrightnessWidgetLayout.VISIBLE, false);
         bindShowSwitch(
                 R.id.switchShowCabinTemperature, CabinTemperatureWidgetLayout.VISIBLE, false);
         bindShowSwitch(R.id.switchShowRadio, RadioWidgetLayout.VISIBLE, false, R.id.radioSizeRow);
-        bindTileSizeSpinners(
-                R.id.radioSettingWidth, R.id.radioSettingHeight, RadioWidgetLayout.ID, 2, 2);
         bindShowSwitch(
                 R.id.switchShowClock, "show_" + ClockWidgetView.ID, false, R.id.ClockSizeRow);
-        bindTileSizeSpinners(
-                R.id.ClockSettingWidth, R.id.ClockSettingHeight, ClockWidgetView.ID, 1, 1);
         bindShowSwitch(R.id.switchShowCpu, "show_cpuWidget", false, R.id.CpuSizeRow);
-        bindTileSizeSpinners(
-                R.id.CpuSettingWidth, R.id.CpuSettingHeight, SystemWidgetLayout.CPU, 1, 1);
         bindShowSwitch(R.id.switchShowRam, "show_ramWidget", false, R.id.RamSizeRow);
-        bindTileSizeSpinners(
-                R.id.RamSettingWidth, R.id.RamSettingHeight, SystemWidgetLayout.RAM, 1, 1);
         bindShowSwitch(R.id.switchShowClearMemory, "show_clearMemoryWidget", false, 0);
         bindShowSwitch(R.id.switchShowMedia, "show_mediaWidget", false, R.id.MediaSizeRow);
-        bindTileSizeSpinners(
-                R.id.MediaSettingWidth,
-                R.id.MediaSettingHeight,
-                MediaWidgetLayout.MEDIA,
-                MediaWidgetLayout.DEFAULT_WIDTH,
-                MediaWidgetLayout.DEFAULT_HEIGHT);
         bindShowSwitch(R.id.switchShowEnergy, "show_energyWidget", false, R.id.EnergySizeRow);
-        bindTileSizeSpinners(
-                R.id.EnergySettingWidth, R.id.EnergySettingHeight, "energyWidget", 8, 4);
         bindShowSwitch(
                 R.id.switchShowEnergyConsumption,
                 "show_energyConsumptionWidget",
                 false,
                 R.id.EnergyConsumptionSizeRow);
-        bindTileSizeSpinners(
-                R.id.EnergyConsumptionSettingWidth,
-                R.id.EnergyConsumptionSettingHeight,
-                "energyConsumptionWidget",
-                2,
-                2);
         bindShowSwitch(
                 R.id.switchShowEnergyTrip, "show_energyTripWidget", false, R.id.EnergyTripSizeRow);
-        bindTileSizeSpinners(
-                R.id.EnergyTripSettingWidth,
-                R.id.EnergyTripSettingHeight,
-                "energyTripWidget",
-                8,
-                2);
         bindShowSwitch(
                 R.id.switchShowTirePressure,
                 "show_tirePressureWidget",
                 false,
                 R.id.TirePressureSizeRow);
-        bindTileSizeSpinners(
-                R.id.TirePressureSettingWidth,
-                R.id.TirePressureSettingHeight,
-                "tirePressureWidget",
-                2,
-                4);
         bindShowSwitch(R.id.switchShowOdometer, "show_odometerWidget", false, R.id.OdometerSizeRow);
-        bindTileSizeSpinners(
-                R.id.OdometerSettingWidth, R.id.OdometerSettingHeight, "odometerWidget", 4, 1);
-    }
-
-    private void bindHeadlightSize() {
-        Spinner size = settingView(R.id.headlightSettingSize);
-        if (size == null) {
-            return;
-        }
-        HeadlightWidgetLayout.Size[] sizes = HeadlightWidgetLayout.Size.values();
-        ArrayAdapter<HeadlightWidgetLayout.Size> adapter =
-                new ArrayAdapter<>(requireContext(), R.layout.settings_spinner_item, sizes);
-        adapter.setDropDownViewResource(R.layout.settings_spinner_dropdown);
-        size.setAdapter(adapter);
-        int[] dimensions =
-                TileSizeStore.dimensions(
-                        preferences,
-                        HeadlightWidgetLayout.ID,
-                        HeadlightWidgetLayout.DEFAULT_WIDTH,
-                        HeadlightWidgetLayout.DEFAULT_HEIGHT);
-        size.setSelection(HeadlightWidgetLayout.size(dimensions[0], dimensions[1]).ordinal());
-        size.setOnItemSelectedListener(
-                new AdapterView.OnItemSelectedListener() {
-                    @Override
-                    public void onItemSelected(
-                            AdapterView<?> parent, View view, int position, long id) {
-                        HeadlightWidgetLayout.Size selected = sizes[position];
-                        int[] current =
-                                TileSizeStore.dimensions(
-                                        preferences,
-                                        HeadlightWidgetLayout.ID,
-                                        HeadlightWidgetLayout.DEFAULT_WIDTH,
-                                        HeadlightWidgetLayout.DEFAULT_HEIGHT);
-                        if (current[0] != selected.width || current[1] != selected.height) {
-                            TileSizeStore.setHeadlightSize(preferences, selected);
-                        }
-                    }
-
-                    @Override
-                    public void onNothingSelected(AdapterView<?> parent) {}
-                });
     }
 
     private void bindEnergyCapacities() {
@@ -363,10 +296,39 @@ public class MainSettingsFragment extends SettingsSectionFragment {
                 });
     }
 
+    private void bindHiddenScenarios(Button restore) {
+        List<ScenarioStore.Scenario> hidden = ScenarioStore.load(globalPreferences);
+        hidden.removeIf(
+                scenario ->
+                        !scenario.enabled
+                                || !scenario.showTile
+                                || !TileOrderStore.isScenarioHidden(preferences, scenario.id));
+        restore.setVisibility(hidden.isEmpty() ? View.GONE : View.VISIBLE);
+        restore.setOnClickListener(
+                view -> {
+                    String[] labels = new String[hidden.size()];
+                    for (int index = 0; index < hidden.size(); index++) {
+                        labels[index] = hidden.get(index).name;
+                    }
+                    new android.app.AlertDialog.Builder(requireContext())
+                            .setTitle("Вернуть плитку сценария")
+                            .setItems(
+                                    labels,
+                                    (dialog, index) -> {
+                                        TileOrderStore.setScenarioHidden(
+                                                preferences, hidden.get(index).id, false);
+                                        syncTiles();
+                                        bindHiddenScenarios(restore);
+                                    })
+                            .show();
+                });
+    }
+
     private void bindMainGrid() {
         if (settingView(R.id.switchFullscreenGrid) == null) {
             return;
         }
+        bindHiddenScenarios(settingView(R.id.restoreScenarioTile));
         Switch switchFullscreenGrid = settingView(R.id.switchFullscreenGrid);
         NumberPicker pickerFullscreenGridColumns = settingView(R.id.pickerFullscreenGridColumns);
         pickerFullscreenGridColumns.setMinValue(0);
@@ -468,194 +430,6 @@ public class MainSettingsFragment extends SettingsSectionFragment {
                     if (dependent != null) {
                         dependent.setVisibility(on ? View.VISIBLE : View.GONE);
                     }
-                });
-    }
-
-    private void bindTileSizeSpinners(
-            int widthSpinnerId,
-            int heightSpinnerId,
-            String widgetId,
-            int defaultWidth,
-            int defaultHeight) {
-        android.widget.Spinner widthSpinner = settingView(widthSpinnerId);
-        android.widget.Spinner heightSpinner = settingView(heightSpinnerId);
-        if (widthSpinner == null || heightSpinner == null) {
-            return;
-        }
-        if (ClockWidgetView.ID.equals(widgetId)) {
-            bindEnergySize(widthSpinner, widgetId, true, 1, 1, 5, null);
-            bindEnergySize(heightSpinner, widgetId, false, 1, 1, 5, null);
-            return;
-        }
-        if (RadioWidgetLayout.ID.equals(widgetId)) {
-            bindEnergySize(widthSpinner, widgetId, true, 2, 2, 3, null);
-            bindEnergySize(heightSpinner, widgetId, false, 2, 2, 5, null);
-            return;
-        }
-        if (SystemWidgetLayout.isWidget(widgetId)) {
-            bindEnergySize(widthSpinner, widgetId, true, 1, 1, 2, null);
-            bindEnergySize(heightSpinner, widgetId, false, 1, 1, 1, null);
-            heightSpinner.setEnabled(false);
-            return;
-        }
-        if (MediaWidgetLayout.isWidget(widgetId)) {
-            Runnable bindHeight =
-                    () -> {
-                        int columns = TileSizeStore.width(preferences, widgetId, defaultWidth);
-                        bindEnergySize(
-                                heightSpinner,
-                                widgetId,
-                                false,
-                                defaultHeight,
-                                MediaWidgetLayout.minHeight(columns),
-                                MediaWidgetLayout.maxHeight(columns),
-                                null);
-                    };
-            bindHeight.run();
-            bindEnergySize(
-                    widthSpinner,
-                    widgetId,
-                    true,
-                    defaultWidth,
-                    MediaWidgetLayout.minWidth(),
-                    MediaWidgetLayout.maxWidth(),
-                    bindHeight);
-            return;
-        }
-        if (EnergyWidgetLayout.isWidget(widgetId)) {
-            Runnable bindHeight =
-                    () -> {
-                        int columns = TileSizeStore.width(preferences, widgetId, defaultWidth);
-                        bindEnergySize(
-                                heightSpinner,
-                                widgetId,
-                                false,
-                                defaultHeight,
-                                EnergyWidgetLayout.minHeight(widgetId, columns),
-                                EnergyWidgetLayout.maxHeight(widgetId, columns),
-                                null);
-                    };
-            bindHeight.run();
-            bindEnergySize(
-                    widthSpinner,
-                    widgetId,
-                    true,
-                    defaultWidth,
-                    EnergyWidgetLayout.minWidth(widgetId),
-                    EnergyWidgetLayout.maxWidth(widgetId),
-                    bindHeight);
-            return;
-        }
-
-        String[] widths = {
-            "1 ячейка",
-            "2 ячейки",
-            "3 ячейки",
-            "4 ячейки",
-            "5 ячеек",
-            "6 ячеек",
-            "7 ячеек",
-            "8 ячеек",
-            "9 ячеек",
-            "10 ячеек",
-            "11 ячеек",
-            "12 ячеек"
-        };
-        android.widget.ArrayAdapter<String> widthAdapter =
-                new android.widget.ArrayAdapter<>(
-                        requireContext(), R.layout.settings_spinner_item, widths);
-        widthAdapter.setDropDownViewResource(R.layout.settings_spinner_dropdown);
-        widthSpinner.setAdapter(widthAdapter);
-        widthSpinner.setSelection(TileSizeStore.width(preferences, widgetId, defaultWidth) - 1);
-        widthSpinner.setOnItemSelectedListener(
-                new android.widget.AdapterView.OnItemSelectedListener() {
-                    @Override
-                    public void onItemSelected(
-                            android.widget.AdapterView<?> parent,
-                            View view,
-                            int position,
-                            long id) {
-                        if (TileSizeStore.width(preferences, widgetId, defaultWidth)
-                                != position + 1) {
-                            TileSizeStore.setWidth(preferences, widgetId, position + 1);
-                        }
-                    }
-
-                    @Override
-                    public void onNothingSelected(android.widget.AdapterView<?> parent) {}
-                });
-
-        String[] heights = {"1 ячейка", "2 ячейки", "3 ячейки", "4 ячейки", "5 ячеек"};
-        android.widget.ArrayAdapter<String> heightAdapter =
-                new android.widget.ArrayAdapter<>(
-                        requireContext(), R.layout.settings_spinner_item, heights);
-        heightAdapter.setDropDownViewResource(R.layout.settings_spinner_dropdown);
-        heightSpinner.setAdapter(heightAdapter);
-        heightSpinner.setSelection(TileSizeStore.height(preferences, widgetId, defaultHeight) - 1);
-        heightSpinner.setOnItemSelectedListener(
-                new android.widget.AdapterView.OnItemSelectedListener() {
-                    @Override
-                    public void onItemSelected(
-                            android.widget.AdapterView<?> parent,
-                            View view,
-                            int position,
-                            long id) {
-                        if (TileSizeStore.height(preferences, widgetId, defaultHeight)
-                                != position + 1) {
-                            TileSizeStore.setHeight(preferences, widgetId, position + 1);
-                        }
-                    }
-
-                    @Override
-                    public void onNothingSelected(android.widget.AdapterView<?> parent) {}
-                });
-    }
-
-    private void bindEnergySize(
-            android.widget.Spinner spinner,
-            String id,
-            boolean width,
-            int fallback,
-            int min,
-            int max,
-            Runnable onChange) {
-        String[] labels = new String[max - min + 1];
-        for (int i = 0; i < labels.length; i++) {
-            labels[i] = String.valueOf(min + i);
-        }
-        android.widget.ArrayAdapter<String> adapter =
-                new android.widget.ArrayAdapter<>(
-                        requireContext(), R.layout.settings_spinner_item, labels);
-        adapter.setDropDownViewResource(R.layout.settings_spinner_dropdown);
-        spinner.setOnItemSelectedListener(null);
-        spinner.setAdapter(adapter);
-        spinner.setSelection(
-                (width
-                                ? TileSizeStore.width(preferences, id, fallback)
-                                : TileSizeStore.height(preferences, id, fallback))
-                        - min);
-        spinner.setEnabled(max > min);
-        spinner.setOnItemSelectedListener(
-                new android.widget.AdapterView.OnItemSelectedListener() {
-                    @Override
-                    public void onItemSelected(
-                            android.widget.AdapterView<?> parent,
-                            View view,
-                            int position,
-                            long itemId) {
-                        int value = min + position;
-                        if (width) {
-                            TileSizeStore.setWidth(preferences, id, value);
-                        } else {
-                            TileSizeStore.setHeight(preferences, id, value);
-                        }
-                        if (onChange != null) {
-                            onChange.run();
-                        }
-                    }
-
-                    @Override
-                    public void onNothingSelected(android.widget.AdapterView<?> parent) {}
                 });
     }
 
@@ -1029,8 +803,6 @@ public class MainSettingsFragment extends SettingsSectionFragment {
         android.widget.ImageView icon = row.findViewById(R.id.appWidgetSettingIcon);
         TextView label = row.findViewById(R.id.appWidgetSettingLabel);
         ImageButton delete = row.findViewById(R.id.appWidgetSettingDelete);
-        android.widget.Spinner widthSpinner = row.findViewById(R.id.appWidgetSettingWidth);
-        android.widget.Spinner heightSpinner = row.findViewById(R.id.appWidgetSettingHeight);
         android.widget.Switch autoStart = row.findViewById(R.id.appWidgetSettingAutoStart);
         String name = entry.packageName;
         try {
@@ -1052,78 +824,19 @@ public class MainSettingsFragment extends SettingsSectionFragment {
                         carPlayShortcut
                                 ? getString(R.string.carplay_shortcut_description)
                                 : entry.profiles.size() + " приложений · запуск внутри карточки");
-        android.widget.ArrayAdapter<String> widthAdapter =
-                new android.widget.ArrayAdapter<>(
-                        requireContext(),
-                        R.layout.settings_spinner_item,
-                        new String[] {
-                            "1 ячейка",
-                            "2 ячейки",
-                            "3 ячейки",
-                            "4 ячейки",
-                            "5 ячеек",
-                            "6 ячеек",
-                            "7 ячеек",
-                            "8 ячеек",
-                            "9 ячеек",
-                            "10 ячеек",
-                            "11 ячеек",
-                            "12 ячеек"
-                        });
-        widthAdapter.setDropDownViewResource(R.layout.settings_spinner_dropdown);
-        widthSpinner.setAdapter(widthAdapter);
-        widthSpinner.setSelection(AppWidgetStore.clampWidth(entry.width) - 1);
-        widthSpinner.setOnItemSelectedListener(
-                new android.widget.AdapterView.OnItemSelectedListener() {
-                    @Override
-                    public void onItemSelected(
-                            android.widget.AdapterView<?> parent,
-                            View view,
-                            int position,
-                            long id) {
-                        int value = position + 1;
-                        if (entry.width != value) {
-                            entry.width = value;
-                            AppWidgetStore.update(preferences, entry);
-                            syncTiles();
-                            if (CarPlayTarget.isCarPlay(entry.packageName)) {
-                                renderAppWidgets();
-                            }
-                        }
+        WidgetSizeGrid grid = row.findViewById(R.id.appWidgetSizeGrid);
+        grid.bind(
+                entry.width,
+                entry.height,
+                (columns, rows) -> true,
+                (columns, rows) -> {
+                    entry.width = columns;
+                    entry.height = rows;
+                    AppWidgetStore.update(preferences, entry);
+                    syncTiles();
+                    if (CarPlayTarget.isCarPlay(entry.packageName)) {
+                        renderAppWidgets();
                     }
-
-                    @Override
-                    public void onNothingSelected(android.widget.AdapterView<?> parent) {}
-                });
-        android.widget.ArrayAdapter<String> heightAdapter =
-                new android.widget.ArrayAdapter<>(
-                        requireContext(),
-                        R.layout.settings_spinner_item,
-                        new String[] {"1 ячейка", "2 ячейки", "3 ячейки", "4 ячейки", "5 ячеек"});
-        heightAdapter.setDropDownViewResource(R.layout.settings_spinner_dropdown);
-        heightSpinner.setAdapter(heightAdapter);
-        heightSpinner.setSelection(AppWidgetStore.clampHeight(entry.height) - 1);
-        heightSpinner.setOnItemSelectedListener(
-                new android.widget.AdapterView.OnItemSelectedListener() {
-                    @Override
-                    public void onItemSelected(
-                            android.widget.AdapterView<?> parent,
-                            View view,
-                            int position,
-                            long id) {
-                        int value = position + 1;
-                        if (entry.height != value) {
-                            entry.height = value;
-                            AppWidgetStore.update(preferences, entry);
-                            syncTiles();
-                            if (CarPlayTarget.isCarPlay(entry.packageName)) {
-                                renderAppWidgets();
-                            }
-                        }
-                    }
-
-                    @Override
-                    public void onNothingSelected(android.widget.AdapterView<?> parent) {}
                 });
         autoStart.setChecked(entry.autoStart && !carPlayShortcut);
         autoStart.setEnabled(!carPlayShortcut);
@@ -1318,9 +1031,7 @@ public class MainSettingsFragment extends SettingsSectionFragment {
                             ? View.VISIBLE
                             : View.GONE);
         }
-        if (profile().isPassenger()) {
-            useLayoutPreferences(row);
-        }
+        useLayoutPreferences(row);
         if (layout == R.layout.settings_main_add_shortcut) {
             return SettingsPanels.appSelectionPanel(
                     row, AppShortcutStore.load(preferences).isEmpty(), true);
@@ -1331,8 +1042,8 @@ public class MainSettingsFragment extends SettingsSectionFragment {
     private void useLayoutPreferences(View view) {
         if (view instanceof SettingsWidgetCard) {
             ((SettingsWidgetCard) view).usePreferences(preferences);
-        } else if (view instanceof SettingsPreviewView) {
-            ((SettingsPreviewView) view).usePreferences(preferences);
+        } else if (view instanceof WidgetSizeGrid) {
+            ((WidgetSizeGrid) view).usePreferences(preferences);
         } else if (view instanceof SettingsIllustration) {
             ((SettingsIllustration) view).usePreferences(preferences);
         }

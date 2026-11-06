@@ -129,60 +129,11 @@
                         android:text="@string/carplay_widget_window_description"
                         android:textSize="16sp"
                         android:textColor="@color/settings_muted" />
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="16dp"
-                        android:orientation="horizontal">
-                        <LinearLayout
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:layout_marginEnd="10dp"
-                            android:orientation="vertical">
-                            <TextView
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:text="Ширина"
-                                android:textSize="15sp"
-                                android:textColor="@color/settings_muted" />
-                            <Spinner
-                                android:id="@+id/carPlayWidgetWidth"
-                                android:layout_width="match_parent"
-                                android:layout_height="48dp"
-                                android:layout_marginTop="8dp"
-                                android:contentDescription="Ширина окна CarPlay в ячейках"
-                                android:popupBackground="@color/settings_inset"
-                                android:background="@drawable/settings_field" />
-                        </LinearLayout>
-                        <LinearLayout
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:orientation="vertical">
-                            <TextView
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:text="Высота"
-                                android:textSize="15sp"
-                                android:textColor="@color/settings_muted" />
-                            <Spinner
-                                android:id="@+id/carPlayWidgetHeight"
-                                android:layout_width="match_parent"
-                                android:layout_height="48dp"
-                                android:layout_marginTop="8dp"
-                                android:contentDescription="Высота окна CarPlay в ячейках"
-                                android:popupBackground="@color/settings_inset"
-                                android:background="@drawable/settings_field" />
-                        </LinearLayout>
-                    </LinearLayout>
-                    <ru.big.town.restoremode.settings.ui.preview.SettingsPreviewView
+                    <ru.big.town.restoremode.settings.ui.preview.WidgetSizeGrid
                         android:id="@+id/carPlayWidgetGrid"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="16dp"
-                        app:settingsPreviewKind="grid"
-                        android:tag="settings.cell-grid" />
+                        android:layout_marginTop="16dp" />
                     <TextView
                         android:id="@+id/carPlayWidgetSizeSummary"
                         android:layout_width="match_parent"

@@ -90,31 +90,14 @@
                     android:includeFontPadding="false"
                     android:letterSpacing="0.077"
                     android:layout_marginBottom="12dp" />
-                <Spinner
-                    android:id="@+id/radioSettingWidth"
-                    android:layout_width="match_parent"
-                    android:layout_height="48dp"
-                    android:contentDescription="Ширина виджета радио"
-                    android:popupBackground="@color/settings_inset"
-                    android:background="@drawable/settings_field" />
-                <Spinner
-                    android:id="@+id/radioSettingHeight"
-                    android:layout_width="match_parent"
-                    android:layout_height="48dp"
-                    android:layout_marginTop="8dp"
-                    android:contentDescription="Высота виджета радио"
-                    android:popupBackground="@color/settings_inset"
-                    android:background="@drawable/settings_field" />
-                <ru.big.town.restoremode.settings.ui.preview.SettingsPreviewView
+                <ru.big.town.restoremode.settings.ui.preview.WidgetSizeGrid
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="16dp"
                     android:layout_marginBottom="12dp"
-                    app:settingsPreviewKind="grid"
                     app:settingsTileKey="radioWidget"
                     app:settingsTileWidth="2"
-                    app:settingsTileHeight="2"
-                    android:tag="settings.cell-grid" />
+                    app:settingsTileHeight="2" />
             </LinearLayout>
             <TextView
                 android:layout_width="match_parent"

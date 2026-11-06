@@ -58,4 +58,7 @@
         68 08 02 00 00 f0 2c 24 08 00 - форсе EV выкл
     </string>
     <string name="suspension_maintenance_title">Сервисный режим подвески</string>
+    <string name="widget_size_selection">Размер %1$s ▾</string>
+    <string name="widget_size_choices">Размер в ячейках</string>
+    <string name="widget_size_drag_hint">Потяните до светло-зелёной ячейки</string>
 </resources>

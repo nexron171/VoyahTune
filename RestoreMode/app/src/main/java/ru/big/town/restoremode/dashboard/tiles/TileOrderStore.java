@@ -29,7 +29,7 @@ import java.util.List;
 
 /** Screen-scoped tile order with shared definitions for widgets and scenarios. */
 public class TileOrderStore {
-    private static final String KEY = "tileOrder";
+    public static final String ORDER_KEY = "tileOrder";
     private static final String[] KNOWN_WIDGETS = {
         HeadlightWidgetLayout.ID,
         BrightnessWidgetLayout.ID,
@@ -85,6 +85,19 @@ public class TileOrderStore {
         }
     }
 
+    public static boolean isScenarioHidden(SharedPreferences layout, String id) {
+        return layout.getBoolean("hiddenScenarioTile:" + id, false);
+    }
+
+    public static void setScenarioHidden(SharedPreferences layout, String id, boolean hidden) {
+        String key = "hiddenScenarioTile:" + id;
+        if (hidden) {
+            layout.edit().putBoolean(key, true).apply();
+        } else {
+            layout.edit().remove(key).apply();
+        }
+    }
+
     /** Load the saved order or initialize it from the configured stores. */
     public static List<Tile> load(SharedPreferences preferences) {
         return load(preferences, preferences, false);
@@ -98,7 +111,7 @@ public class TileOrderStore {
     public static List<Tile> load(
             SharedPreferences layout, SharedPreferences content, boolean passenger) {
         List<Tile> tiles = new ArrayList<>();
-        String stored = layout.getString(KEY, "");
+        String stored = layout.getString(ORDER_KEY, "");
 
         if (!stored.isEmpty()) {
             try {
@@ -171,7 +184,7 @@ public class TileOrderStore {
             }
         } catch (Exception ignored) {
         }
-        preferences.edit().putString(KEY, entries.toString()).apply();
+        preferences.edit().putString(ORDER_KEY, entries.toString()).apply();
     }
 
     /** Visibility is applied by the dashboard after validating the tile definition. */
@@ -235,7 +248,10 @@ public class TileOrderStore {
             return false;
         } else if (Tile.TYPE_SCENARIO.equals(tile.type)) {
             ScenarioStore.Scenario scenario = ScenarioStore.find(content, tile.id);
-            return scenario != null && scenario.enabled && scenario.showTile;
+            return scenario != null
+                    && scenario.enabled
+                    && scenario.showTile
+                    && !isScenarioHidden(layout, tile.id);
         }
         return false;
     }
@@ -365,7 +381,7 @@ public class TileOrderStore {
         }
 
         for (ScenarioStore.Scenario scenario : ScenarioStore.load(content)) {
-            if (!scenario.enabled || !scenario.showTile) {
+            if (!scenario.enabled || !scenario.showTile || isScenarioHidden(layout, scenario.id)) {
                 continue;
             }
             boolean found = false;

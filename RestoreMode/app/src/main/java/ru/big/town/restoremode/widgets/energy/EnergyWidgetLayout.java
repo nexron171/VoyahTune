@@ -13,7 +13,7 @@ public final class EnergyWidgetLayout {
     }
 
     public static int minWidth(String id) {
-        return "energyWidget".equals(id) || "energyTripWidget".equals(id)
+        return "energyWidget".equals(id)
                 ? 3
                 : "energyConsumptionWidget".equals(id) || "tirePressureWidget".equals(id) ? 1 : 2;
     }
@@ -52,9 +52,6 @@ public final class EnergyWidgetLayout {
         }
         if ("energyWidget".equals(id)) {
             return columns <= 3 ? 4 : columns <= 6 ? 5 : 4;
-        }
-        if (vertical(id, columns)) {
-            return 4;
         }
         if ("energyTripWidget".equals(id) && columns <= 6) {
             return 3;

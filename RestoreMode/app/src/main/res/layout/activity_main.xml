@@ -23,7 +23,7 @@
             android:scrollbars="none">
 
             <!-- Сплиты и все тайлы: единая горизонтальная сетка -->
-            <GridLayout
+            <ru.big.town.restoremode.dashboard.tiles.DashboardEditGrid
                 android:id="@+id/splitTilesGrid"
                 android:layout_width="wrap_content"
                 android:layout_height="match_parent"

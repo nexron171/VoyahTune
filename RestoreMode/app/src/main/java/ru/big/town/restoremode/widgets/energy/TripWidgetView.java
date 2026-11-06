@@ -48,10 +48,10 @@ public final class TripWidgetView extends VehicleWidgetView {
     }
 
     private float tripValue(String key, int index) {
-        float[] a = floatArray(key, index + 1);
+        float[] values = floatArray(key, index + 1);
         return state.getInt(EnergyWidgetProtocol.SCHEMA) == EnergyWidgetProtocol.VERSION
-                        && a.length > index
-                ? a[index]
+                        && values.length > index
+                ? values[index]
                 : Float.NaN;
     }
 
@@ -68,10 +68,10 @@ public final class TripWidgetView extends VehicleWidgetView {
         if (unit.isEmpty()) {
             return;
         }
-        if (valueWidth + 8 + measureText(unit, unitFont()) <= width) {
+        if (!wrapsUnit(value, unit, width)) {
             drawText(canvas, unit, x + valueWidth + 8, baseline, unitFont(), color, false);
         } else {
-            drawText(canvas, unit, x, baseline + 26 * (unitFont() / 20), unitFont(), color, false);
+            drawText(canvas, unit, x, baseline + unitFont() * 1.3f, unitFont(), color, false);
         }
     }
 
@@ -92,7 +92,8 @@ public final class TripWidgetView extends VehicleWidgetView {
                 fontSize(R.dimen.energy_title_text_size),
                 WHITE,
                 true);
-        if (tripDurationMillis < 0) {
+        boolean small = columns == 2 || (vertical && rows == 3);
+        if (!small && tripDurationMillis < 0) {
             if (vertical) {
                 drawText(
                         canvas, "Ожидание статуса", pad, 60 * fontScale, labelFont(), MUTED, false);
@@ -103,8 +104,14 @@ public final class TripWidgetView extends VehicleWidgetView {
         }
         String time = "—";
         if (tripDurationMillis >= 0) {
-            long s = tripDurationMillis / 1000;
-            time = String.format(Locale.US, "%02d:%02d:%02d", s / 3600, (s / 60) % 60, s % 60);
+            long seconds = tripDurationMillis / 1000;
+            time =
+                    String.format(
+                            Locale.US,
+                            "%02d:%02d:%02d",
+                            seconds / 3600,
+                            (seconds / 60) % 60,
+                            seconds % 60);
         }
         String[] labels = {"Время в пути", "Пробег", "Электричество", "Бензин"};
         String[] values = {
@@ -114,6 +121,24 @@ public final class TripWidgetView extends VehicleWidgetView {
             formatEstimate(tripValue(EnergyWidgetProtocol.TRIP, 2))
         };
         String[] units = {"", "км", "кВт·ч/100 км", "л/100 км"};
+        float evKm = tripValue(EnergyWidgetProtocol.TRIP_OBSERVED_KM, 0),
+                fuelKm = tripValue(EnergyWidgetProtocol.TRIP_OBSERVED_KM, 1);
+        String note =
+                !hasLiveData()
+                        ? "Нет связи с автомобилем"
+                        : Math.max(evKm, fuelKm) < 1
+                                ? (small ? "Средние после 1 км" : "Средние после 1 км наблюдения")
+                                : Math.abs(evKm - fuelKm) < .1
+                                        ? "Учтено " + formatNumber(Math.min(evKm, fuelKm)) + " км"
+                                        : "Учтено: электро "
+                                                + formatNumber(evKm)
+                                                + ", бензин "
+                                                + formatNumber(fuelKm)
+                                                + " км";
+        if (small) {
+            drawCompact(canvas, values, units, note, content, pad, fontScale);
+            return;
+        }
         float first =
                 vertical
                         ? 86 * fontScale
@@ -143,20 +168,6 @@ public final class TripWidgetView extends VehicleWidgetView {
                         1);
             }
         }
-        float evKm = tripValue(EnergyWidgetProtocol.TRIP_OBSERVED_KM, 0),
-                fuelKm = tripValue(EnergyWidgetProtocol.TRIP_OBSERVED_KM, 1);
-        String note =
-                !hasLiveData()
-                        ? "Нет связи с автомобилем"
-                        : Math.max(evKm, fuelKm) < 1
-                                ? "Средние после 1 км наблюдения"
-                                : Math.abs(evKm - fuelKm) < .1
-                                        ? "Учтено " + formatNumber(Math.min(evKm, fuelKm)) + " км"
-                                        : "Учтено: электро "
-                                                + formatNumber(evKm)
-                                                + ", бензин "
-                                                + formatNumber(fuelKm)
-                                                + " км";
         drawWrappedText(
                 canvas,
                 note,
@@ -165,5 +176,59 @@ public final class TripWidgetView extends VehicleWidgetView {
                 captionFont(),
                 content,
                 MUTED);
+    }
+
+    private void drawCompact(
+            Canvas canvas,
+            String[] values,
+            String[] units,
+            String note,
+            float width,
+            float pad,
+            float fontScale) {
+        // Each wrapped unit consumes a line before the next reading.
+
+        float unitLine = unitFont() * 1.3f;
+        float top = 32 * fontScale;
+        float notesHeight =
+                drawWrappedText(
+                        null, note, pad, captionFont() * 1.25f, captionFont(), width, MUTED);
+        float required = top + notesHeight + 4;
+        for (int index = 0; index < values.length; index++) {
+
+            if (wrapsUnit(values[index], units[index], width)) {
+                required += unitLine;
+            }
+        }
+        float line = Math.min(valueFont() * 1.12f, (contentHeight - required) / values.length);
+        float gap =
+                Math.max(
+                        0, (contentHeight - required - line * values.length) / (values.length + 1));
+        float baseline = top;
+        for (int index = 0; index < values.length; index++) {
+            baseline += line + gap;
+            if (index == 0 && tripDurationMillis < 0) {
+                drawText(canvas, "Ожидание статуса", pad, baseline, labelFont(), MUTED, false);
+            } else {
+                int color = index == 2 ? GREEN : index == 3 ? BLUE : WHITE;
+                metric(canvas, values[index], units[index], pad, baseline, width, color);
+            }
+            if (wrapsUnit(values[index], units[index], width)) {
+                baseline += unitLine;
+            }
+        }
+        drawWrappedText(
+                canvas,
+                note,
+                pad,
+                baseline + gap + captionFont() * 1.25f,
+                captionFont(),
+                width,
+                MUTED);
+    }
+
+    private boolean wrapsUnit(String value, String unit, float width) {
+        return !unit.isEmpty()
+                && measureText(value, valueFont()) + 8 + measureText(unit, unitFont()) > width;
     }
 }
