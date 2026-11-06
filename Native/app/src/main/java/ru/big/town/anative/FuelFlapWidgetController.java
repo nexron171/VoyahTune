@@ -105,19 +105,27 @@ final class FuelFlapWidgetController {
                 break;
         }
         publish(
-                new FuelFlapWidgetSnapshot(
-                        snapshot.canOpen,
-                        result.refillLiters != null ? result.refillLiters : snapshot.refillLiters,
-                        message));
+                snapshot,
+                message,
+                snapshot.refillLiters != null ? snapshot.refillLiters : result.refillLiters);
     }
 
     private void publish(FuelFlapWidgetSnapshot snapshot) {
+        publish(snapshot, snapshot.message, snapshot.refillLiters);
+    }
+
+    private void publish(FuelFlapWidgetSnapshot snapshot, String message, Integer refillLiters) {
         Bundle state = new Bundle();
         state.putBoolean(FuelFlapWidgetProtocol.CAN_OPEN, snapshot.canOpen);
-        if (snapshot.refillLiters != null) {
-            state.putInt(FuelFlapWidgetProtocol.REFILL_LITERS, snapshot.refillLiters);
+        if (refillLiters != null) {
+            state.putInt(FuelFlapWidgetProtocol.REFILL_LITERS, refillLiters);
         }
-        state.putString(FuelFlapWidgetProtocol.MESSAGE, snapshot.message);
+        if (snapshot.fuel != null) {
+            state.putInt(FuelFlapWidgetProtocol.CAPACITY_LITERS, snapshot.fuel.capacityLiters);
+            state.putFloat(
+                    FuelFlapWidgetProtocol.REMAINING_PERCENT, snapshot.fuel.remainingPercent);
+        }
+        state.putString(FuelFlapWidgetProtocol.MESSAGE, message);
         if (!clients.publish(FuelFlapWidgetProtocol.STATE, state)) stopWatching();
     }
 

@@ -46,6 +46,8 @@ public class FuelFlapWidgetSnapshotTest {
         Session session = new Session();
         FuelFlapWidgetSnapshot state = FuelFlapWidgetSnapshot.read(session);
         assertTrue(state.canOpen);
+        assertEquals(52, state.fuel.capacityLiters);
+        assertEquals(25f, state.fuel.remainingPercent, 0f);
         assertEquals(Integer.valueOf(39), state.refillLiters);
         session.fuel = new OemVehicleStateTransport.FuelLevel(60, 50);
         assertEquals(Integer.valueOf(30), FuelFlapWidgetSnapshot.read(session).refillLiters);
@@ -77,6 +79,7 @@ public class FuelFlapWidgetSnapshotTest {
             FuelFlapWidgetSnapshot state = FuelFlapWidgetSnapshot.read(session);
             assertTrue(state.canOpen);
             assertNull(state.refillLiters);
+            assertNull(state.fuel);
         }
     }
 }

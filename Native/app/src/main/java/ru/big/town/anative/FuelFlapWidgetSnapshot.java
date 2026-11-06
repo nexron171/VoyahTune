@@ -3,11 +3,18 @@ package ru.big.town.anative;
 final class FuelFlapWidgetSnapshot {
     final boolean canOpen;
     final Integer refillLiters;
+    final OemVehicleStateTransport.FuelLevel fuel;
     final String message;
 
-    FuelFlapWidgetSnapshot(boolean canOpen, Integer refillLiters, String message) {
+    FuelFlapWidgetSnapshot(
+            boolean canOpen, OemVehicleStateTransport.FuelLevel reading, String message) {
         this.canOpen = canOpen;
-        this.refillLiters = refillLiters;
+        refillLiters =
+                reading == null
+                        ? null
+                        : FuelRefillEstimate.liters(
+                                reading.capacityLiters, reading.remainingPercent);
+        fuel = refillLiters == null ? null : reading;
         this.message = message;
     }
 
@@ -18,16 +25,12 @@ final class FuelFlapWidgetSnapshot {
                 gear == null
                         ? "Не удалось проверить положение селектора"
                         : parking ? "Нажмите для открытия" : "Переведите селектор в P";
-        Integer refillLiters = null;
+        OemVehicleStateTransport.FuelLevel fuel = null;
         try {
-            OemVehicleStateTransport.FuelLevel fuel = session.readFuelLevel();
-            if (fuel != null) {
-                refillLiters =
-                        FuelRefillEstimate.liters(fuel.capacityLiters, fuel.remainingPercent);
-            }
+            fuel = session.readFuelLevel();
         } catch (RuntimeException ignored) {
             // Fuel availability is independent of the permission to open in Parking.
         }
-        return new FuelFlapWidgetSnapshot(parking, refillLiters, message);
+        return new FuelFlapWidgetSnapshot(parking, fuel, message);
     }
 }

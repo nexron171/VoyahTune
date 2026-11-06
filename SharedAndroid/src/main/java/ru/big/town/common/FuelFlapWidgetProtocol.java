@@ -9,6 +9,8 @@ public final class FuelFlapWidgetProtocol {
 
     public static final String CAN_OPEN = "canOpen";
     public static final String REFILL_LITERS = "refillLiters";
+    public static final String CAPACITY_LITERS = "capacityLiters";
+    public static final String REMAINING_PERCENT = "remainingPercent";
     public static final String MESSAGE = "message";
 
     private FuelFlapWidgetProtocol() {}
