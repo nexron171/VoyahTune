@@ -43,12 +43,7 @@ public class DashboardEditModeTest {
         app.width = 4;
         AppWidgetStore.addProfile(app, "another.profile", 200);
         AppWidgetStore.update(prefs, app);
-        shadowOf(RuntimeEnvironment.getApplication())
-                .setComponentNameAndServiceForBindService(
-                        new android.content.ComponentName(
-                                "ru.big.town.anative", "ru.big.town.anative.MyService"),
-                        new android.os.Messenger(new android.os.Handler(Looper.getMainLooper()))
-                                .getBinder());
+        bindNativeService();
         ActivityController<MainActivity> controller =
                 Robolectric.buildActivity(MainActivity.class).setup();
         try {
@@ -188,6 +183,61 @@ public class DashboardEditModeTest {
             assertNull(controller.get().findViewById(R.id.dashboardEditDone));
         } finally {
             controller.pause().stop().destroy();
+        }
+    }
+
+    private static void bindNativeService() {
+        shadowOf(RuntimeEnvironment.getApplication())
+                .setComponentNameAndServiceForBindService(
+                        new android.content.ComponentName(
+                                "ru.big.town.anative", "ru.big.town.anative.MyService"),
+                        new android.os.Messenger(new android.os.Handler(Looper.getMainLooper()))
+                                .getBinder());
+    }
+
+    @Test
+    public void emptyDesktopHoldEntersAndOnlyTapExitsEditing() {
+        bindNativeService();
+        try (ActivityController<MainActivity> controller =
+                Robolectric.buildActivity(MainActivity.class).setup().visible()) {
+            View desktop = controller.get().findViewById(R.id.mainContent);
+            DashboardEditGrid grid = controller.get().findViewById(R.id.splitTilesGrid);
+            shadowOf(Looper.getMainLooper()).idle();
+            desktop.measure(
+                    View.MeasureSpec.makeMeasureSpec(1920, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(720, View.MeasureSpec.EXACTLY));
+            desktop.layout(0, 0, 1920, 720);
+            Duration holdTime = Duration.ofMillis(ViewConfiguration.getLongPressTimeout() + 1);
+            // One point in the grid padding, one in the wallpaper beside the scroll view.
+            int gridX = desktop.getPaddingLeft() + 1;
+            int y = desktop.getPaddingTop() + 1;
+            touch(desktop, MotionEvent.ACTION_DOWN, gridX, y);
+            shadowOf(Looper.getMainLooper()).idleFor(holdTime);
+            touch(desktop, MotionEvent.ACTION_UP, gridX, y);
+            assertTrue(grid.isEditing());
+
+            touch(desktop, MotionEvent.ACTION_DOWN, 4, y);
+            touch(desktop, MotionEvent.ACTION_MOVE, 65, y);
+            touch(desktop, MotionEvent.ACTION_UP, 65, y);
+            assertTrue(grid.isEditing());
+            touch(desktop, MotionEvent.ACTION_DOWN, 4, y);
+            touch(desktop, MotionEvent.ACTION_CANCEL, 4, y);
+            assertTrue(grid.isEditing());
+            touch(desktop, MotionEvent.ACTION_DOWN, 4, y);
+            touch(desktop, MotionEvent.ACTION_UP, 4, y);
+            assertFalse(grid.isEditing());
+
+            touch(desktop, MotionEvent.ACTION_DOWN, 4, y);
+            shadowOf(Looper.getMainLooper()).idleFor(holdTime);
+            touch(desktop, MotionEvent.ACTION_UP, 4, y);
+            assertTrue(grid.isEditing());
+            touch(desktop, MotionEvent.ACTION_DOWN, gridX, y);
+            shadowOf(Looper.getMainLooper()).idleFor(holdTime);
+            touch(desktop, MotionEvent.ACTION_UP, gridX, y);
+            assertTrue(grid.isEditing());
+            touch(desktop, MotionEvent.ACTION_DOWN, gridX, y);
+            touch(desktop, MotionEvent.ACTION_UP, gridX, y);
+            assertFalse(grid.isEditing());
         }
     }
 

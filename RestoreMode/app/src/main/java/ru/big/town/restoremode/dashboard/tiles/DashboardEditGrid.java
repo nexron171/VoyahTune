@@ -54,6 +54,7 @@ public final class DashboardEditGrid extends GridLayout {
     }
 
     private enum Gesture {
+        BACKGROUND,
         BODY,
         REMOVE,
         RESIZE,
@@ -135,20 +136,39 @@ public final class DashboardEditGrid extends GridLayout {
 
     @Override
     public boolean dispatchTouchEvent(MotionEvent event) {
+        return dispatchDesktopTouch(event, false);
+    }
+
+    public boolean onWallpaperMarginTouch(MotionEvent event) {
+        return dispatchDesktopTouch(event, true);
+    }
+
+    private boolean dispatchDesktopTouch(MotionEvent event, boolean inWallpaperMargin) {
         int action = event.getActionMasked();
         if (action == MotionEvent.ACTION_DOWN) {
-            beginGesture(event);
+            beginGesture(event, inWallpaperMargin);
         }
-        if (action == MotionEvent.ACTION_MOVE && pressed != null) {
-            if (Math.abs(event.getX() - downX) > slop || Math.abs(event.getY() - downY) > slop) {
+        if ((action == MotionEvent.ACTION_MOVE || action == MotionEvent.ACTION_UP)
+                && gesture != null) {
+            float dx = event.getX() - downX, dy = event.getY() - downY;
+            if (dx * dx + dy * dy > slop * slop) {
                 moved = true;
                 removeCallbacks(hold);
             }
-            if (gesture == Gesture.RESIZE) {
+            if (gesture == Gesture.RESIZE && action == MotionEvent.ACTION_MOVE) {
                 previewSize(event);
             }
         }
-        boolean consume = editing && gesture != Gesture.WINDOW_CONTROL;
+        boolean background = gesture == Gesture.BACKGROUND;
+        boolean consume =
+                inWallpaperMargin || background || (editing && gesture != Gesture.WINDOW_CONTROL);
+        if (action == MotionEvent.ACTION_UP
+                && background
+                && editing
+                && !moved
+                && (inWallpaperMargin || tileAt(event.getX(), event.getY()) == null)) {
+            setEditing(false);
+        }
         if (action == MotionEvent.ACTION_UP && editing && pressed != null) {
             View view = pressed;
             Item item = items.get(view);
@@ -175,12 +195,16 @@ public final class DashboardEditGrid extends GridLayout {
         return consume || super.dispatchTouchEvent(event) || pressed != null;
     }
 
-    private void beginGesture(MotionEvent event) {
+    private void beginGesture(MotionEvent event, boolean inWallpaperMargin) {
         resetGesture();
         downX = event.getX();
         downY = event.getY();
-        pressed = tileAt(downX, downY);
-        if (pressed == null) return;
+        pressed = inWallpaperMargin ? null : tileAt(downX, downY);
+        if (pressed == null) {
+            gesture = Gesture.BACKGROUND;
+            postDelayed(hold, ViewConfiguration.getLongPressTimeout());
+            return;
+        }
         View handler = touchTarget(pressed, downX - pressed.getX(), downY - pressed.getY());
         if (editing && isWindowControl(handler)) {
             gesture = Gesture.WINDOW_CONTROL;
@@ -214,6 +238,15 @@ public final class DashboardEditGrid extends GridLayout {
     }
 
     private void longPress() {
+        if (gesture == Gesture.BACKGROUND && !moved) {
+            if (!editing) {
+                performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+                setEditing(true);
+            } else {
+                resetGesture();
+            }
+            return;
+        }
         if (pressed == null || moved) {
             return;
         }

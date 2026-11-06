@@ -3004,6 +3004,8 @@ public class DashboardActivity extends AppCompatActivity {
     }
 
     private void configureDesktopEditor() {
+        findViewById(R.id.mainContent)
+                .setOnTouchListener((view, event) -> splitTilesGrid.onWallpaperMarginTouch(event));
         editBack =
                 new OnBackPressedCallback(false) {
                     @Override
