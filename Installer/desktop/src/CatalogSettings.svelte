@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { command, failure } from "./api";
+  import { command, caughtFailure } from "./api";
 
   let {
     disabled = false,
@@ -35,7 +35,7 @@
       defaultCatalogUrl = settings.defaultCatalogUrl;
       loaded = true;
     } catch (error) {
-      errorMessage = failure(error).message;
+      errorMessage = caughtFailure(error).message;
     } finally {
       loading = false;
     }
@@ -51,7 +51,7 @@
     try {
       await command("save_catalog_url", { url: catalogUrl.trim() });
     } catch (error) {
-      errorMessage = failure(error).message;
+      errorMessage = caughtFailure(error).message;
       saving = false;
       return;
     }

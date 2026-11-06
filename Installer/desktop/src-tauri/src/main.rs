@@ -6,7 +6,9 @@ use installer_core::{
     engine::{default_adb, Engine},
     engineering_menu,
     events::{Event, Events},
-    installation_log::{InstallationLog, Status as SessionStatus, UploadProgress},
+    installation_log::{
+        write_javascript_exception, InstallationLog, Status as SessionStatus, UploadProgress,
+    },
     payload::Payload,
     plans::{Action, Dns, Plan, Request},
     recovery, session, Error, Result,
@@ -885,19 +887,29 @@ fn operation_events(runtime: State<Runtime>) -> Result<Vec<Value>> {
     milestones.sort_by_key(|event| event["sequence"].as_u64().unwrap_or(0));
     Ok(milestones)
 }
+
+fn logs_directory(running: &Running) -> Result<PathBuf> {
+    running
+        .installation_log
+        .as_ref()
+        .map(InstallationLog::directory)
+        .or_else(|| running.operation_dir.clone())
+        .map(Ok)
+        .unwrap_or_else(session_logs_root)
+}
+
+#[tauri::command]
+fn log_javascript_exception(runtime: State<Runtime>, entry: Value) -> Result<()> {
+    let (directory, session) = {
+        let running = runtime.0.lock().unwrap();
+        (logs_directory(&running)?, running.installation_log.clone())
+    };
+    write_javascript_exception(&directory, session.as_ref(), entry)
+}
+
 #[tauri::command]
 async fn open_logs_folder(app: tauri::AppHandle) -> Result<String> {
-    let directory = {
-        let runtime = app.state::<Runtime>();
-        let running = runtime.0.lock().unwrap();
-        running
-            .installation_log
-            .as_ref()
-            .map(InstallationLog::directory)
-            .or_else(|| running.operation_dir.clone())
-    }
-    .map(Ok)
-    .unwrap_or_else(session_logs_root)?;
+    let directory = logs_directory(&app.state::<Runtime>().0.lock().unwrap())?;
     tauri::async_runtime::spawn_blocking(move || {
         fs::create_dir_all(&directory)?;
         #[cfg(target_os = "macos")]
@@ -952,6 +964,7 @@ fn save_report(events: Vec<Value>, runtime: State<Runtime>) -> Result<String> {
     if let Some(source) = &operation_dir {
         for name in [
             "events.jsonl",
+            "javascript-errors.jsonl",
             "plan.json",
             "report.json",
             "backup.json",
@@ -1017,6 +1030,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             log_session_begin,
             log_session_record,
+            log_javascript_exception,
             log_session_finish,
             log_session_upload,
             engineering_code,

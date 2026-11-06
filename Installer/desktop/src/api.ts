@@ -1,4 +1,5 @@
 import { Channel, invoke, isTauri } from '@tauri-apps/api/core';
+import { exceptionMessage, flushJavascriptExceptions, logJavascriptException } from './javascript-errors';
 import { listen } from '@tauri-apps/api/event';
 
 export type Action = 'install' | 'remove';
@@ -88,8 +89,23 @@ let sessionId: string | null = null;
 let auditQueue: Promise<void> = Promise.resolve();
 
 export function failure(error: unknown): Failure {
-  if (typeof error === 'object' && error && 'message' in error) return error as Failure;
-  return { code: 'DESKTOP_ERROR', message: String(error), detail: '', nextAction: 'Сохраните отчёт и повторите проверку.', retryable: true };
+  if (typeof error === 'object' && error && 'code' in error && 'message' in error) {
+    return error as Failure;
+  }
+  return {
+    code: 'DESKTOP_ERROR',
+    message: exceptionMessage(error),
+    detail: error instanceof Error ? error.stack ?? '' : '',
+    nextAction: 'Сохраните отчёт и повторите проверку.',
+    retryable: true,
+  };
+}
+
+export function caughtFailure(reason: unknown): Failure {
+  if (!(reason && typeof reason === 'object' && 'code' in reason && 'retryable' in reason)) {
+    logJavascriptException('caught', reason);
+  }
+  return failure(reason);
 }
 
 async function raw<T>(name: string, args: Record<string, unknown> = {}): Promise<T> {
@@ -107,7 +123,7 @@ function audit(kind: string, name: string, data: unknown, selectedRelease?: unkn
   const recordedSessionId = sessionId;
   auditQueue = auditQueue.then(() => raw<void>('log_session_record', { sessionId: recordedSessionId, kind, name, data, selectedRelease: selectedRelease === null ? { cleared: true } : selectedRelease, dns }))
     .catch(error => {
-      window.dispatchEvent(new CustomEvent('installation-log-error', { detail: failure(error).message }));
+      window.dispatchEvent(new CustomEvent('installation-log-error', { detail: caughtFailure(error).message }));
     });
   return auditQueue;
 }
@@ -123,6 +139,7 @@ export function recordChoice(name: string, data: unknown, selectedRelease?: unkn
 export async function beginInstallationSession(): Promise<string> {
   if (fixture()) return 'browser-preview-session';
   if (sessionId) return sessionId;
+  await flushJavascriptExceptions();
   const session = await raw<{ sessionId: string }>('log_session_begin');
   sessionId = session.sessionId;
   return sessionId;
@@ -130,7 +147,7 @@ export async function beginInstallationSession(): Promise<string> {
 
 export async function finishInstallationSession(status: 'success' | 'error', reason: unknown = null) {
   if (!sessionId) return;
-  await auditQueue;
+  await Promise.all([auditQueue, flushJavascriptExceptions()]);
   await raw('log_session_finish', { sessionId, status, reason });
   sessionId = null;
 }
@@ -139,7 +156,7 @@ export async function uploadInstallationLogs(
   recordedSessionId: string,
   onProgress: (progress: LogUploadProgress) => void,
 ): Promise<LogUploadProgress> {
-  await auditQueue;
+  await Promise.all([auditQueue, flushJavascriptExceptions()]);
   if (fixture()) {
     const progress = { uploadedChunks: 0, totalChunks: 4, totalEvents: 342 };
     onProgress({ ...progress });

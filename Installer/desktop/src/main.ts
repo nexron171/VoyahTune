@@ -1,4 +1,4 @@
-import { mount } from 'svelte';
-import App from './App.svelte';
-import './styles.css';
-mount(App, {target: document.getElementById('app')!});
+import { listenForJavascriptExceptions } from './javascript-errors';
+
+listenForJavascriptExceptions();
+void import('./mount');

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { logJavascriptException } from "./javascript-errors";
   import CatalogSettings from "./CatalogSettings.svelte";
   import ReadinessStatus from "./ReadinessStatus.svelte";
   import { compareReleaseVersionsNewestFirst } from "./release-version";
@@ -15,6 +16,7 @@
     onCloseBlocked,
     onPayloadProgress,
     failure,
+    caughtFailure,
     type CatalogState,
     type Release,
     type CachedPayload,
@@ -338,7 +340,7 @@
       for (const event of await command<Event[]>("operation_events"))
         acceptEvent(event);
     } catch (e) {
-      eventError = failure(e);
+      eventError = caughtFailure(e);
     }
   }
   onMount(() => {
@@ -355,13 +357,13 @@
         if (disposed) off();
         else unsubscribeDownload = off;
       })
-      .catch((e) => (error = failure(e)));
+      .catch((e) => (error = caughtFailure(e)));
     onCloseBlocked(() => (closeNotice = true))
       .then((off) => {
         if (disposed) off();
         else unsubscribeClose = off;
       })
-      .catch((e) => (eventError = failure(e)));
+      .catch((e) => (eventError = caughtFailure(e)));
     subscribe(acceptEvent)
       .then((off) => {
         if (disposed) off();
@@ -374,7 +376,7 @@
         eventError = {
           code: "EVENTS_UNAVAILABLE",
           message: "Не удалось подключить журнал и прогресс установки",
-          detail: String(e),
+          detail: caughtFailure(e).message,
           nextAction:
             "Перезапустите установщик. Установка не начнётся без подключения журнала.",
           retryable: false,
@@ -396,7 +398,7 @@
     try {
       catalog = await command<CatalogState>("release_catalog", { refresh });
     } catch (e) {
-      error = failure(e);
+      error = caughtFailure(e);
     } finally {
       busy = false;
     }
@@ -419,7 +421,7 @@
     try {
       selectInfo(await command("release_info", { path }));
     } catch (e) {
-      error = failure(e);
+      error = caughtFailure(e);
       await finishBlockedPreparation(error);
     } finally {
       downloadBusy = false;
@@ -468,7 +470,7 @@
         }),
       );
     } catch (e) {
-      error = failure(e);
+      error = caughtFailure(e);
       await finishBlockedPreparation(error);
     } finally {
       downloadBusy = false;
@@ -493,7 +495,7 @@
         confirmed = false;
       }
     } catch (e) {
-      error = failure(e);
+      error = caughtFailure(e);
     } finally {
       await updateCatalog(false);
     }
@@ -502,7 +504,7 @@
     try {
       await command("open_release_link", { url });
     } catch (e) {
-      error = failure(e);
+      error = caughtFailure(e);
     }
   }
   async function cancelDownload() {
@@ -510,7 +512,7 @@
     try {
       await command("cancel");
     } catch (e) {
-      error = failure(e);
+      error = caughtFailure(e);
     }
   }
   async function updateCode() {
@@ -522,7 +524,7 @@
       code = c.code;
       date = c.date;
     } catch (e) {
-      error = failure(e);
+      error = caughtFailure(e);
     }
   }
   async function ensureInstallationSession() {
@@ -544,7 +546,7 @@
     try {
       await finishInstallationSession(status, reason);
     } catch (caught) {
-      loggingWarning = failure(caught).message;
+      loggingWarning = caughtFailure(caught).message;
     } finally {
       sessionStarting = false;
     }
@@ -579,7 +581,7 @@
       confirmed = false;
       error = null;
     } catch (caught) {
-      error = failure(caught);
+      error = caughtFailure(caught);
     } finally {
       sessionStarting = false;
     }
@@ -599,7 +601,7 @@
     try {
       devices = (await command<{ devices: Device[] }>("devices")).devices;
     } catch (e) {
-      error = failure(e);
+      error = caughtFailure(e);
       await finishBlockedPreparation(error);
     } finally {
       busy = false;
@@ -625,7 +627,7 @@
       cunbaReady = true;
       screen = 1;
     } catch (caught) {
-      error = failure(caught);
+      error = caughtFailure(caught);
       await finishSession("error", {
         ...error,
         displayTitle: error.message,
@@ -683,7 +685,7 @@
       voyahTweaksReady = true;
       screen = 1;
     } catch (caught) {
-      error = failure(caught);
+      error = caughtFailure(caught);
       await finishSession("error", {
         ...error,
         displayTitle: error.message,
@@ -739,7 +741,7 @@
       restoreCunba = false;
       cunbaRestored = false;
     } catch (e) {
-      error = failure(e);
+      error = caughtFailure(e);
       await finishBlockedPreparation(error);
     } finally {
       busy = false;
@@ -759,7 +761,7 @@
       plan = { ...plan, ...updated };
       await recordChoice("vehicle-options-selected", { options });
     } catch (cause) {
-      error = failure(cause);
+      error = caughtFailure(cause);
     } finally {
       busy = false;
     }
@@ -816,7 +818,7 @@
         });
       }
     } catch (e) {
-      error = failure(e);
+      error = caughtFailure(e);
       if (["READINESS_FAILED", "NATIVE_DATA_INVALID"].includes(error.code))
         verificationPending = false;
       else verificationPending ||= error.code === "READINESS_UNCONFIRMED";
@@ -834,7 +836,7 @@
     try {
       await command("resolve_canbus_conflict", { approved });
     } catch (e) {
-      error = failure(e);
+      error = caughtFailure(e);
       canbusAnswerPending = false;
     }
   }
@@ -844,7 +846,7 @@
       await command("cancel");
       stopRequested = true;
     } catch (e) {
-      error = failure(e);
+      error = caughtFailure(e);
     }
   }
   async function retry() {
@@ -867,7 +869,7 @@
     try {
       await command<string>("open_logs_folder");
     } catch (caught) {
-      logsFolderError = failure(caught).message;
+      logsFolderError = caughtFailure(caught).message;
     } finally {
       logsFolderOpening = false;
     }
@@ -885,7 +887,7 @@
       );
       logUploadComplete = true;
     } catch (caught) {
-      logUploadError = failure(caught).message;
+      logUploadError = caughtFailure(caught).message;
     } finally {
       logsUploading = false;
     }
@@ -895,7 +897,7 @@
       const path = await command<string>("save_report", { events });
       reportPath = path;
     } catch (e) {
-      error = failure(e);
+      error = caughtFailure(e);
     }
   }
   async function completeVisibleSession() {
@@ -976,6 +978,15 @@
       </p>{/if}
   </div>
 {/snippet}
+
+<svelte:boundary onerror={(cause) => logJavascriptException("render", cause)}>
+  {#snippet failed(cause)}
+    <section class="screen" role="alert">
+      <h1>Ошибка отображения</h1>
+      <p>{failure(cause).message}</p>
+      {@render logActions()}
+    </section>
+  {/snippet}
 
 <div class="installer-window">
   <div class="window-body">
@@ -1895,6 +1906,7 @@
       {@render logActions()}
     </div>
   </dialog>{/if}
+</svelte:boundary>
 
 <style>
   .footer {

@@ -19,6 +19,26 @@ use std::{
     thread::{self, JoinHandle},
 };
 
+pub fn write_javascript_exception(
+    directory: &Path,
+    session: Option<&InstallationLog>,
+    entry: Value,
+) -> Result<()> {
+    fs::create_dir_all(directory)?;
+    let mut line = serde_json::to_vec(&entry)?;
+    line.push(b'\n');
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(directory.join("javascript-errors.jsonl"))?;
+    file.write_all(&line)?;
+
+    if let Some(session) = session {
+        session.record("step", "javascript-exception", None, None, entry)?;
+    }
+    Ok(())
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum Status {
@@ -495,6 +515,7 @@ impl InstallationLog {
             "session-request.json",
             "session.ack",
             "delivery-attempts.jsonl",
+            "javascript-errors.jsonl",
         ] {
             let source = self.0.directory.join(name);
             if source.is_file() {
@@ -593,6 +614,36 @@ mod tests {
         serde_json::from_reader::<_, SpoolItem>(File::open(path).unwrap())
             .unwrap()
             .request
+    }
+
+    #[test]
+    fn javascript_exceptions_are_available_locally_and_in_active_session_uploads() {
+        let root = tempfile::tempdir().unwrap();
+        let entry = json!({"message": "render error", "stack": "renderPlan@installer.js:42"});
+        write_javascript_exception(root.path(), None, entry.clone()).unwrap();
+        let filename = "javascript-errors.jsonl";
+        let expected = format!("{entry}\n");
+        assert_eq!(
+            fs::read_to_string(root.path().join(filename)).unwrap(),
+            expected
+        );
+
+        let session = begin(root.path());
+        let directory = session.directory();
+        write_javascript_exception(&directory, Some(&session), entry.clone()).unwrap();
+        let chunk = read_chunk(session.cut_with(true, |_| {}).unwrap());
+        assert!(chunk.logs.iter().any(|record| {
+            record.name == "javascript-exception" && record.data == entry
+        }));
+
+        session.finish(Status::Success, None).unwrap();
+        write_javascript_exception(&directory, Some(&session), entry).unwrap();
+        let export = root.path().join("export");
+        session.export(&export).unwrap();
+        assert_eq!(
+            fs::read_to_string(export.join(filename)).unwrap(),
+            expected.repeat(2)
+        );
     }
 
     #[test]
