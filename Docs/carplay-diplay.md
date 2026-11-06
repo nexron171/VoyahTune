@@ -1042,8 +1042,11 @@ Settings-клиент проверяет поколение соединения
 
 Сохранение виджета использует расширения существующего message **34** из
 [CarPlayWidgetProtocol.java](../SharedAndroid/src/main/java/ru/big/town/common/CarPlayWidgetProtocol.java):
-`embeddedDetach=true`, `widgetId` отсоединяет поверхность (CarPlay паркуется,
-обычное приложение освобождается); `embeddedRelease=true` остаётся явным release.
+`embeddedDetach=true` с `widgetId` паркует виртуальный дисплей работающего виджета,
+в том числе на время редактирования стола. `embeddedRelease=true` освобождает его.
+При подключении поверхности `widgetGridSize` передаёт ширину и высоту в ячейках.
+После изменения размера Native заново открывает окно проекции CarPlay в итоговых
+границах. Общий процесс RestoreMode и CarPlay продолжает работать.
 `embeddedCarPlayQuery=true`, `carPlayWidgetGeneration: long`, отдельный `replyTo`
 запрашивает живые VD CarPlay. Ответ 34 содержит то же поколение, `carPlayWidgets`
 (ArrayList<String> widget IDs) и `carPlayWidgetDpi` (Bundle id → int DPI).
