@@ -243,7 +243,8 @@ public class MainSettingsFragment extends SettingsSectionFragment {
                 false,
                 R.id.headlightSizeRow);
         bindShowSwitch(R.id.switchShowRecirculation, RecirculationWidgetLayout.VISIBLE, false);
-        bindShowSwitch(R.id.switchShowFuelFlap, FuelFlapWidgetLayout.VISIBLE, false);
+        bindShowSwitch(
+                R.id.switchShowFuelFlap, FuelFlapWidgetLayout.VISIBLE, false, R.id.fuelFlapSizeRow);
         bindShowSwitch(R.id.switchShowBrightness, BrightnessWidgetLayout.VISIBLE, false);
         bindShowSwitch(
                 R.id.switchShowCabinTemperature, CabinTemperatureWidgetLayout.VISIBLE, false);

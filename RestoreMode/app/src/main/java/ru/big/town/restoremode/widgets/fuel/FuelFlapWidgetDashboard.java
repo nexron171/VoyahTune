@@ -27,10 +27,11 @@ public final class FuelFlapWidgetDashboard {
         this.context = context;
     }
 
-    public FuelFlapWidgetView create() {
+    public FuelFlapWidgetView create(FuelFlapWidgetLayout layout) {
         view =
                 new FuelFlapWidgetView(
                         context,
+                        layout,
                         () -> {
                             if (!watching
                                     || !state.getBoolean(FuelFlapWidgetProtocol.CAN_OPEN, false))

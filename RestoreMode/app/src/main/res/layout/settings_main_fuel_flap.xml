@@ -4,6 +4,7 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
+    android:orientation="vertical"
     android:background="@drawable/settings_card"
     app:settingsToggleRef="@id/switchShowFuelFlap"
     android:padding="24dp">
@@ -16,7 +17,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="Лючок бензобака\nОткрытие и доступная заправка · 2 × 1"
+            android:text="Лючок бензобака\nУровень топлива и открытие лючка"
             android:textSize="23sp"
             android:textColor="#f3f5fa" />
         <ru.big.town.restoremode.settings.ui.controls.SettingsToggle
@@ -27,4 +28,13 @@
             android:thumb="@drawable/switch_thumb"
             android:track="@drawable/switch_track" />
     </LinearLayout>
+    <ru.big.town.restoremode.settings.ui.preview.WidgetSizeGrid
+        android:id="@+id/fuelFlapSizeRow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:visibility="gone"
+        app:settingsTileKey="fuelFlapWidget"
+        app:settingsTileWidth="2"
+        app:settingsTileHeight="1" />
 </ru.big.town.restoremode.settings.ui.layout.SettingsWidgetCard>

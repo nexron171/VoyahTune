@@ -5,6 +5,7 @@ import android.content.SharedPreferences;
 import ru.big.town.restoremode.widgets.apps.AppWidgetStore;
 import ru.big.town.restoremode.widgets.clock.ClockWidgetView;
 import ru.big.town.restoremode.widgets.energy.EnergyWidgetLayout;
+import ru.big.town.restoremode.widgets.fuel.FuelFlapWidgetLayout;
 import ru.big.town.restoremode.widgets.headlights.HeadlightWidgetLayout;
 import ru.big.town.restoremode.widgets.media.MediaWidgetLayout;
 import ru.big.town.restoremode.widgets.radio.RadioWidgetLayout;
@@ -53,6 +54,8 @@ public class TileSizeStore {
     }
 
     private static int clampWidth(String widgetId, int value) {
+        if (FuelFlapWidgetLayout.ID.equals(widgetId))
+            return FuelFlapWidgetLayout.fit(value, 1).columns;
         if (ClockWidgetView.ID.equals(widgetId)) {
             return Math.max(1, Math.min(5, value));
         }
@@ -78,11 +81,13 @@ public class TileSizeStore {
             return defaultValue;
         }
         int defaultColumns =
-                MediaWidgetLayout.isWidget(widgetId)
-                        ? MediaWidgetLayout.DEFAULT_WIDTH
-                        : HeadlightWidgetLayout.ID.equals(widgetId)
-                                ? HeadlightWidgetLayout.DEFAULT_WIDTH
-                                : 8;
+                FuelFlapWidgetLayout.ID.equals(widgetId)
+                        ? FuelFlapWidgetLayout.STANDARD.columns
+                        : MediaWidgetLayout.isWidget(widgetId)
+                                ? MediaWidgetLayout.DEFAULT_WIDTH
+                                : HeadlightWidgetLayout.ID.equals(widgetId)
+                                        ? HeadlightWidgetLayout.DEFAULT_WIDTH
+                                        : 8;
         return clampHeight(
                 widgetId,
                 width(prefs, widgetId, defaultColumns),
@@ -90,6 +95,8 @@ public class TileSizeStore {
     }
 
     private static int clampHeight(String widgetId, int columns, int value) {
+        if (FuelFlapWidgetLayout.ID.equals(widgetId))
+            return FuelFlapWidgetLayout.fit(columns, value).rows;
         if (RadioWidgetLayout.ID.equals(widgetId)) {
             return RadioWidgetLayout.height(value);
         }
@@ -108,7 +115,8 @@ public class TileSizeStore {
     }
 
     public static boolean isResizable(String widgetId) {
-        return EnergyWidgetLayout.isWidget(widgetId)
+        return FuelFlapWidgetLayout.ID.equals(widgetId)
+                || EnergyWidgetLayout.isWidget(widgetId)
                 || MediaWidgetLayout.isWidget(widgetId)
                 || ClockWidgetView.ID.equals(widgetId)
                 || RadioWidgetLayout.ID.equals(widgetId)
@@ -148,6 +156,16 @@ public class TileSizeStore {
             value = Math.max(1, Math.min(5, value));
         }
         if (prefs == null || widgetId == null) {
+            return;
+        }
+        if (FuelFlapWidgetLayout.ID.equals(widgetId)) {
+            FuelFlapWidgetLayout size =
+                    FuelFlapWidgetLayout.fit(
+                            value,
+                            prefs.getInt(
+                                    HEIGHT_KEY_PREFIX + widgetId,
+                                    FuelFlapWidgetLayout.STANDARD.rows));
+            setSize(prefs, widgetId, size.columns, size.rows);
             return;
         }
         if (RadioWidgetLayout.ID.equals(widgetId)) {
@@ -197,6 +215,13 @@ public class TileSizeStore {
 
     public static void setHeight(SharedPreferences prefs, String widgetId, int value) {
         if (prefs == null || widgetId == null) {
+            return;
+        }
+        if (FuelFlapWidgetLayout.ID.equals(widgetId)) {
+            FuelFlapWidgetLayout size =
+                    FuelFlapWidgetLayout.fit(
+                            width(prefs, widgetId, FuelFlapWidgetLayout.STANDARD.columns), value);
+            setSize(prefs, widgetId, size.columns, size.rows);
             return;
         }
         if (RadioWidgetLayout.ID.equals(widgetId)) {

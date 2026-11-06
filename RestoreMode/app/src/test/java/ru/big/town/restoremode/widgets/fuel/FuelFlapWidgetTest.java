@@ -21,10 +21,26 @@ import org.robolectric.shadows.ShadowDialog;
 
 import ru.big.town.common.FuelFlapWidgetProtocol;
 import ru.big.town.restoremode.R;
+import ru.big.town.restoremode.dashboard.tiles.TileSizeStore;
 
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = 30, application = Application.class)
 public class FuelFlapWidgetTest {
+    @Test
+    public void gridPersistsOnlyTheFiveFuelSizes() {
+        var preferences = RuntimeEnvironment.getApplication().getSharedPreferences("fuel-sizes", 0);
+        String widget = FuelFlapWidgetLayout.ID;
+        assertTrue(TileSizeStore.isResizable(widget));
+        assertArrayEquals(new int[] {2, 1}, TileSizeStore.dimensions(preferences, widget, 2, 1));
+        for (int[] size : new int[][] {{1, 1}, {1, 2}, {2, 1}, {2, 2}, {3, 1}}) {
+            TileSizeStore.setSize(preferences, widget, size[0], size[1]);
+            assertArrayEquals(size, TileSizeStore.dimensions(preferences, widget, 2, 1));
+        }
+        TileSizeStore.setSize(preferences, widget, 3, 2);
+        TileSizeStore.setSize(preferences, widget, 4, 1);
+        assertArrayEquals(new int[] {3, 1}, TileSizeStore.dimensions(preferences, widget, 2, 1));
+    }
+
     private static Bundle state(boolean canOpen, int liters) {
         Bundle state = new Bundle();
         state.putBoolean(FuelFlapWidgetProtocol.CAN_OPEN, canOpen);
@@ -41,7 +57,7 @@ public class FuelFlapWidgetTest {
             int[] requests = {0};
             FuelFlapWidgetView card =
                     new FuelFlapWidgetView(
-                            activity, () -> requests[0]++);
+                            activity, FuelFlapWidgetLayout.STANDARD, () -> requests[0]++);
             activity.setContentView(card);
             card.update(state(true, 26));
             assertEquals("Открыть лючок", card.getTooltipText());
@@ -70,7 +86,7 @@ public class FuelFlapWidgetTest {
             int[] requests = {0};
             FuelFlapWidgetView card =
                     new FuelFlapWidgetView(
-                            activity, () -> requests[0]++);
+                            activity, FuelFlapWidgetLayout.STANDARD, () -> requests[0]++);
             activity.setContentView(card);
             card.update(state(true, 26));
             card.performClick();
@@ -96,6 +112,7 @@ public class FuelFlapWidgetTest {
         FuelFlapWidgetView card =
                 new FuelFlapWidgetView(
                         RuntimeEnvironment.getApplication(),
+                        FuelFlapWidgetLayout.STANDARD,
                         () -> {});
         for (int liters : new int[] {-1, 201}) {
             Bundle state = state(false, liters);
@@ -111,6 +128,7 @@ public class FuelFlapWidgetTest {
         FuelFlapWidgetView card =
                 new FuelFlapWidgetView(
                         RuntimeEnvironment.getApplication(),
+                        FuelFlapWidgetLayout.STANDARD,
                         () -> {});
         Bundle reading = state(true, 39);
         reading.putInt(FuelFlapWidgetProtocol.CAPACITY_LITERS, 52);
@@ -130,6 +148,7 @@ public class FuelFlapWidgetTest {
         FuelFlapWidgetView card =
                 new FuelFlapWidgetView(
                         RuntimeEnvironment.getApplication(),
+                        FuelFlapWidgetLayout.STANDARD,
                         () -> {});
         boolean[] moved = {false};
         card.setOnLongClickListener(
@@ -151,7 +170,7 @@ public class FuelFlapWidgetTest {
             int[] requests = {0};
             FuelFlapWidgetView card =
                     new FuelFlapWidgetView(
-                            activity, () -> requests[0]++);
+                            activity, FuelFlapWidgetLayout.STANDARD, () -> requests[0]++);
             activity.setContentView(card);
             card.update(state(true, -1));
             assertTrue(card.getContentDescription().toString().contains("Нет данных о топливе"));

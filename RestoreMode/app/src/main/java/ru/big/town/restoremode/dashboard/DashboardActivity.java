@@ -1990,7 +1990,11 @@ public class DashboardActivity extends AppCompatActivity {
             return new int[] {RecirculationWidgetLayout.WIDTH, RecirculationWidgetLayout.HEIGHT};
         }
         if (FuelFlapWidgetLayout.ID.equals(widgetId)) {
-            return new int[] {FuelFlapWidgetLayout.WIDTH, FuelFlapWidgetLayout.HEIGHT};
+            return TileSizeStore.dimensions(
+                    sharedPreferences,
+                    widgetId,
+                    FuelFlapWidgetLayout.STANDARD.columns,
+                    FuelFlapWidgetLayout.STANDARD.rows);
         }
         if (CabinTemperatureWidgetLayout.ID.equals(widgetId)) {
             return new int[] {
@@ -2338,7 +2342,10 @@ public class DashboardActivity extends AppCompatActivity {
                         widgetView = recirculationWidget.create();
                         break;
                     case FuelFlapWidgetLayout.ID:
-                        widgetView = fuelFlapWidget.create();
+                        int[] fuelSize = getWidgetDimensions(tile.id);
+                        widgetView =
+                                fuelFlapWidget.create(
+                                        FuelFlapWidgetLayout.fit(fuelSize[0], fuelSize[1]));
                         break;
                     case CabinTemperatureWidgetLayout.ID:
                         widgetView = cabinTemperatureWidget.create();

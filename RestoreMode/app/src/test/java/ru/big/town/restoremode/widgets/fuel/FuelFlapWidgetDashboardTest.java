@@ -70,7 +70,7 @@ public class FuelFlapWidgetDashboardTest {
             Activity activity = controller.setup().visible().get();
             connectService();
             FuelFlapWidgetDashboard dashboard = new FuelFlapWidgetDashboard(activity);
-            FuelFlapWidgetView card = dashboard.create();
+            FuelFlapWidgetView card = dashboard.create(FuelFlapWidgetLayout.STANDARD);
             activity.setContentView(card);
             dashboard.watch(true);
             shadowOf(Looper.getMainLooper()).idle();
@@ -99,7 +99,7 @@ public class FuelFlapWidgetDashboardTest {
             Activity activity = controller.setup().get();
             connectService();
             FuelFlapWidgetDashboard dashboard = new FuelFlapWidgetDashboard(activity);
-            FuelFlapWidgetView card = dashboard.create();
+            FuelFlapWidgetView card = dashboard.create(FuelFlapWidgetLayout.STANDARD);
             dashboard.watch(true);
             shadowOf(Looper.getMainLooper()).idle();
             Message previous = requests.get(0);

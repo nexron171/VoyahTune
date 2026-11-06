@@ -43,7 +43,9 @@ public final class FuelFlapWidgetView extends View {
             new PorterDuffColorFilter(INK, PorterDuff.Mode.SRC_IN);
     private final PorterDuffColorFilter reserveTint =
             new PorterDuffColorFilter(AMBER, PorterDuff.Mode.SRC_IN);
+    private final FuelFlapWidgetLayout layout;
     private final Typeface regular;
+    private final Typeface bold;
     private Shader liquid;
     private float percent = -1;
     private String refillText;
@@ -53,9 +55,11 @@ public final class FuelFlapWidgetView extends View {
     private boolean canOpen;
     private AlertDialog confirmation;
 
-    public FuelFlapWidgetView(Context context, Runnable open) {
+    public FuelFlapWidgetView(Context context, FuelFlapWidgetLayout layout, Runnable open) {
         super(context);
+        this.layout = layout;
         regular = getResources().getFont(R.font.settings_arimo_regular);
+        bold = Typeface.create(regular, Typeface.BOLD);
         glass = artwork(R.drawable.fuel_gauge_glass);
         face = artwork(R.drawable.fuel_gauge_face);
         digits = artwork(R.drawable.fuel_gauge_digits);
@@ -157,13 +161,42 @@ public final class FuelFlapWidgetView extends View {
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
         canvas.save();
-        fitCanvas(canvas, 420, 194);
-        canvas.drawBitmap(glass, 0, 0, artwork);
-        drawFuel(canvas);
-        canvas.drawBitmap(face, 0, 0, artwork);
-        drawLiters(canvas, refillText, 82, false);
-        drawLiters(canvas, remainingText, 163, percent >= 0 && percent <= 5);
-        drawStatus(canvas, 32, 182, 356, 18);
+        switch (layout) {
+            case STANDARD:
+                fitCanvas(canvas, 420, 194);
+                canvas.drawBitmap(glass, 0, 0, artwork);
+                drawFuel(canvas);
+                canvas.drawBitmap(face, 0, 0, artwork);
+                drawLiters(canvas, refillText, 82, false);
+                drawLiters(canvas, remainingText, 163, isReserve());
+                drawStatus(canvas, 32, 182, 356, 18);
+                break;
+            case WIDE:
+                fitCanvas(canvas, 432, 130);
+                drawGauge(canvas, 35, 10, 104);
+                drawVolumeRows(canvas, 177, 398, 48, 35, 16, 25);
+                drawStatus(canvas, 35, 120, 362, 12);
+                break;
+            case LARGE:
+                fitCanvas(canvas, 286, 267);
+                drawGauge(canvas, 66, 16, 154);
+                drawVolumeRows(canvas, 31, 255, 175, 32, 16, 24);
+                drawStatus(canvas, 31, 253, 224, 12);
+                break;
+            case TALL:
+                fitCanvas(canvas, 140, 267);
+                drawGauge(canvas, 18, 13, 104);
+                drawStackedVolume(canvas, "До полного", refillText, 125, INK);
+                drawStackedVolume(canvas, "В баке", remainingText, 176, remainingColor());
+                drawStatus(canvas, 18, 251, 116, 12);
+                break;
+            case COMPACT:
+                fitCanvas(canvas, 140, 130);
+                drawGauge(canvas, 45, 5, 50);
+                drawVolumeRows(canvas, 11, 129, 66, 20, 12, 16);
+                drawStatus(canvas, 11, 121, 118, 12);
+                break;
+        }
         canvas.restore();
     }
 
@@ -172,6 +205,73 @@ public final class FuelFlapWidgetView extends View {
         canvas.translate((getWidth() - width * scale) / 2, (getHeight() - height * scale) / 2);
         canvas.scale(scale, scale);
         artwork.setFilterBitmap(scale != 1f);
+    }
+
+    private void drawGauge(Canvas canvas, int left, int top, int width) {
+        canvas.save();
+        canvas.translate(left, top);
+        float scale = width / 156f;
+        canvas.scale(scale, scale);
+        canvas.translate(-29, -26);
+        // Only the left part of the dial face belongs to the gauge.
+        canvas.clipRect(29, 26, 185, 153);
+        artwork.setFilterBitmap(true);
+        canvas.drawBitmap(glass, 0, 0, artwork);
+        drawFuel(canvas);
+        canvas.drawBitmap(face, 0, 0, artwork);
+        canvas.restore();
+    }
+
+    private boolean isReserve() {
+        return percent >= 0 && percent <= 5;
+    }
+
+    private int remainingColor() {
+        return isReserve() ? AMBER : INK;
+    }
+
+    private void drawVolumeRows(
+            Canvas canvas,
+            int left,
+            int right,
+            int baseline,
+            int spacing,
+            int labelSize,
+            int valueSize) {
+        drawVolumeRow(
+                canvas, "До полного", refillText, left, right, baseline, labelSize, valueSize, INK);
+        drawVolumeRow(
+                canvas,
+                "В баке",
+                remainingText,
+                left,
+                right,
+                baseline + spacing,
+                labelSize,
+                valueSize,
+                remainingColor());
+    }
+
+    private void drawVolumeRow(
+            Canvas canvas,
+            String label,
+            String value,
+            int left,
+            int right,
+            int baseline,
+            int labelSize,
+            int valueSize,
+            int color) {
+        text(canvas, label, left, baseline, labelSize, regular, SECONDARY);
+        paint.setTextAlign(Paint.Align.RIGHT);
+        text(canvas, value, right, baseline, valueSize, bold, color);
+        paint.setTextAlign(Paint.Align.LEFT);
+    }
+
+    private void drawStackedVolume(
+            Canvas canvas, String label, String value, int baseline, int color) {
+        text(canvas, label, 18, baseline, 13, regular, SECONDARY);
+        text(canvas, value, 18, baseline + 25, 24, bold, color);
     }
 
     private void drawStatus(Canvas canvas, int x, int baseline, int width, int fontSize) {
