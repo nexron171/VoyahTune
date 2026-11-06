@@ -26,6 +26,7 @@ import ru.big.town.restoremode.dashboard.DashboardProfile;
 import ru.big.town.restoremode.dashboard.tiles.TileOrderStore;
 import ru.big.town.restoremode.dashboard.tiles.TileScrollSnap;
 import ru.big.town.restoremode.integration.GlobalVars;
+import ru.big.town.restoremode.scenarios.ScenarioStore;
 import ru.big.town.restoremode.settings.core.SettingsHost;
 import ru.big.town.restoremode.settings.core.SettingsSection;
 import ru.big.town.restoremode.settings.core.SettingsSectionFragment;
@@ -61,6 +62,30 @@ public class MainSettingsFragment extends SettingsSectionFragment {
     private SharedPreferences globalPreferences;
     private MainSettingsCategory category;
     private Parcelable menuScroll;
+
+    private final SharedPreferences.OnSharedPreferenceChangeListener orderChanged =
+            (prefs, key) -> {
+                if (TileOrderStore.ORDER_KEY.equals(key)) refreshDynamicTiles();
+            };
+
+    private void refreshDynamicTiles() {
+        if (category == MainSettingsCategory.APPLICATIONS
+                || category == MainSettingsCategory.CARPLAY
+                || category == MainSettingsCategory.LINKS) refreshSettingsRows();
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        preferences.registerOnSharedPreferenceChangeListener(orderChanged);
+        refreshDynamicTiles();
+    }
+
+    @Override
+    public void onPause() {
+        preferences.unregisterOnSharedPreferenceChangeListener(orderChanged);
+        super.onPause();
+    }
 
     @Override
     public void onCreate(Bundle state) {
@@ -271,10 +296,39 @@ public class MainSettingsFragment extends SettingsSectionFragment {
                 });
     }
 
+    private void bindHiddenScenarios(Button restore) {
+        List<ScenarioStore.Scenario> hidden = ScenarioStore.load(globalPreferences);
+        hidden.removeIf(
+                scenario ->
+                        !scenario.enabled
+                                || !scenario.showTile
+                                || !TileOrderStore.isScenarioHidden(preferences, scenario.id));
+        restore.setVisibility(hidden.isEmpty() ? View.GONE : View.VISIBLE);
+        restore.setOnClickListener(
+                view -> {
+                    String[] labels = new String[hidden.size()];
+                    for (int index = 0; index < hidden.size(); index++) {
+                        labels[index] = hidden.get(index).name;
+                    }
+                    new android.app.AlertDialog.Builder(requireContext())
+                            .setTitle("Вернуть плитку сценария")
+                            .setItems(
+                                    labels,
+                                    (dialog, index) -> {
+                                        TileOrderStore.setScenarioHidden(
+                                                preferences, hidden.get(index).id, false);
+                                        syncTiles();
+                                        bindHiddenScenarios(restore);
+                                    })
+                            .show();
+                });
+    }
+
     private void bindMainGrid() {
         if (settingView(R.id.switchFullscreenGrid) == null) {
             return;
         }
+        bindHiddenScenarios(settingView(R.id.restoreScenarioTile));
         Switch switchFullscreenGrid = settingView(R.id.switchFullscreenGrid);
         NumberPicker pickerFullscreenGridColumns = settingView(R.id.pickerFullscreenGridColumns);
         pickerFullscreenGridColumns.setMinValue(0);

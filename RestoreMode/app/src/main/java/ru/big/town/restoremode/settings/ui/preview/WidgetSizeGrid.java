@@ -21,7 +21,10 @@ import ru.big.town.restoremode.settings.ui.style.SettingsDesign;
 import java.util.ArrayList;
 import java.util.List;
 
-public final class WidgetSizeGrid extends LinearLayout {
+public final class WidgetSizeGrid extends LinearLayout
+        implements SharedPreferences.OnSharedPreferenceChangeListener {
+    private SharedPreferences preferences;
+
     public interface AllowedSize {
         boolean contains(int columns, int rows);
     }
@@ -69,6 +72,37 @@ public final class WidgetSizeGrid extends LinearLayout {
         if (widgetId == null) {
             return;
         }
+        if (this.preferences != null && isAttachedToWindow()) {
+            this.preferences.unregisterOnSharedPreferenceChangeListener(this);
+        }
+        this.preferences = preferences;
+        if (isAttachedToWindow()) preferences.registerOnSharedPreferenceChangeListener(this);
+        readSize();
+    }
+
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        if (preferences != null) {
+            preferences.registerOnSharedPreferenceChangeListener(this);
+            readSize();
+        }
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        if (preferences != null) preferences.unregisterOnSharedPreferenceChangeListener(this);
+        super.onDetachedFromWindow();
+    }
+
+    @Override
+    public void onSharedPreferenceChanged(SharedPreferences prefs, String key) {
+        if (key == null
+                || key.equals("tileWidth_" + widgetId)
+                || key.equals("tileHeight_" + widgetId)) readSize();
+    }
+
+    private void readSize() {
         int[] size = TileSizeStore.dimensions(preferences, widgetId, defaultColumns, defaultRows);
         bind(
                 size[0],

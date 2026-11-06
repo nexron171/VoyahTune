@@ -28,6 +28,8 @@ import android.os.Messenger;
 import android.os.RemoteException;
 import android.os.SystemClock;
 import android.provider.Settings;
+import android.transition.ChangeBounds;
+import android.transition.TransitionManager;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.GestureDetector;
@@ -49,6 +51,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.activity.EdgeToEdge;
+import androidx.activity.OnBackPressedCallback;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
@@ -71,6 +74,7 @@ import ru.big.town.restoremode.appearance.DashboardAppearance;
 import ru.big.town.restoremode.apps.AppDpiStore;
 import ru.big.town.restoremode.apps.split.SplitStore;
 import ru.big.town.restoremode.carplay.CarPlayWidgetPlaceholder;
+import ru.big.town.restoremode.dashboard.tiles.DashboardEditGrid;
 import ru.big.town.restoremode.dashboard.tiles.TileDragController;
 import ru.big.town.restoremode.dashboard.tiles.TileGridPacking;
 import ru.big.town.restoremode.dashboard.tiles.TileOrderStore;
@@ -83,6 +87,7 @@ import ru.big.town.restoremode.scenarios.ScenarioStore;
 import ru.big.town.restoremode.settings.core.SettingsSection;
 import ru.big.town.restoremode.trips.location.TripLocationPermission;
 import ru.big.town.restoremode.voice.commands.VoiceCommands;
+import ru.big.town.restoremode.widgets.apps.AppShortcutStore;
 import ru.big.town.restoremode.widgets.apps.AppWidgetSessionStore;
 import ru.big.town.restoremode.widgets.apps.AppWidgetStore;
 import ru.big.town.restoremode.widgets.brightness.BrightnessWidgetDashboard;
@@ -263,7 +268,9 @@ public class DashboardActivity extends AppCompatActivity {
     private static final int BH_COLOR_FAULT = 0xFFD04A4A; // красный — неисправность ВВБ
 
     // Сплиты — прокручиваемая сетка плиток по пресетам из «Разделение экрана»
-    private GridLayout splitTilesGrid;
+    private DashboardEditGrid splitTilesGrid;
+    private Button finishEditing;
+    private OnBackPressedCallback editBack;
     // Верхний инсет контента — тот же, что уходит в padding mainContent (нижний всегда 0).
     private int contentInsetTop;
     // «Полноэкранная сетка»: верхний ряд плиток растягивается до границы экрана.
@@ -1249,6 +1256,7 @@ public class DashboardActivity extends AppCompatActivity {
         GlobalVars.sharedPreferences = settingsPreferences;
 
         splitTilesGrid = findViewById(R.id.splitTilesGrid);
+        configureDesktopEditor();
         gridPaddingTop = splitTilesGrid.getPaddingTop();
         gridPaddingBottom = splitTilesGrid.getPaddingBottom();
 
@@ -1829,73 +1837,86 @@ public class DashboardActivity extends AppCompatActivity {
         sendMessageToService(ru.big.town.common.TaskManagerProtocol.REQUEST);
     }
 
-    private boolean isWidgetVisible(String widgetId) {
+    private String visibilityKey(String widgetId) {
         if (ClockWidgetView.ID.equals(widgetId)
                 || VehicleWidgets.isWidget(widgetId)
                 || SystemWidgetLayout.isWidget(widgetId)
                 || MediaWidgetLayout.isWidget(widgetId)) {
-            return sharedPreferences.getBoolean("show_" + widgetId, false);
+            return "show_" + widgetId;
         }
         switch (widgetId) {
             case RadioWidgetLayout.ID:
-                return sharedPreferences.getBoolean(RadioWidgetLayout.VISIBLE, false);
+                return RadioWidgetLayout.VISIBLE;
             case RecirculationWidgetLayout.ID:
-                return sharedPreferences.getBoolean(RecirculationWidgetLayout.VISIBLE, false);
+                return RecirculationWidgetLayout.VISIBLE;
             case FuelFlapWidgetLayout.ID:
-                return sharedPreferences.getBoolean(FuelFlapWidgetLayout.VISIBLE, false);
+                return FuelFlapWidgetLayout.VISIBLE;
             case CabinTemperatureWidgetLayout.ID:
-                return sharedPreferences.getBoolean(CabinTemperatureWidgetLayout.VISIBLE, false);
+                return CabinTemperatureWidgetLayout.VISIBLE;
             case BrightnessWidgetLayout.ID:
-                return sharedPreferences.getBoolean(BrightnessWidgetLayout.VISIBLE, false);
+                return BrightnessWidgetLayout.VISIBLE;
             case HeadlightWidgetLayout.ID:
-                return sharedPreferences.getBoolean(HeadlightWidgetLayout.VISIBLE, false);
+                return HeadlightWidgetLayout.VISIBLE;
             case "suspensionWidget":
-                return sharedPreferences.getBoolean("showSuspensionWidget", false);
+                return "showSuspensionWidget";
             case "tripCard":
-                return sharedPreferences.getBoolean(
-                        "showTripTimer", dashboardProfile.defaultVisible(true));
+                return "showTripTimer";
             case "cardPowerHold":
             case "cardLeaveCar":
-                return sharedPreferences.getBoolean(
-                        "showPowerHold", dashboardProfile.defaultVisible(true));
+                return "showPowerHold";
             case "cardWashMode":
-                return sharedPreferences.getBoolean(
-                        "showWashMode", dashboardProfile.defaultVisible(true));
+                return "showWashMode";
             case "cardRearFog":
-                return sharedPreferences.getBoolean("showRearFog", false);
+                return "showRearFog";
             case "cardHotspot":
-                return sharedPreferences.getBoolean("showHotspot", false);
+                return "showHotspot";
             case "cardAutoLight":
-                return sharedPreferences.getBoolean(
-                        "showAutoLight", dashboardProfile.defaultVisible(true));
+                return "showAutoLight";
             case "cardPedestrian":
-                return sharedPreferences.getBoolean(
-                        "showPedestrian", dashboardProfile.defaultVisible(true));
+                return "showPedestrian";
             case "cardSuspensionMaintenance":
-                return sharedPreferences.getBoolean("showSuspensionMaintenance", false);
+                return "showSuspensionMaintenance";
             case "cardForcedEv":
-                return sharedPreferences.getBoolean("showForcedEv", false);
+                return "showForcedEv";
             case "cardVoiceCommand":
-                return sharedPreferences.getBoolean("showVoiceCommand", false);
+                return "showVoiceCommand";
             case "cardScenarios":
-                return sharedPreferences.getBoolean(
-                        "showScenariosCard", dashboardProfile.defaultVisible(true));
+                return "showScenariosCard";
             case "cardBatteryHeat":
-                return sharedPreferences.getBoolean(
-                        "showBatteryHeat", dashboardProfile.defaultVisible(true));
+                return "showBatteryHeat";
             case "launchAppsWidget":
-                return sharedPreferences.getBoolean("showLaunchAppsWidget", false);
+                return "showLaunchAppsWidget";
             case "taskManagerTile":
-                return sharedPreferences.getBoolean(
-                        "showTaskManagerTile", dashboardProfile.defaultVisible(true));
+                return "showTaskManagerTile";
             case "passengerDashboardTile":
-                return sharedPreferences.getBoolean("showPassengerDashboardTile", false);
+                return "showPassengerDashboardTile";
             case "cardAndroidSettings":
-                return sharedPreferences.getBoolean(
-                        "showAndroidSettings", dashboardProfile.defaultVisible(true));
+                return "showAndroidSettings";
             // The VoyahTune settings entry always remains accessible.
             default:
-                return true;
+                return null;
+        }
+    }
+
+    private boolean isWidgetVisible(String widgetId) {
+        String key = visibilityKey(widgetId);
+        if (key == null) {
+            return true;
+        }
+        switch (widgetId) {
+            case "tripCard":
+            case "cardLeaveCar":
+            case "cardWashMode":
+            case "cardAutoLight":
+            case "cardPedestrian":
+            case "cardScenarios":
+            case "cardBatteryHeat":
+            case "taskManagerTile":
+            case "cardAndroidSettings":
+            case "cardPowerHold":
+                return sharedPreferences.getBoolean(key, dashboardProfile.defaultVisible(true));
+            default:
+                return sharedPreferences.getBoolean(key, false);
         }
     }
 
@@ -2097,6 +2118,7 @@ public class DashboardActivity extends AppCompatActivity {
         int tileH = (availableH / 5) - 2 * m;
         // Шаг колонки: ширина плитки плюс её отступы слева и справа.
         tilePitchPx = tileW + 2 * m;
+        splitTilesGrid.beginLayout(tilePitchPx, tileH + 2 * m);
         final int rows = 5;
         // Высота сетки не делится на число рядов нацело. Остаток (до 4px) раздаём по
         // одному пикселю верхним рядам, иначе под нижним рядом остаётся пустая полоса.
@@ -2157,11 +2179,6 @@ public class DashboardActivity extends AppCompatActivity {
                         .setImageResource(R.drawable.ic_link_shortcut);
                 ((TextView) linkView.findViewById(R.id.tileTitle)).setText(entry.name);
                 linkView.setOnClickListener(view -> LinkShortcutLauncher.open(this, entry));
-                linkView.setOnLongClickListener(
-                        view -> {
-                            startTileDrag(view, TileOrderStore.Tile.TYPE_LINK, entry.id);
-                            return true;
-                        });
                 int[] gridPosition = TileGridPacking.place(occupied, rows, 1, 1);
                 GridLayout.LayoutParams linkLayout = new GridLayout.LayoutParams();
                 linkLayout.width = tileW;
@@ -2178,7 +2195,7 @@ public class DashboardActivity extends AppCompatActivity {
                         stretchedColumns);
                 linkView.setLayoutParams(linkLayout);
                 splitTilesGrid.addView(linkView);
-                tileDragController.add(linkView, tilePos, 1, 1);
+                bindEditableTile(linkView, tile, tilePos, 1, 1);
                 continue;
             }
 
@@ -2206,11 +2223,6 @@ public class DashboardActivity extends AppCompatActivity {
                                         ? "Номер не задан"
                                         : finalDialEntry.number);
                 dialView.setOnClickListener(v -> onDialNumber(finalDialEntry));
-                dialView.setOnLongClickListener(
-                        v -> {
-                            startTileDrag(v, TileOrderStore.Tile.TYPE_DIAL, finalDialEntry.id);
-                            return true;
-                        });
                 int[] gridPosition = TileGridPacking.place(occupied, rows, 2, 1);
                 GridLayout.LayoutParams dialLp = new GridLayout.LayoutParams();
                 dialLp.width = tileW * 2 + m * 2;
@@ -2227,7 +2239,7 @@ public class DashboardActivity extends AppCompatActivity {
                         stretchedColumns);
                 dialView.setLayoutParams(dialLp);
                 splitTilesGrid.addView(dialView);
-                tileDragController.add(dialView, tilePos, 2, 1);
+                bindEditableTile(dialView, tile, tilePos, 2, 1);
                 continue;
             }
 
@@ -2241,11 +2253,6 @@ public class DashboardActivity extends AppCompatActivity {
                 ((TextView) scenarioView.findViewById(R.id.scenarioTileName))
                         .setText(finalScenario.name.isEmpty() ? "Сценарий" : finalScenario.name);
                 scenarioView.setOnClickListener(v -> runScenario(finalScenario));
-                scenarioView.setOnLongClickListener(
-                        v -> {
-                            startTileDrag(v, TileOrderStore.Tile.TYPE_SCENARIO, finalScenario.id);
-                            return true;
-                        });
                 int[] gridPosition = TileGridPacking.place(occupied, rows, 2, 1);
                 GridLayout.LayoutParams scenarioLp = new GridLayout.LayoutParams();
                 scenarioLp.width = tileW * 2 + m * 2;
@@ -2262,7 +2269,7 @@ public class DashboardActivity extends AppCompatActivity {
                         stretchedColumns);
                 scenarioView.setLayoutParams(scenarioLp);
                 splitTilesGrid.addView(scenarioView);
-                tileDragController.add(scenarioView, tilePos, 2, 1);
+                bindEditableTile(scenarioView, tile, tilePos, 2, 1);
                 continue;
             }
 
@@ -2490,11 +2497,6 @@ public class DashboardActivity extends AppCompatActivity {
                     requestTaskCount();
                 }
 
-                widgetView.setOnLongClickListener(
-                        v -> {
-                            startTileDrag(v, TileOrderStore.Tile.TYPE_WIDGET, tile.id);
-                            return true;
-                        });
 
                 // Установить размер виджета в сетке
                 int[] dims = getWidgetDimensions(tile.id);
@@ -2515,7 +2517,7 @@ public class DashboardActivity extends AppCompatActivity {
                 widgetView.setLayoutParams(lp);
 
                 splitTilesGrid.addView(widgetView);
-                tileDragController.add(widgetView, tilePos, dims[0], dims[1]);
+                bindEditableTile(widgetView, tile, tilePos, dims[0], dims[1]);
                 continue; // пропустить остальную обработку для этого элемента
             }
 
@@ -2547,7 +2549,7 @@ public class DashboardActivity extends AppCompatActivity {
                         stretchedColumns);
                 appWidgetView.setLayoutParams(lp);
                 splitTilesGrid.addView(appWidgetView);
-                tileDragController.add(appWidgetView, tilePos, widgetWidth, widgetHeight);
+                bindEditableTile(appWidgetView, tile, tilePos, widgetWidth, widgetHeight);
                 if (!CarPlayTarget.isCarPlay(entry.packageName)) {
                     AppWidgetSessionStore.Launch sessionLaunch =
                             AppWidgetSessionStore.findLaunch(
@@ -2594,12 +2596,6 @@ public class DashboardActivity extends AppCompatActivity {
                 state.setText("");
                 tileView.setOnClickListener(v -> onSplitTileClick(finalPreset));
 
-                // Долгий тап сразу начинает перемещение карточки.
-                tileView.setOnLongClickListener(
-                        v -> {
-                            startTileDrag(v, TileOrderStore.Tile.TYPE_SPLIT, preset.id);
-                            return true;
-                        });
 
                 int[] gridPosition = TileGridPacking.place(occupied, rows, 2, 1);
                 GridLayout.LayoutParams lp = new GridLayout.LayoutParams();
@@ -2610,7 +2606,7 @@ public class DashboardActivity extends AppCompatActivity {
                         lp, m, tileH, gridPosition, 1, rowRemainder, topInset, stretchedColumns);
                 tileView.setLayoutParams(lp);
                 splitTilesGrid.addView(tileView);
-                tileDragController.add(tileView, tilePos, 2, 1);
+                bindEditableTile(tileView, tile, tilePos, 2, 1);
 
             } else if (TileOrderStore.Tile.TYPE_APP.equals(tile.type)) {
                 // Это плитка приложения
@@ -2641,12 +2637,6 @@ public class DashboardActivity extends AppCompatActivity {
                 title.setText(name);
                 tileView.setOnClickListener(v -> onAppTileClick(pkg));
 
-                // Долгий тап сразу начинает перемещение карточки.
-                tileView.setOnLongClickListener(
-                        v -> {
-                            startTileDrag(v, TileOrderStore.Tile.TYPE_APP, pkg);
-                            return true;
-                        });
 
                 int[] gridPosition = TileGridPacking.place(occupied, rows, 1, 1);
                 GridLayout.LayoutParams lp = new GridLayout.LayoutParams();
@@ -2657,7 +2647,7 @@ public class DashboardActivity extends AppCompatActivity {
                         lp, m, tileH, gridPosition, 1, rowRemainder, topInset, stretchedColumns);
                 tileView.setLayoutParams(lp);
                 splitTilesGrid.addView(tileView);
-                tileDragController.add(tileView, tilePos, 1, 1);
+                bindEditableTile(tileView, tile, tilePos, 1, 1);
             }
         }
         appearance.apply(splitTilesGrid);
@@ -2761,16 +2751,22 @@ public class DashboardActivity extends AppCompatActivity {
         if (sessionLaunch == null) {
             pendingAutoStartWidgets.add(entry.id);
         }
-        widgetView.postDelayed(
+        uiHandler.postDelayed(
                 () -> {
-                    pendingAutoStartWidgets.remove(entry.id);
+                    View current = appWidgetTileViews.get(entry.id);
+                    if (sessionLaunch == null && !pendingAutoStartWidgets.remove(entry.id)) return;
                     if (!suspensionScreenResumed
                             || destroyed
-                            || appWidgetTileViews.get(entry.id) != widgetView
+                            || current == null
+                            || (sessionLaunch != null && current != widgetView)
                             || embeddedWidgetSurfaces.containsKey(entry.id)) {
                         return;
                     }
-                    showEmbeddedAppWidget(widgetView, entry, packageName, dpi);
+                    // A layout edit may replace the tile during its configured startup delay.
+                    AppWidgetStore.Entry configured =
+                            AppWidgetStore.find(sharedPreferences, entry.id);
+                    if (configured != null)
+                        showEmbeddedAppWidget(current, configured, packageName, dpi);
                 },
                 Math.max(0, delaySeconds) * 1000L);
     }
@@ -2840,7 +2836,8 @@ public class DashboardActivity extends AppCompatActivity {
             // Пользователь перехватил прокрутку: анимация больше не нужна.
             cancelGridSnap();
         }
-        if (tileDragController != null && tileDragController.isDragging()) {
+        if (splitTilesGrid.isEditing()
+                || (tileDragController != null && tileDragController.isDragging())) {
             return;
         }
         if (gridSnapMode() == TileScrollSnap.Mode.OFF) {
@@ -2893,7 +2890,9 @@ public class DashboardActivity extends AppCompatActivity {
 
     /** «По целой странице»: доводим страницу сразу после отпускания, не ожидая паузы покоя. */
     private void snapPageOnRelease() {
-        if (contentScroll == null || gridSnapMode() != TileScrollSnap.Mode.PAGE) {
+        if (splitTilesGrid.isEditing()
+                || contentScroll == null
+                || gridSnapMode() != TileScrollSnap.Mode.PAGE) {
             return;
         }
         // Жест завершён: пауза покоя не нужна, а инерцию гасим, чтобы анимация вела сетку сама.
@@ -3004,10 +3003,179 @@ public class DashboardActivity extends AppCompatActivity {
         TileOrderStore.save(sharedPreferences, tiles);
     }
 
-    private void startTileDrag(View view, String type, String id) {
-        if (tileDragController != null) {
-            tileDragController.start(view);
+    private void configureDesktopEditor() {
+        editBack =
+                new OnBackPressedCallback(false) {
+                    @Override
+                    public void handleOnBackPressed() {
+                        splitTilesGrid.setEditing(false);
+                    }
+                };
+        getOnBackPressedDispatcher().addCallback(this, editBack);
+        splitTilesGrid.setActions(
+                new DashboardEditGrid.Actions() {
+                    @Override
+                    public void editingChanged(boolean editing) {
+                        cancelGridSnap();
+                        editBack.setEnabled(editing);
+                        for (String id : embeddedWidgetSurfaces.keySet()) {
+                            showWindowControls(appWidgetTileViews.get(id), editing);
+                        }
+                        FrameLayout root = findViewById(android.R.id.content);
+                        if (editing) {
+                            finishEditing =
+                                    (Button)
+                                            getLayoutInflater()
+                                                    .inflate(
+                                                            R.layout.dashboard_edit_done,
+                                                            root,
+                                                            false);
+                            finishEditing.setOnClickListener(
+                                    view -> splitTilesGrid.setEditing(false));
+                            FrameLayout.LayoutParams params =
+                                    (FrameLayout.LayoutParams) finishEditing.getLayoutParams();
+                            params.topMargin += contentInsetTop;
+                            root.addView(finishEditing, params);
+                        } else if (finishEditing != null) {
+                            if (tileDragController != null) tileDragController.cancel();
+                            root.removeView(finishEditing);
+                            finishEditing = null;
+                        }
+                    }
+
+                    @Override
+                    public void move(View tile) {
+                        tileDragController.start(tile);
+                    }
+
+                    @Override
+                    public void remove(TileOrderStore.Tile tile, View view) {
+                        removeDesktopTile(tile, view);
+                    }
+
+                    @Override
+                    public void resize(TileOrderStore.Tile tile, int columns, int rows) {
+                        if (TileOrderStore.Tile.TYPE_APP_WIDGET.equals(tile.type)) {
+                            AppWidgetStore.Entry entry =
+                                    AppWidgetStore.find(sharedPreferences, tile.id);
+                            if (entry == null) {
+                                return;
+                            }
+                            entry.width = columns;
+                            entry.height = rows;
+                            AppWidgetStore.update(sharedPreferences, entry);
+                            if (entry.profiles.size() == 1
+                                    && CarPlayTarget.isCarPlay(entry.packageName)) {
+                                TileSizeStore.setSize(
+                                        sharedPreferences,
+                                        "carPlayWindow:" + entry.id,
+                                        columns,
+                                        rows);
+                            }
+                        } else {
+                            TileSizeStore.setSize(sharedPreferences, tile.id, columns, rows);
+                        }
+                        animateDesktopLayout();
+                    }
+                });
+    }
+
+    private void bindEditableTile(
+            View view, TileOrderStore.Tile tile, int position, int columns, int rows) {
+        tileDragController.add(view, position, columns, rows);
+        DashboardEditGrid.Sizes sizes = null;
+        if (TileOrderStore.Tile.TYPE_WIDGET.equals(tile.type)
+                && TileSizeStore.isResizable(tile.id)) {
+            sizes = (width, height) -> TileSizeStore.supportsSize(tile.id, width, height);
+        } else if (TileOrderStore.Tile.TYPE_APP_WIDGET.equals(tile.type)) {
+            AppWidgetStore.Entry entry = AppWidgetStore.find(sharedPreferences, tile.id);
+            if (entry != null) {
+                boolean dedicatedCarPlay =
+                        entry.profiles.size() == 1 && CarPlayTarget.isCarPlay(entry.packageName);
+                if (!dedicatedCarPlay
+                        || !CarPlayTarget.opensActivity(entry.packageName, columns, rows)) {
+                    sizes =
+                            (width, height) ->
+                                    !dedicatedCarPlay
+                                            || !CarPlayTarget.opensActivity(
+                                                    entry.packageName, width, height);
+                }
+            }
         }
+        splitTilesGrid.register(view, tile, columns, rows, sizes);
+    }
+
+    private void animateDesktopLayout() {
+        ChangeBounds transition = new ChangeBounds();
+        transition.setDuration(220);
+        for (int index = 0; index < splitTilesGrid.getChildCount(); index++) {
+            String name = splitTilesGrid.getChildAt(index).getTransitionName();
+            if (name != null) {
+                transition.addTarget(name);
+            }
+        }
+        TransitionManager.beginDelayedTransition(splitTilesGrid, transition);
+        renderSplitTiles();
+    }
+
+    private void removeDesktopTile(TileOrderStore.Tile tile, View view) {
+        switch (tile.type) {
+            case TileOrderStore.Tile.TYPE_WIDGET:
+                String key = visibilityKey(tile.id);
+                if (key == null) {
+                    return;
+                }
+                sharedPreferences.edit().putBoolean(key, false).apply();
+                break;
+            case TileOrderStore.Tile.TYPE_APP_WIDGET:
+                pendingAutoStartWidgets.remove(tile.id);
+                AppWidgetSessionStore.forgetLaunch(
+                        sharedPreferences, currentWidgetSessionId(), tile.id);
+                AppWidgetStore.remove(sharedPreferences, tile.id);
+                releaseEmbeddedWidget(tile.id, view);
+                TileSizeStore.clear(sharedPreferences, "carPlayWindow:" + tile.id);
+                break;
+            case TileOrderStore.Tile.TYPE_APP:
+                List<String> apps = AppShortcutStore.load(sharedPreferences);
+                apps.remove(tile.id);
+                AppShortcutStore.save(sharedPreferences, apps);
+                break;
+            case TileOrderStore.Tile.TYPE_DIAL:
+                List<DialWidgetStore.Entry> dials = DialWidgetStore.load(sharedPreferences);
+                dials.removeIf(entry -> tile.id.equals(entry.id));
+                if (dials.isEmpty())
+                    sharedPreferences
+                            .edit()
+                            .remove("dialWidgetNumber")
+                            .remove("dialWidgetContactName")
+                            .apply();
+                DialWidgetStore.save(sharedPreferences, dials);
+                break;
+            case TileOrderStore.Tile.TYPE_LINK:
+                LinkShortcutStore.remove(sharedPreferences, tile.id);
+                break;
+            case TileOrderStore.Tile.TYPE_SPLIT:
+                List<SplitStore.Preset> presets = SplitStore.load(settingsPreferences);
+                for (SplitStore.Preset preset : presets) {
+                    if (tile.id.equals(preset.id)) {
+                        preset.showOnHome = false;
+                    }
+                }
+                SplitStore.save(settingsPreferences, presets);
+                SplitConfigSync.pushAll(this, settingsPreferences);
+                break;
+            case TileOrderStore.Tile.TYPE_SCENARIO:
+                TileOrderStore.setScenarioHidden(sharedPreferences, tile.id, true);
+                break;
+            default:
+                return;
+        }
+        TileOrderStore.sync(
+                sharedPreferences,
+                settingsPreferences,
+                getPackageManager(),
+                dashboardProfile.isPassenger());
+        animateDesktopLayout();
     }
 
     /**
@@ -3044,10 +3212,12 @@ public class DashboardActivity extends AppCompatActivity {
         PackageManager pm = getPackageManager();
         LayoutInflater inf = LayoutInflater.from(this);
         entry.ensureProfiles();
-        // Clickable profile items and the scroll container consume touches before the root.
-        // Route long presses from each launcher surface to dragging the whole tile.
+        // Child launchers consume holds before the tile root.
         View.OnLongClickListener dragLauncher =
-                v -> tileDragController != null && tileDragController.start(widgetView);
+                v -> {
+                    splitTilesGrid.setEditing(true);
+                    return true;
+                };
         widgetView.setOnLongClickListener(dragLauncher);
         list.setOnLongClickListener(dragLauncher);
 
@@ -3138,6 +3308,16 @@ public class DashboardActivity extends AppCompatActivity {
     }
 
     /** Badge is only shown together with the controls that operate the embedded tile. */
+    private void showWindowControls(View widget, boolean visible) {
+        if (widget == null) return;
+        View controls = widget.findViewById(R.id.appWidgetOverlayControls);
+        if (controls != null) {
+            controls.setVisibility(visible ? View.VISIBLE : View.GONE);
+            if (visible) controls.bringToFront();
+        }
+        setAppWidgetBadgeVisible(widget, visible);
+    }
+
     private void setAppWidgetBadgeVisible(View widgetView, boolean visible) {
         if (widgetView == null) {
             return;
@@ -3239,8 +3419,8 @@ public class DashboardActivity extends AppCompatActivity {
                 dragBtn.setVisibility(View.VISIBLE);
                 dragBtn.setOnLongClickListener(
                         v -> {
-                            startTileDrag(
-                                    widgetView, TileOrderStore.Tile.TYPE_APP_WIDGET, widgetId);
+                            if (splitTilesGrid.isEditing()) tileDragController.start(widgetView);
+                            else splitTilesGrid.setEditing(true);
                             return true;
                         });
             }
@@ -3322,37 +3502,19 @@ public class DashboardActivity extends AppCompatActivity {
                 new ViewGroup.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         embeddedWidgetSurfaces.put(widgetId, textureView);
-        // The designation belongs to the controls, not to the running application.
-        View badge = widgetView.findViewById(R.id.appWidgetBadge);
-        if (badge != null) {
-            badge.bringToFront();
-        }
-        setAppWidgetBadgeVisible(widgetView, false);
-
-        final GestureDetector longClickDetector =
+        showWindowControls(widgetView, splitTilesGrid.isEditing());
+        textureView.setOnLongClickListener(
+                view -> {
+                    splitTilesGrid.setEditing(true);
+                    return true;
+                });
+        GestureDetector longClickDetector =
                 new GestureDetector(
                         this,
                         new GestureDetector.SimpleOnGestureListener() {
-                            private final Runnable hideControls =
-                                    () -> {
-                                        if (controls != null) {
-                                            controls.setVisibility(View.GONE);
-                                        }
-                                        setAppWidgetBadgeVisible(widgetView, false);
-                                    };
-
                             @Override
-                            public void onLongPress(MotionEvent e) {
-                                if (controls != null) {
-                                    controls.setVisibility(View.VISIBLE);
-                                    controls.bringToFront();
-                                    setAppWidgetBadgeVisible(widgetView, true);
-                                    if (badge != null) {
-                                        badge.bringToFront();
-                                    }
-                                    uiHandler.removeCallbacks(hideControls);
-                                    uiHandler.postDelayed(hideControls, 3000);
-                                }
+                            public void onLongPress(MotionEvent event) {
+                                textureView.performLongClick();
                             }
                         });
 
@@ -4243,6 +4405,7 @@ public class DashboardActivity extends AppCompatActivity {
     @Override
     protected void onPause() {
         super.onPause();
+        splitTilesGrid.setEditing(false);
         cancelGridSnap();
         dashboardOpening = false;
         suspensionScreenResumed = false;

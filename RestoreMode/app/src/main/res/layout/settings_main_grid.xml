@@ -158,5 +158,11 @@
                 android:background="@drawable/settings_field"
                 android:contentDescription="Режим выравнивания сетки после прокрутки" />
         </LinearLayout>
+        <Button
+            android:id="@+id/restoreScenarioTile"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Вернуть плитку сценария"
+            android:visibility="gone" />
     </ru.big.town.restoremode.settings.ui.layout.SettingsGrid>
 </LinearLayout>

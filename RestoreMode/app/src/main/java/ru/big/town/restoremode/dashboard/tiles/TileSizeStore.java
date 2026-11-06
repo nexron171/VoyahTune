@@ -107,9 +107,29 @@ public class TileSizeStore {
                 : AppWidgetStore.clampHeight(value);
     }
 
+    public static boolean isResizable(String widgetId) {
+        return EnergyWidgetLayout.isWidget(widgetId)
+                || MediaWidgetLayout.isWidget(widgetId)
+                || ClockWidgetView.ID.equals(widgetId)
+                || RadioWidgetLayout.ID.equals(widgetId)
+                || HeadlightWidgetLayout.ID.equals(widgetId)
+                || SystemWidgetLayout.CPU.equals(widgetId)
+                || SystemWidgetLayout.RAM.equals(widgetId)
+                || SUSPENSION_WIDGET_ID.equals(widgetId)
+                || LAUNCH_APPS_WIDGET_ID.equals(widgetId);
+    }
+
     public static boolean supportsSize(String widgetId, int columns, int rows) {
         return columns == clampWidth(widgetId, columns)
                 && rows == clampHeight(widgetId, columns, rows);
+    }
+
+    public static void clear(SharedPreferences preferences, String widgetId) {
+        preferences
+                .edit()
+                .remove(WIDTH_KEY_PREFIX + widgetId)
+                .remove(HEIGHT_KEY_PREFIX + widgetId)
+                .apply();
     }
 
     public static void setSize(
