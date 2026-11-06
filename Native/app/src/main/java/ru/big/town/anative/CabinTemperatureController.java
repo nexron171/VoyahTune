@@ -14,6 +14,9 @@ import android.util.Log;
 
 import ru.big.town.common.CabinTemperatureProtocol;
 
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.DoubleConsumer;
+
 /** One last-known cabin observation shared by scenarios and both dashboards. */
 final class CabinTemperatureController {
     private static CabinTemperatureController instance;
@@ -24,6 +27,7 @@ final class CabinTemperatureController {
     private final CabinTemperatureReading reading = new CabinTemperatureReading();
     private final WidgetClients clients = new WidgetClients();
     private final CanBusEventHub.Subscription connection;
+    private final CopyOnWriteArrayList<DoubleConsumer> listeners = new CopyOnWriteArrayList<>();
     private boolean closed;
     private boolean requesting;
     private final BroadcastReceiver updates =
@@ -72,6 +76,11 @@ final class CabinTemperatureController {
         return reading.value();
     }
 
+    ScenarioEnvironment.Subscription subscribe(DoubleConsumer listener) {
+        listeners.add(listener);
+        return () -> listeners.remove(listener);
+    }
+
     private void accept(Bundle values) {
         if (closed || values == null) return;
         int raw = values.getInt(CabinTemperatureProtocol.RAW, -1);
@@ -80,8 +89,12 @@ final class CabinTemperatureController {
                         raw,
                         values.getLong(CabinTemperatureProtocol.SAMPLED_AT, -1),
                         SystemClock.elapsedRealtime());
-        if (accepted && preferences.getInt(SAVED_RAW, -1) != raw) {
-            preferences.edit().putInt(SAVED_RAW, raw).apply();
+        if (accepted) {
+            if (preferences.getInt(SAVED_RAW, -1) != raw) {
+                preferences.edit().putInt(SAVED_RAW, raw).apply();
+            }
+            double temperature = reading.value();
+            for (DoubleConsumer listener : listeners) listener.accept(temperature);
         }
         publish();
     }
@@ -144,6 +157,7 @@ final class CabinTemperatureController {
         connection.close();
         context.unregisterReceiver(updates);
         clients.clear();
+        listeners.clear();
         synchronized (CabinTemperatureController.class) {
             if (instance == this) instance = null;
         }

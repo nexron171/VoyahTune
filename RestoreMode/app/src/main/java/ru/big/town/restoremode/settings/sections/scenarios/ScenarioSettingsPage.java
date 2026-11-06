@@ -49,6 +49,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BiConsumer;
 
 public final class ScenarioSettingsPage {
     private static final String EXPANDED_KEY = "scenarioExpandedId";
@@ -499,6 +500,19 @@ public final class ScenarioSettingsPage {
                                     save();
                                 }));
         buttons.addView(driveMode);
+        MaterialButton cabinTemperature = actionButton("В салоне t°");
+        cabinTemperature.setOnClickListener(view -> pickNumberComparison(
+                "Температура в салоне, °C",
+                ScenarioProtocol.CABIN_THRESHOLD_MIN,
+                ScenarioProtocol.CABIN_THRESHOLD_MAX,
+                1,
+                20,
+                (operator, threshold) -> {
+                    scenario.triggers.add(new ScenarioStore.Trigger(
+                            ScenarioProtocol.TRIGGER_TEMP_IN, String.valueOf(threshold), operator));
+                    save();
+                }));
+        buttons.addView(cabinTemperature);
         block.addView(buttons);
         if (scenario.triggers.isEmpty()) {
             block.addView(
@@ -544,6 +558,9 @@ public final class ScenarioSettingsPage {
     }
 
     private static String describe(ScenarioStore.Trigger trigger) {
+        if (ScenarioProtocol.TRIGGER_TEMP_IN.equals(trigger.type)) {
+            return "В салоне t° " + comparisonSymbol(trigger.edge) + " " + trigger.value + " °C";
+        }
         if (ScenarioProtocol.TRIGGER_DRIVE_MODE.equals(trigger.type)) {
             return "Переход в режим движения: " + trigger.value;
         }
@@ -616,8 +633,8 @@ public final class ScenarioSettingsPage {
                                 scenario,
                                 ScenarioProtocol.CONDITION_TEMP_IN,
                                 "Температура в салоне, °C",
-                                -40,
-                                85,
+                                ScenarioProtocol.CABIN_THRESHOLD_MIN,
+                                ScenarioProtocol.CABIN_THRESHOLD_MAX,
                                 1,
                                 20));
         buttons.addView(cabinTemperature);
@@ -694,6 +711,19 @@ public final class ScenarioSettingsPage {
             int max,
             int step,
             int initial) {
+        pickNumberComparison(title, min, max, step, initial, (operator, value) -> {
+            ScenarioStore.Condition condition = new ScenarioStore.Condition();
+            condition.type = type;
+            condition.op = operator;
+            condition.value = value;
+            scenario.conditions.add(condition);
+            save();
+        });
+    }
+
+    private void pickNumberComparison(
+            String title, int min, int max, int step, int initial,
+            BiConsumer<String, Integer> onPicked) {
         String[] ops = {"не более (≤)", "не менее (≥)", "равно (=)"};
         String[] opsValues = {
             ScenarioProtocol.OP_LE, ScenarioProtocol.OP_GE, ScenarioProtocol.OP_EQ
@@ -708,15 +738,7 @@ public final class ScenarioSettingsPage {
                                 max,
                                 Math.max(min, Math.min(max, initial)),
                                 step,
-                                value -> {
-                                    ScenarioStore.Condition condition =
-                                            new ScenarioStore.Condition();
-                                    condition.type = type;
-                                    condition.op = opsValues[opIndex];
-                                    condition.value = value;
-                                    scenario.conditions.add(condition);
-                                    save();
-                                }));
+                                value -> onPicked.accept(opsValues[opIndex], value)));
     }
 
     private void addTimeCondition(ScenarioStore.Scenario scenario) {
@@ -813,15 +835,13 @@ public final class ScenarioSettingsPage {
         } else {
             name = "Заряд";
         }
-        String op;
-        if (ScenarioProtocol.OP_LE.equals(condition.op)) {
-            op = "≤";
-        } else if (ScenarioProtocol.OP_GE.equals(condition.op)) {
-            op = "≥";
-        } else {
-            op = "=";
-        }
-        return name + " " + op + " " + condition.value;
+        return name + " " + comparisonSymbol(condition.op) + " " + condition.value;
+    }
+
+    private static String comparisonSymbol(String operator) {
+        if (ScenarioProtocol.OP_LE.equals(operator)) return "≤";
+        if (ScenarioProtocol.OP_GE.equals(operator)) return "≥";
+        return "=";
     }
 
     private View stepSection(ScenarioStore.Scenario scenario) {

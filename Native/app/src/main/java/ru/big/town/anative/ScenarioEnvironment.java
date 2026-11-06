@@ -9,6 +9,7 @@ import java.util.Calendar;
 import java.util.Collections;
 import java.util.Map;
 import java.util.function.Consumer;
+import java.util.function.DoubleConsumer;
 import java.util.function.IntConsumer;
 
 /** Event, snapshot and action boundaries shared by the scenario engine and emulator. */
@@ -22,6 +23,8 @@ interface ScenarioEnvironment {
     Subscription doors(Handler handler, IntConsumer listener);
 
     Subscription driveMode(Handler handler, Consumer<String> listener);
+
+    Subscription cabinTemperature(Handler handler, DoubleConsumer listener);
 
     Subscription light(IntConsumer listener);
 
@@ -87,6 +90,12 @@ interface ScenarioEnvironment {
                                             }
                                         });
                 return subscription::close;
+            }
+
+            @Override
+            public Subscription cabinTemperature(Handler handler, DoubleConsumer listener) {
+                return CabinTemperatureController.get(service)
+                        .subscribe(value -> handler.post(() -> listener.accept(value)));
             }
 
             @Override

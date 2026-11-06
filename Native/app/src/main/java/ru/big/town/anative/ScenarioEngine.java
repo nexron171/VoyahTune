@@ -54,10 +54,12 @@ final class ScenarioEngine {
     private boolean doorSnapshotSeen;
     private int previousDoorMask;
     private String lastDriveMode;
+    private double lastCabinTemperature = Double.NaN;
     private ScenarioPolicy.LightState lastLight = ScenarioPolicy.LightState.HOLD;
 
     private final ScenarioEnvironment.Subscription gearSubscription;
     private final ScenarioEnvironment.Subscription doorSubscription;
+    private final ScenarioEnvironment.Subscription cabinTemperatureSubscription;
     private final ScenarioEnvironment.Subscription driveModeSubscription;
 
     ScenarioEngine(SetModesService service) {
@@ -72,6 +74,7 @@ final class ScenarioEngine {
         handler = new Handler(thread.getLooper());
         gearSubscription = environment.gear(handler, this::onGear);
         doorSubscription = environment.doors(handler, this::onDoors);
+        cabinTemperatureSubscription = environment.cabinTemperature(handler, this::onCabinTemperature);
         driveModeSubscription = environment.driveMode(handler, this::onDriveMode);
     }
 
@@ -82,6 +85,7 @@ final class ScenarioEngine {
         handler.removeCallbacksAndMessages(null);
         gearSubscription.close();
         doorSubscription.close();
+        cabinTemperatureSubscription.close();
         driveModeSubscription.close();
         stopLightListening();
         conditionExecutor.shutdownNow();
@@ -164,6 +168,18 @@ final class ScenarioEngine {
             if (acceptTriggers(
                     scenario, trigger -> ScenarioPolicy.matchesDoor(trigger, previous, doorMask))) {
                 evaluateAndRun(scenario, "двери " + doorMask);
+            }
+        }
+    }
+
+    private void onCabinTemperature(double temperature) {
+        double previous = lastCabinTemperature;
+        lastCabinTemperature = temperature;
+        if (closed || temperature == previous || !Double.isFinite(previous)) return;
+        for (ScenarioDefinition scenario : enabledScenarios()) {
+            if (acceptTriggers(scenario,
+                    trigger -> ScenarioPolicy.matchesCabinTemperature(trigger, previous, temperature))) {
+                evaluateAndRun(scenario, "температура в салоне " + temperature + " °C");
             }
         }
     }

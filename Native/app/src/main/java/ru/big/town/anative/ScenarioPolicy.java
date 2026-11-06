@@ -93,6 +93,15 @@ final class ScenarioPolicy {
                 .anyMatch(trigger -> matchesLight(trigger, previous, current));
     }
 
+    static boolean matchesCabinTemperature(
+            ScenarioDefinition.Trigger trigger, double previous, double current) {
+        return trigger.cabinThreshold != null
+                && Double.isFinite(previous)
+                && Double.isFinite(current)
+                && !ScenarioProtocol.compare(previous, trigger.edge, trigger.cabinThreshold)
+                && ScenarioProtocol.compare(current, trigger.edge, trigger.cabinThreshold);
+    }
+
     static boolean matchesGear(ScenarioDefinition.Trigger trigger, int value) {
         return ScenarioProtocol.TRIGGER_GEAR.equals(trigger.type)
                 && java.util.Objects.equals(ScenarioProtocol.gearValue(trigger.value), value);
@@ -255,13 +264,8 @@ final class ScenarioPolicy {
                     && ScenarioProtocol.compare(snapshot.lightLevel, condition.op, condition.value);
         }
         if (ScenarioProtocol.CONDITION_TEMP_IN.equals(condition.type)) {
-            if (!Double.isFinite(snapshot.cabinTemperature)) return false;
-            if (ScenarioProtocol.OP_LE.equals(condition.op))
-                return snapshot.cabinTemperature <= condition.value;
-            if (ScenarioProtocol.OP_GE.equals(condition.op))
-                return snapshot.cabinTemperature >= condition.value;
-            return ScenarioProtocol.OP_EQ.equals(condition.op)
-                    && snapshot.cabinTemperature == condition.value;
+            return Double.isFinite(snapshot.cabinTemperature)
+                    && ScenarioProtocol.compare(snapshot.cabinTemperature, condition.op, condition.value);
         }
         if (ScenarioProtocol.CONDITION_TEMP_OUT.equals(condition.type)) {
             return snapshot.ambientTemp != Snapshot.UNKNOWN

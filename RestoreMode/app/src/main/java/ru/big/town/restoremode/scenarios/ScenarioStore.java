@@ -378,6 +378,9 @@ public final class ScenarioStore {
         if (trigger == null) {
             return false;
         }
+        if (ScenarioProtocol.TRIGGER_TEMP_IN.equals(trigger.type)) {
+            return ScenarioProtocol.cabinTriggerThreshold(trigger.value, trigger.edge) != null;
+        }
         if (ScenarioProtocol.TRIGGER_GEAR.equals(trigger.type)) {
             return ScenarioProtocol.validGear(trigger.value);
         }
@@ -414,8 +417,8 @@ public final class ScenarioStore {
         }
         if (ScenarioProtocol.CONDITION_TEMP_IN.equals(condition.type)) {
             return ScenarioProtocol.validOp(condition.op)
-                    && condition.value >= -40
-                    && condition.value <= 85;
+                    && condition.value >= ScenarioProtocol.CABIN_THRESHOLD_MIN
+                    && condition.value <= ScenarioProtocol.CABIN_THRESHOLD_MAX;
         }
         if (ScenarioProtocol.CONDITION_TEMP_OUT.equals(condition.type)
                 || ScenarioProtocol.CONDITION_SOC.equals(condition.type)) {

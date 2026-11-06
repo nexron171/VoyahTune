@@ -17,6 +17,23 @@ import java.util.List;
 public class ScenarioPolicyTest {
 
     @Test
+    public void cabinTriggerFiresOnlyOnEnteringSelectedRange() {
+        ScenarioDefinition.Trigger warm = new ScenarioDefinition.Trigger("tempIn", "20", ScenarioProtocol.OP_GE);
+        ScenarioDefinition.Trigger cold = new ScenarioDefinition.Trigger("tempIn", "-5", ScenarioProtocol.OP_LE);
+        ScenarioDefinition.Trigger exact = new ScenarioDefinition.Trigger("tempIn", "20", ScenarioProtocol.OP_EQ);
+
+        assertFalse(ScenarioPolicy.matchesCabinTemperature(warm, Double.NaN, 21));
+        assertFalse(ScenarioPolicy.matchesCabinTemperature(warm, 19.5, Double.NaN));
+        assertTrue(ScenarioPolicy.matchesCabinTemperature(warm, 19.5, 20));
+        assertFalse(ScenarioPolicy.matchesCabinTemperature(warm, 20, 20.5));
+        assertTrue(ScenarioPolicy.matchesCabinTemperature(cold, -4.5, -5.5));
+        assertFalse(ScenarioPolicy.matchesCabinTemperature(cold, -5.5, -4.5));
+        assertTrue(ScenarioPolicy.matchesCabinTemperature(exact, 20.5, 20));
+        assertFalse(ScenarioPolicy.matchesCabinTemperature(exact, 20, 20));
+        assertFalse(ScenarioPolicy.matchesCabinTemperature(exact, 19.5, 20.5));
+    }
+
+    @Test
     public void firstDoorEventRequiresTheSelectedDoorToChange() {
         ScenarioDefinition.Trigger open = new ScenarioDefinition.Trigger(
                 ScenarioProtocol.TRIGGER_DOOR, ScenarioProtocol.DOOR_DRIVER,

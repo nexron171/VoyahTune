@@ -20,6 +20,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
+import java.util.function.DoubleConsumer;
 import java.util.function.IntConsumer;
 
 @RunWith(AndroidJUnit4.class)
@@ -95,6 +96,11 @@ public class WallpaperScenarioIntegrationTest {
 
         void mode(String value) {
             modeHandler.post(() -> modeListener.accept(value));
+        }
+
+        @Override
+        public Subscription cabinTemperature(Handler handler, DoubleConsumer listener) {
+            return () -> {};
         }
 
         @Override

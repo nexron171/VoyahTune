@@ -9,6 +9,7 @@ import ru.big.town.common.ScenarioProtocol;
 import java.util.Collections;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
+import java.util.function.DoubleConsumer;
 import java.util.function.IntConsumer;
 
 /** Uses real event controllers and OEM command encoding against the simulated car. */
@@ -23,6 +24,8 @@ final class MockScenarioEnvironment implements ScenarioEnvironment {
     private final CopyOnWriteArrayList<Consumer<String>> driveListeners = new CopyOnWriteArrayList<>();
     private final VehiclePort.Subscription subscription;
     private int light = 7, temperature = 12, minutes = 600, day = 1;
+    private final CopyOnWriteArrayList<DoubleConsumer> cabinListeners = new CopyOnWriteArrayList<>();
+    private volatile double cabinTemperature = Double.NaN;
     private String drive = "COMFORT";
 
     MockScenarioEnvironment(SetModesService service, MockVehicle vehicle, Consumer<Bundle> trace) {
@@ -71,6 +74,13 @@ final class MockScenarioEnvironment implements ScenarioEnvironment {
     }
 
     @Override
+    public Subscription cabinTemperature(Handler handler, DoubleConsumer listener) {
+        DoubleConsumer delivery = value -> handler.post(() -> listener.accept(value));
+        cabinListeners.add(delivery);
+        return () -> cabinListeners.remove(delivery);
+    }
+
+    @Override
     public Subscription light(IntConsumer listener) {
         lightListeners.add(listener);
         listener.accept(light);
@@ -83,6 +93,13 @@ final class MockScenarioEnvironment implements ScenarioEnvironment {
 
     void configure(Bundle data) {
         temperature = data.getInt("temperature", temperature);
+        if (data.containsKey("cabinTemperature")) {
+            double value = data.getDouble("cabinTemperature", Double.NaN);
+            if (Double.isFinite(value)) {
+                cabinTemperature = value;
+                for (DoubleConsumer listener : cabinListeners) listener.accept(value);
+            }
+        }
         minutes = data.getInt("minutes", minutes);
         day = data.getInt("day", day);
         String selectedDrive = data.getString("driveMode", drive);
@@ -117,7 +134,8 @@ final class MockScenarioEnvironment implements ScenarioEnvironment {
                 vehicle.connected ? drive : null,
                 minutes,
                 day,
-                vehicle.connected ? gears.currentGear() : -1);
+                vehicle.connected ? gears.currentGear() : -1,
+                cabinTemperature);
     }
 
     @Override
@@ -153,5 +171,6 @@ final class MockScenarioEnvironment implements ScenarioEnvironment {
         subscription.close();
         lightListeners.clear();
         driveListeners.clear();
+        cabinListeners.clear();
     }
 }

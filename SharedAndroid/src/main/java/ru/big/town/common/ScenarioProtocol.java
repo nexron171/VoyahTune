@@ -56,6 +56,9 @@ public final class ScenarioProtocol {
     // --- Триггеры ---
     public static final String TRIGGER_GEAR = "gear";
     public static final String TRIGGER_DOOR = "door";
+    public static final String TRIGGER_TEMP_IN = "tempIn";
+    public static final int CABIN_THRESHOLD_MIN = -40;
+    public static final int CABIN_THRESHOLD_MAX = 85;
     public static final String TRIGGER_LIGHT = "light";
     public static final String TRIGGER_DRIVE_MODE = "driveMode";
 
@@ -172,6 +175,17 @@ public final class ScenarioProtocol {
         return LIGHT_TRIGGERS.contains(value);
     }
 
+    public static Integer cabinTriggerThreshold(String value, String operator) {
+        if (!validOp(operator)) return null;
+        try {
+            int threshold = Integer.parseInt(value);
+            return threshold >= CABIN_THRESHOLD_MIN && threshold <= CABIN_THRESHOLD_MAX
+                    ? threshold : null;
+        } catch (NumberFormatException invalidThreshold) {
+            return null;
+        }
+    }
+
     public static boolean validEdge(String edge) {
         return EDGE_OPEN.equals(edge) || EDGE_CLOSE.equals(edge);
     }
@@ -205,7 +219,7 @@ public final class ScenarioProtocol {
     /**
      * Сравнение значения с порогом по буквенному оператору. Неизвестный оператор → {@code false}.
      */
-    public static boolean compare(int actual, String op, int threshold) {
+    public static boolean compare(double actual, String op, int threshold) {
         if (OP_LE.equals(op)) return actual <= threshold;
         if (OP_GE.equals(op)) return actual >= threshold;
         if (OP_EQ.equals(op)) return actual == threshold;

@@ -21,6 +21,7 @@ final class ScenarioDefinition {
         final String value;
         final String edge;
         final boolean firstOnly;
+        final Integer cabinThreshold;
 
         Trigger(String type, String value, String edge) {
             this(type, value, edge, false);
@@ -31,6 +32,9 @@ final class ScenarioDefinition {
             this.value = value;
             this.edge = edge;
             this.firstOnly = firstOnly;
+            this.cabinThreshold = ScenarioProtocol.TRIGGER_TEMP_IN.equals(type)
+                    ? ScenarioProtocol.cabinTriggerThreshold(value, edge)
+                    : null;
         }
     }
 
@@ -207,6 +211,9 @@ final class ScenarioDefinition {
     }
 
     private static boolean validTrigger(Trigger trigger) {
+        if (ScenarioProtocol.TRIGGER_TEMP_IN.equals(trigger.type)) {
+            return trigger.cabinThreshold != null;
+        }
         if (ScenarioProtocol.TRIGGER_GEAR.equals(trigger.type)) {
             return ScenarioProtocol.validGear(trigger.value);
         }
@@ -242,8 +249,8 @@ final class ScenarioDefinition {
         }
         if (ScenarioProtocol.CONDITION_TEMP_IN.equals(condition.type)) {
             return ScenarioProtocol.validOp(condition.op)
-                    && condition.value >= -40
-                    && condition.value <= 85;
+                    && condition.value >= ScenarioProtocol.CABIN_THRESHOLD_MIN
+                    && condition.value <= ScenarioProtocol.CABIN_THRESHOLD_MAX;
         }
         if (ScenarioProtocol.CONDITION_TEMP_OUT.equals(condition.type)
                 || ScenarioProtocol.CONDITION_SOC.equals(condition.type)) {
