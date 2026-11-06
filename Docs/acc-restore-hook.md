@@ -73,7 +73,7 @@ Sport после reboot. Это не испытание новой native реа
 гостевой ACC и физические кнопки требуют отдельной проверки.
 
 Личность resident и ACK находятся в `/data/local/tmp/voyahtune-new/`; диагностика —
-`voyahtune-loader --health`, `--check-hooks`, `--control-status`, logcat
+`voyahtune-loader --health`, `--check-hook-acks`, `--control-status`, logcat
 `VoyahAccRestore` и provider `driveHookV2`. Текстовые ready-файлы прежнего backend
 не подтверждают работоспособность. Повторный старт supervisor восстанавливает
 resident без повторного attach; disable/removal сначала выполняют quiesce/drain.

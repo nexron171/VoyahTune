@@ -97,12 +97,16 @@ quiesce/drain, остановка сервиса, замена компонен�
 /data/local/bin/voyahtune-new/voyahtune-loader --check
 /data/local/bin/voyahtune-new/voyahtune-loader --health
 /data/local/bin/voyahtune-new/voyahtune-loader --check-hooks
+/data/local/bin/voyahtune-new/voyahtune-loader --check-hook-acks
 /data/local/bin/voyahtune-new/voyahtune-loader --control-status
 /data/local/bin/voyahtune-new/voyahtune-loader --quiesce --control-timeout 60s
 ```
 
-`--check` валидирует компоненты без инъекций; `--check-hooks` дополнительно
-проверяет живые identity и полные ACK. Состояние находится в
+`--check` проверяет комплект компонентов. Для завершения установки `--check-hooks`
+требует 10 секунд устойчивых PID загрузчика и запущенных целевых процессов.
+Если OEM-приложение ещё закрыто, для его агента допустим статус `waiting`.
+`--check-hook-acks` проверяет состояния агентов и запрашивает у активных
+процессов подтверждение каждого Java-модуля. Состояние находится в
 `/data/local/tmp/voyahtune-new/`; Native получает совместимый `publishHookStatusV1`.
 Остановка сервиса сама по себе не подтверждает выгрузку resident: сначала нужен
 успешный quiesce. `stop-loader.sh` соблюдает этот порядок.
