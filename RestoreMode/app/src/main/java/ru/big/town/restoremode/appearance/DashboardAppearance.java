@@ -35,7 +35,19 @@ public final class DashboardAppearance implements AutoCloseable {
     private final int[] wallpaperPosition = new int[2];
     private final ViewTreeObserver.OnPreDrawListener trackWallpaperSamples =
             this::refreshMovedTiles;
-    private boolean trackingSamples;
+    private ViewTreeObserver sampleObserver;
+    private final View.OnAttachStateChangeListener sampleLifecycle =
+            new View.OnAttachStateChangeListener() {
+                @Override
+                public void onViewAttachedToWindow(View view) {
+                    updateSampleTracking();
+                }
+
+                @Override
+                public void onViewDetachedFromWindow(View view) {
+                    stopSampleTracking();
+                }
+            };
     private final ValueAnimator crossfade = ValueAnimator.ofFloat(0f, 1f);
     private final SharedPreferences.OnSharedPreferenceChangeListener wallpaperListener;
     private ViewGroup tiles;
@@ -80,9 +92,11 @@ public final class DashboardAppearance implements AutoCloseable {
                     }
                 };
         preferences.registerOnSharedPreferenceChangeListener(wallpaperListener);
+        wallpaperView.addOnAttachStateChangeListener(sampleLifecycle);
     }
 
     public void apply(ViewGroup tiles) {
+        if (closed) return;
         AppearanceSettings updated = AppearanceSettings.load(preferences);
         boolean restyle =
                 this.tiles != tiles
@@ -100,18 +114,35 @@ public final class DashboardAppearance implements AutoCloseable {
                 || loadedBlur != blurAmount) {
             loadWallpaper(settings.wallpaper, blurAmount);
         }
-        if (trackingSamples != settings.blursWallpaper()) {
-            trackingSamples = settings.blursWallpaper();
-            if (trackingSamples) {
-                wallpaperView.getViewTreeObserver().addOnPreDrawListener(trackWallpaperSamples);
-            } else {
-                wallpaperView.getViewTreeObserver().removeOnPreDrawListener(trackWallpaperSamples);
-            }
-        }
+        updateSampleTracking();
         styleTiles(restyle);
         if (!restyle) {
             invalidateTiles();
         }
+    }
+
+    private void updateSampleTracking() {
+        ViewTreeObserver observer =
+                !closed
+                                && tiles != null
+                                && settings.blursWallpaper()
+                                && wallpaperView.isAttachedToWindow()
+                        ? wallpaperView.getViewTreeObserver()
+                        : null;
+        if (sampleObserver == observer) return;
+        stopSampleTracking();
+        if (observer != null && observer.isAlive()) {
+            sampleObserver = observer;
+            observer.addOnPreDrawListener(trackWallpaperSamples);
+        }
+    }
+
+    private void stopSampleTracking() {
+        // A detached view exposes a different observer from the window that owns the callback.
+        if (sampleObserver != null && sampleObserver.isAlive()) {
+            sampleObserver.removeOnPreDrawListener(trackWallpaperSamples);
+        }
+        sampleObserver = null;
     }
 
     private void loadWallpaper(AppearanceSettings.Wallpaper selected, int blurAmount) {
@@ -187,6 +218,8 @@ public final class DashboardAppearance implements AutoCloseable {
     }
 
     private boolean refreshMovedTiles() {
+        // An in-progress dispatch can retain a callback after its listener is removed.
+        if (closed || tiles == null || !wallpaperView.isAttachedToWindow()) return true;
         wallpaperView.getLocationOnScreen(wallpaperPosition);
         for (int index = 0; index < tiles.getChildCount(); index++) {
             View tile = tiles.getChildAt(index);
@@ -326,8 +359,10 @@ public final class DashboardAppearance implements AutoCloseable {
 
     @Override
     public void close() {
+        if (closed) return;
         closed = true;
-        wallpaperView.getViewTreeObserver().removeOnPreDrawListener(trackWallpaperSamples);
+        stopSampleTracking();
+        wallpaperView.removeOnAttachStateChangeListener(sampleLifecycle);
         preferences.unregisterOnSharedPreferenceChangeListener(wallpaperListener);
         crossfade.cancel();
         ++generation;

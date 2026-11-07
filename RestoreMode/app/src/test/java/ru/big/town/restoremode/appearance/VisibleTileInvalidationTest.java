@@ -6,7 +6,9 @@ import static org.junit.Assert.assertNotNull;
 import android.app.Activity;
 import android.app.Application;
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.view.View;
+import android.view.ViewTreeObserver;
 import android.widget.FrameLayout;
 
 import org.junit.Test;
@@ -84,7 +86,7 @@ public class VisibleTileInvalidationTest {
                     View.MeasureSpec.makeMeasureSpec(240, View.MeasureSpec.EXACTLY),
                     View.MeasureSpec.makeMeasureSpec(100, View.MeasureSpec.EXACTLY));
             tiles.layout(0, 0, 240, 100);
-            android.content.SharedPreferences prefs =
+            SharedPreferences prefs =
                     activity.getSharedPreferences("moving-blur", Context.MODE_PRIVATE);
             prefs.edit()
                     .putString(AppearanceSettings.WALLPAPER, AppearanceSettings.Wallpaper.GREEN.key)
@@ -103,6 +105,89 @@ public class VisibleTileInvalidationTest {
                 assertEquals(1, moving.sampleInvalidations);
             }
         }
+    }
+
+    @Test
+    public void recycledPreviewDoesNotReceiveWindowDrawCallbacks() {
+        try (ActivityController<Activity> controller =
+                Robolectric.buildActivity(Activity.class).setup().visible()) {
+            Activity activity = controller.get();
+            FrameLayout window = new FrameLayout(activity);
+            FrameLayout preview = new FrameLayout(activity);
+            activity.setContentView(window);
+            window.addView(preview);
+            addTile(preview, 0);
+            SharedPreferences preferences = blurPreferences(activity);
+            DashboardAppearance appearance = new DashboardAppearance(preview, preferences);
+            appearance.apply(preview);
+            ViewTreeObserver observer = window.getViewTreeObserver();
+            observer.dispatchOnPreDraw();
+            window.removeView(preview);
+            appearance.close();
+            observer.dispatchOnPreDraw();
+        }
+    }
+
+    @Test
+    public void closingDuringDrawDispatchIgnoresAlreadyQueuedCallback() {
+        try (ActivityController<Activity> controller =
+                Robolectric.buildActivity(Activity.class).setup().visible()) {
+            Activity activity = controller.get();
+            FrameLayout preview = new FrameLayout(activity);
+            activity.setContentView(preview);
+            addTile(preview, 0);
+            DashboardAppearance appearance =
+                    new DashboardAppearance(preview, blurPreferences(activity));
+            preview.getViewTreeObserver()
+                    .addOnPreDrawListener(
+                            () -> {
+                                appearance.close();
+                                return true;
+                            });
+            appearance.apply(preview);
+            preview.getViewTreeObserver().dispatchOnPreDraw();
+        }
+    }
+
+    @Test
+    public void previewResumesWallpaperTrackingWhenReattached() {
+        try (ActivityController<Activity> controller =
+                Robolectric.buildActivity(Activity.class).setup().visible()) {
+            Activity activity = controller.get();
+            FrameLayout window = new FrameLayout(activity);
+            FrameLayout preview = new FrameLayout(activity);
+            activity.setContentView(window);
+            CountingView moving = addTile(preview, 0);
+            try (DashboardAppearance appearance =
+                    new DashboardAppearance(preview, blurPreferences(activity))) {
+                appearance.apply(preview);
+                for (int attachment = 0; attachment < 2; attachment++) {
+                    window.addView(preview, new FrameLayout.LayoutParams(240, 100));
+                    window.measure(
+                            View.MeasureSpec.makeMeasureSpec(240, View.MeasureSpec.EXACTLY),
+                            View.MeasureSpec.makeMeasureSpec(100, View.MeasureSpec.EXACTLY));
+                    window.layout(0, 0, 240, 100);
+                    window.getViewTreeObserver().dispatchOnPreDraw();
+                    moving.sampleInvalidations = 0;
+                    moving.setTranslationX(40 + attachment * 40);
+                    window.getViewTreeObserver().dispatchOnPreDraw();
+                    assertEquals(1, moving.sampleInvalidations);
+                    window.removeView(preview);
+                }
+            }
+        }
+    }
+
+    private static SharedPreferences blurPreferences(Activity activity) {
+        SharedPreferences preferences =
+                activity.getSharedPreferences("preview-lifecycle", Context.MODE_PRIVATE);
+        preferences
+                .edit()
+                .putString(AppearanceSettings.WALLPAPER, AppearanceSettings.Wallpaper.GREEN.key)
+                .putBoolean(AppearanceSettings.TRANSPARENCY_ENABLED, true)
+                .putBoolean(AppearanceSettings.BLUR_ENABLED, true)
+                .apply();
+        return preferences;
     }
 
     private static CountingView addTile(FrameLayout tiles, int left) {
