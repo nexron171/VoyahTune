@@ -3309,21 +3309,6 @@ public class DashboardActivity extends AppCompatActivity {
             controls.setVisibility(View.GONE);
         }
 
-        widgetView
-                .findViewById(R.id.appWidgetEditDesktopLauncher)
-                .setOnClickListener(view -> splitTilesGrid.setEditing(true));
-        View launcherControls = widgetView.findViewById(R.id.appWidgetLauncherControls);
-        if (launcherControls != null) {
-            launcherControls.setVisibility(View.VISIBLE);
-            launcherControls.bringToFront();
-        }
-        View swapLauncher = widgetView.findViewById(R.id.appWidgetSwapLauncher);
-        if (swapLauncher != null) {
-            swapLauncher.setOnLongClickListener(editLauncher);
-            final String widgetId = entry.id;
-            swapLauncher.setOnClickListener(v -> showSwapAppWidgetMenu(swapLauncher, widgetId));
-        }
-
         refreshAppWidgetBadge(widgetView, entry.id);
         appearance.styleTile(widgetView);
     }
@@ -3469,11 +3454,6 @@ public class DashboardActivity extends AppCompatActivity {
         View scroll = widgetView.findViewById(R.id.appWidgetLauncherScroll);
         if (scroll != null) {
             scroll.setVisibility(View.GONE);
-        }
-
-        View launcherControls = widgetView.findViewById(R.id.appWidgetLauncherControls);
-        if (launcherControls != null) {
-            launcherControls.setVisibility(View.GONE);
         }
 
         bindWindowAction(

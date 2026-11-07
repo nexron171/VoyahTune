@@ -14,8 +14,8 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.Messenger;
 import android.os.SystemClock;
-import android.view.MotionEvent;
 import android.util.Size;
+import android.view.MotionEvent;
 import android.view.TextureView;
 import android.view.View;
 import android.view.ViewConfiguration;
@@ -150,7 +150,8 @@ public class DashboardEditModeTest {
             controller.get().findViewById(R.id.dashboardEditDone).performClick();
             layout(grid);
             appTile = tile(grid, "appWidget:" + app.id);
-            tapControl(grid, appTile.findViewById(R.id.appWidgetEditDesktopLauncher));
+            assertEquals(0, visibleWindowButtons(appTile));
+            holdWidget(grid, appTile);
             assertTrue(grid.isEditing());
             controller.get().findViewById(R.id.dashboardEditDone).performClick();
             appTile = tile(grid, "appWidget:" + app.id);
@@ -158,6 +159,7 @@ public class DashboardEditModeTest {
             profiles.getChildAt(0).performClick();
             layout(grid);
             View controls = appTile.findViewById(R.id.appWidgetOverlayControls);
+            assertEquals(0, visibleWindowButtons(appTile));
             holdWidget(grid, appTile);
             assertFalse(grid.isEditing());
             assertEquals(View.VISIBLE, controls.getVisibility());
@@ -176,6 +178,7 @@ public class DashboardEditModeTest {
             tapControl(grid, appTile.findViewById(R.id.appWidgetClose));
             assertEquals(View.GONE, controls.getVisibility());
             assertNotNull(AppWidgetStore.find(prefs, app.id));
+            assertEquals(0, visibleWindowButtons(appTile));
             profiles.getChildAt(0).performClick();
             layout(grid);
             holdWidget(grid, appTile);
@@ -280,6 +283,18 @@ public class DashboardEditModeTest {
                     window.getHeight() - window.getPaddingTop() - window.getPaddingBottom(),
                     attached.getInt("height"));
         }
+    }
+
+    private static int visibleWindowButtons(View view) {
+        if (view.getVisibility() != View.VISIBLE) return 0;
+        int count = view instanceof android.widget.ImageButton ? 1 : 0;
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                count += visibleWindowButtons(group.getChildAt(i));
+            }
+        }
+        return count;
     }
 
     private static void attachSurface(DashboardEditGrid grid, View window) {

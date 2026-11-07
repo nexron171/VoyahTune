@@ -67,40 +67,6 @@
         android:visibility="gone" />
 
     <LinearLayout
-        android:id="@+id/appWidgetLauncherControls"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="top|end"
-        android:layout_margin="8dp"
-        android:orientation="horizontal"
-        android:visibility="visible">
-
-        <ImageButton
-            android:id="@+id/appWidgetSwapLauncher"
-            android:layout_width="80dp"
-            android:layout_height="80dp"
-            android:layout_marginEnd="8dp"
-            android:background="@drawable/nav_back_circle_bg"
-            android:src="@drawable/ic_swap"
-            android:padding="12dp"
-            android:scaleType="fitCenter"
-            android:alpha="0.85"
-            android:contentDescription="Обмен приложениями" />
-
-        <ImageButton
-            android:id="@+id/appWidgetEditDesktopLauncher"
-            android:layout_width="80dp"
-            android:layout_height="80dp"
-            android:background="@drawable/nav_back_circle_bg"
-            android:src="@drawable/ic_edit_desktop"
-            android:padding="12dp"
-            android:scaleType="fitCenter"
-            android:alpha="0.85"
-            android:contentDescription="Редактировать рабочий стол" />
-
-    </LinearLayout>
-
-    <LinearLayout
         android:id="@+id/appWidgetOverlayControls"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"

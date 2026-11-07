@@ -20,14 +20,15 @@ public final class CarPlayWidgetPlaceholder {
             View.OnLongClickListener drag) {
         View placeholder = widget.findViewById(R.id.carPlayWidgetPlaceholder);
         boolean carPlay = entry.profiles.size() == 1 && CarPlayTarget.isCarPlay(entry.packageName);
-        boolean shortcut = carPlay
-                && CarPlayTarget.opensActivity(entry.packageName, entry.width, entry.height);
+        boolean shortcut =
+                carPlay
+                        && CarPlayTarget.opensActivity(
+                                entry.packageName, entry.width, entry.height);
         widget.setBackgroundResource(shortcut ? 0 : R.drawable.card_dark_ripple);
         placeholder.setVisibility(carPlay ? View.VISIBLE : View.GONE);
         if (!carPlay) return false;
 
         widget.findViewById(R.id.appWidgetLauncherScroll).setVisibility(View.GONE);
-        widget.findViewById(R.id.appWidgetLauncherControls).setVisibility(View.GONE);
         widget.findViewById(R.id.appWidgetOverlayControls).setVisibility(View.GONE);
         widget.findViewById(R.id.appWidgetBadge).setVisibility(View.GONE);
         ImageView button = widget.findViewById(R.id.carPlayWidgetLaunch);
