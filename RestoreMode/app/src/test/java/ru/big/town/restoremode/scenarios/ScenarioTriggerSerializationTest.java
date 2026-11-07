@@ -15,6 +15,68 @@ import java.util.Collections;
 @Config(manifest = Config.NONE)
 public class ScenarioTriggerSerializationTest {
     @Test
+    public void speedRoundTripKeepsThresholdsComparisonsAndFirstEventSelection() {
+        ScenarioStore.Scenario scenario = new ScenarioStore.Scenario();
+        scenario.id = "speed";
+        for (String operator : new String[] {"le", "ge", "eq"}) {
+            for (int threshold : new int[] {0, 5, 95, 190}) {
+                ScenarioStore.Trigger trigger =
+                        new ScenarioStore.Trigger("speed", String.valueOf(threshold), operator);
+                trigger.firstOnly = true;
+                scenario.triggers.add(trigger);
+                ScenarioStore.Condition condition = new ScenarioStore.Condition();
+                condition.type = "speed";
+                condition.op = operator;
+                condition.value = threshold;
+                scenario.conditions.add(condition);
+            }
+        }
+
+        String json = ScenarioStore.toJson(Collections.singletonList(scenario));
+        ScenarioStore.Scenario restored = ScenarioStore.fromJson(json).get(0);
+        assertEquals(12, restored.triggers.size());
+        assertEquals(12, restored.conditions.size());
+        for (int index = 0; index < scenario.triggers.size(); index++) {
+            ScenarioStore.Trigger expected = scenario.triggers.get(index);
+            ScenarioStore.Trigger actual = restored.triggers.get(index);
+            assertEquals(expected.type, actual.type);
+            assertEquals(expected.value, actual.value);
+            assertEquals(expected.edge, actual.edge);
+            assertTrue(actual.firstOnly);
+            ScenarioStore.Condition condition = restored.conditions.get(index);
+            assertEquals("speed", condition.type);
+            assertEquals(expected.edge, condition.op);
+            assertEquals(Integer.parseInt(expected.value), condition.value);
+        }
+    }
+
+    @Test
+    public void speedRoundTripDropsInvalidThresholdsAndOperators() {
+        ScenarioStore.Scenario scenario = new ScenarioStore.Scenario();
+        scenario.id = "invalid-speed";
+        for (String threshold : new String[] {"-5", "195", "3", "", "bad", "5.5"}) {
+            scenario.triggers.add(new ScenarioStore.Trigger("speed", threshold, "ge"));
+        }
+        scenario.triggers.add(new ScenarioStore.Trigger("speed", "50", "bad"));
+        for (int threshold : new int[] {-5, 195, 3}) {
+            ScenarioStore.Condition condition = new ScenarioStore.Condition();
+            condition.type = "speed";
+            condition.value = threshold;
+            scenario.conditions.add(condition);
+        }
+        ScenarioStore.Condition condition = new ScenarioStore.Condition();
+        condition.type = "speed";
+        condition.value = 50;
+        condition.op = "bad";
+        scenario.conditions.add(condition);
+
+        ScenarioStore.Scenario restored = ScenarioStore.fromJson(
+                ScenarioStore.toJson(Collections.singletonList(scenario))).get(0);
+        assertTrue(restored.triggers.isEmpty());
+        assertTrue(restored.conditions.isEmpty());
+    }
+
+    @Test
     public void cabinTriggerRoundTripKeepsOnlyValidThresholdsAndOperators() {
         ScenarioStore.Scenario scenario = new ScenarioStore.Scenario();
         scenario.id = "climate";

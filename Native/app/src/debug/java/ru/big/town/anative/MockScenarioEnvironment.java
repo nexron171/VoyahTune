@@ -23,8 +23,12 @@ final class MockScenarioEnvironment implements ScenarioEnvironment {
     private final CopyOnWriteArrayList<IntConsumer> lightListeners = new CopyOnWriteArrayList<>();
     private final CopyOnWriteArrayList<Consumer<String>> driveListeners = new CopyOnWriteArrayList<>();
     private final VehiclePort.Subscription subscription;
-    private int light = 7, temperature = 12, minutes = 600, day = 1;
+    private int light = 7;
+    private int temperature = 12;
+    private int minutes = 600;
+    private int day = 1;
     private final CopyOnWriteArrayList<DoubleConsumer> cabinListeners = new CopyOnWriteArrayList<>();
+    private final CopyOnWriteArrayList<IntConsumer> speedListeners = new CopyOnWriteArrayList<>();
     private volatile double cabinTemperature = Double.NaN;
     private String drive = "COMFORT";
 
@@ -41,15 +45,26 @@ final class MockScenarioEnvironment implements ScenarioEnvironment {
                             if (event.kind == CanBusEvent.Kind.CONNECTION) {
                                 gears.accept(vehicle.gear);
                                 doors.accept(vehicle.doors);
-                                for (Consumer<String> listener : driveListeners) listener.accept(drive);
+                                for (Consumer<String> listener : driveListeners) {
+                                    listener.accept(drive);
+                                }
+                                for (IntConsumer listener : speedListeners) {
+                                    listener.accept(vehicle.speed);
+                                }
                             } else if (event.kind == CanBusEvent.Kind.CONNECTION_LOST) {
                                 gears.reset();
                                 doors.reset();
-                                for (Consumer<String> listener : driveListeners) listener.accept(null);
-                            } else if (event.kind == CanBusEvent.Kind.GEAR)
+                                for (Consumer<String> listener : driveListeners) {
+                                    listener.accept(null);
+                                }
+                                for (IntConsumer listener : speedListeners) {
+                                    listener.accept(-1);
+                                }
+                            } else if (event.kind == CanBusEvent.Kind.GEAR) {
                                 gears.accept(event.first);
-                            else if (event.kind == CanBusEvent.Kind.DOOR)
+                            } else if (event.kind == CanBusEvent.Kind.DOOR) {
                                 doors.accept(event.second);
+                            }
                         });
     }
 
@@ -81,6 +96,14 @@ final class MockScenarioEnvironment implements ScenarioEnvironment {
     }
 
     @Override
+    public Subscription speed(Handler handler, IntConsumer listener) {
+        IntConsumer delivery = value -> handler.post(() -> listener.accept(value));
+        speedListeners.add(delivery);
+        delivery.accept(vehicle.connected ? vehicle.speed : -1);
+        return () -> speedListeners.remove(delivery);
+    }
+
+    @Override
     public Subscription light(IntConsumer listener) {
         lightListeners.add(listener);
         listener.accept(light);
@@ -92,6 +115,11 @@ final class MockScenarioEnvironment implements ScenarioEnvironment {
     }
 
     void configure(Bundle data) {
+        if (data.containsKey("speed")) {
+            for (IntConsumer listener : speedListeners) {
+                listener.accept(vehicle.connected ? vehicle.speed : -1);
+            }
+        }
         temperature = data.getInt("temperature", temperature);
         if (data.containsKey("cabinTemperature")) {
             double value = data.getDouble("cabinTemperature", Double.NaN);
@@ -135,7 +163,8 @@ final class MockScenarioEnvironment implements ScenarioEnvironment {
                 minutes,
                 day,
                 vehicle.connected ? gears.currentGear() : -1,
-                cabinTemperature);
+                cabinTemperature,
+                vehicle.connected ? vehicle.speed : -1);
     }
 
     @Override
@@ -146,11 +175,13 @@ final class MockScenarioEnvironment implements ScenarioEnvironment {
                     event("scenarioActionResult", action, accepted ? 1 : 0);
                     completion.onFinished(accepted, error);
                 };
-        if (SeatCommand.handles(action) || WindowCommand.handles(action)
-                || ru.big.town.common.WallpaperProtocol.handles(action))
+        if (SeatCommand.handles(action)
+                || WindowCommand.handles(action)
+                || ru.big.town.common.WallpaperProtocol.handles(action)) {
             actions.execute(action, reply);
-        else
+        } else {
             reply.onFinished(vehicle.connected && vehicle.accepted, "Simulated platform operation");
+        }
     }
 
     @Override
@@ -172,5 +203,6 @@ final class MockScenarioEnvironment implements ScenarioEnvironment {
         lightListeners.clear();
         driveListeners.clear();
         cabinListeners.clear();
+        speedListeners.clear();
     }
 }

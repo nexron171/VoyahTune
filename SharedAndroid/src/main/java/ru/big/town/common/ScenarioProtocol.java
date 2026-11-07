@@ -59,6 +59,10 @@ public final class ScenarioProtocol {
     public static final String TRIGGER_TEMP_IN = "tempIn";
     public static final int CABIN_THRESHOLD_MIN = -40;
     public static final int CABIN_THRESHOLD_MAX = 85;
+    public static final String TRIGGER_SPEED = "speed";
+    public static final int SPEED_THRESHOLD_MIN = 0;
+    public static final int SPEED_THRESHOLD_MAX = 190;
+    public static final int SPEED_THRESHOLD_STEP = 5;
     public static final String TRIGGER_LIGHT = "light";
     public static final String TRIGGER_DRIVE_MODE = "driveMode";
 
@@ -115,6 +119,7 @@ public final class ScenarioProtocol {
     public static final String CONDITION_LIGHT = "light";
     public static final String CONDITION_TEMP_OUT = "tempOut";
     public static final String CONDITION_TEMP_IN = "tempIn";
+    public static final String CONDITION_SPEED = "speed";
     public static final String CONDITION_SOC = "soc";
     public static final String CONDITION_GEAR = "gear";
     public static final String CONDITION_DRIVE_MODE = "driveMode";
@@ -175,15 +180,27 @@ public final class ScenarioProtocol {
         return LIGHT_TRIGGERS.contains(value);
     }
 
-    public static Integer cabinTriggerThreshold(String value, String operator) {
+    public static Integer triggerThreshold(String type, String value, String operator) {
         if (!validOp(operator)) return null;
         try {
             int threshold = Integer.parseInt(value);
-            return threshold >= CABIN_THRESHOLD_MIN && threshold <= CABIN_THRESHOLD_MAX
-                    ? threshold : null;
+            if (TRIGGER_SPEED.equals(type)) {
+                return validSpeedThreshold(threshold) ? threshold : null;
+            }
+            return TRIGGER_TEMP_IN.equals(type)
+                            && threshold >= CABIN_THRESHOLD_MIN
+                            && threshold <= CABIN_THRESHOLD_MAX
+                    ? threshold
+                    : null;
         } catch (NumberFormatException invalidThreshold) {
             return null;
         }
+    }
+
+    public static boolean validSpeedThreshold(int value) {
+        return value >= SPEED_THRESHOLD_MIN
+                && value <= SPEED_THRESHOLD_MAX
+                && (value - SPEED_THRESHOLD_MIN) % SPEED_THRESHOLD_STEP == 0;
     }
 
     public static boolean validEdge(String edge) {

@@ -500,18 +500,29 @@ public final class ScenarioSettingsPage {
                                     save();
                                 }));
         buttons.addView(driveMode);
+        MaterialButton speed = actionButton("Скорость");
+        speed.setOnClickListener(
+                view ->
+                        addNumberTrigger(
+                                scenario,
+                                ScenarioProtocol.TRIGGER_SPEED,
+                                "Скорость, км/ч",
+                                ScenarioProtocol.SPEED_THRESHOLD_MIN,
+                                ScenarioProtocol.SPEED_THRESHOLD_MAX,
+                                ScenarioProtocol.SPEED_THRESHOLD_STEP,
+                                50));
+        buttons.addView(speed);
         MaterialButton cabinTemperature = actionButton("В салоне t°");
-        cabinTemperature.setOnClickListener(view -> pickNumberComparison(
-                "Температура в салоне, °C",
-                ScenarioProtocol.CABIN_THRESHOLD_MIN,
-                ScenarioProtocol.CABIN_THRESHOLD_MAX,
-                1,
-                20,
-                (operator, threshold) -> {
-                    scenario.triggers.add(new ScenarioStore.Trigger(
-                            ScenarioProtocol.TRIGGER_TEMP_IN, String.valueOf(threshold), operator));
-                    save();
-                }));
+        cabinTemperature.setOnClickListener(
+                view ->
+                        addNumberTrigger(
+                                scenario,
+                                ScenarioProtocol.TRIGGER_TEMP_IN,
+                                "Температура в салоне, °C",
+                                ScenarioProtocol.CABIN_THRESHOLD_MIN,
+                                ScenarioProtocol.CABIN_THRESHOLD_MAX,
+                                1,
+                                20));
         buttons.addView(cabinTemperature);
         block.addView(buttons);
         if (scenario.triggers.isEmpty()) {
@@ -519,6 +530,27 @@ public final class ScenarioSettingsPage {
                     text("Без события — только ручной или голосовой запуск.", 17, 0xff97a6bc));
         }
         return block;
+    }
+
+    private void addNumberTrigger(
+            ScenarioStore.Scenario scenario,
+            String type,
+            String title,
+            int min,
+            int max,
+            int step,
+            int initial) {
+        pickNumberComparison(
+                title,
+                min,
+                max,
+                step,
+                initial,
+                (operator, threshold) -> {
+                    scenario.triggers.add(
+                            new ScenarioStore.Trigger(type, String.valueOf(threshold), operator));
+                    save();
+                });
     }
 
     private void pickDoor(ScenarioStore.Scenario scenario) {
@@ -558,6 +590,9 @@ public final class ScenarioSettingsPage {
     }
 
     private static String describe(ScenarioStore.Trigger trigger) {
+        if (ScenarioProtocol.TRIGGER_SPEED.equals(trigger.type)) {
+            return "Скорость " + comparisonSymbol(trigger.edge) + " " + trigger.value + " км/ч";
+        }
         if (ScenarioProtocol.TRIGGER_TEMP_IN.equals(trigger.type)) {
             return "В салоне t° " + comparisonSymbol(trigger.edge) + " " + trigger.value + " °C";
         }
@@ -657,6 +692,18 @@ public final class ScenarioSettingsPage {
         secondRow.topMargin = dp(12);
         buttons2.setLayoutParams(secondRow);
         buttons2.setGravity(Gravity.CENTER_VERTICAL);
+        MaterialButton speed = actionButton("Скорость");
+        speed.setOnClickListener(
+                view ->
+                        addNumberCondition(
+                                scenario,
+                                ScenarioProtocol.CONDITION_SPEED,
+                                "Скорость, км/ч",
+                                ScenarioProtocol.SPEED_THRESHOLD_MIN,
+                                ScenarioProtocol.SPEED_THRESHOLD_MAX,
+                                ScenarioProtocol.SPEED_THRESHOLD_STEP,
+                                50));
+        buttons2.addView(speed);
         MaterialButton gear = actionButton("Селектор");
         gear.setOnClickListener(
                 view ->
@@ -711,18 +758,28 @@ public final class ScenarioSettingsPage {
             int max,
             int step,
             int initial) {
-        pickNumberComparison(title, min, max, step, initial, (operator, value) -> {
-            ScenarioStore.Condition condition = new ScenarioStore.Condition();
-            condition.type = type;
-            condition.op = operator;
-            condition.value = value;
-            scenario.conditions.add(condition);
-            save();
-        });
+        pickNumberComparison(
+                title,
+                min,
+                max,
+                step,
+                initial,
+                (operator, value) -> {
+                    ScenarioStore.Condition condition = new ScenarioStore.Condition();
+                    condition.type = type;
+                    condition.op = operator;
+                    condition.value = value;
+                    scenario.conditions.add(condition);
+                    save();
+                });
     }
 
     private void pickNumberComparison(
-            String title, int min, int max, int step, int initial,
+            String title,
+            int min,
+            int max,
+            int step,
+            int initial,
             BiConsumer<String, Integer> onPicked) {
         String[] ops = {"не более (≤)", "не менее (≥)", "равно (=)"};
         String[] opsValues = {
@@ -812,6 +869,9 @@ public final class ScenarioSettingsPage {
     }
 
     private static String describe(ScenarioStore.Condition condition) {
+        if (ScenarioProtocol.CONDITION_SPEED.equals(condition.type)) {
+            return "Скорость " + comparisonSymbol(condition.op) + " " + condition.value + " км/ч";
+        }
         if (ScenarioProtocol.CONDITION_GEAR.equals(condition.type)) {
             return "Селектор: " + ScenarioProtocol.gearName(condition.value);
         }

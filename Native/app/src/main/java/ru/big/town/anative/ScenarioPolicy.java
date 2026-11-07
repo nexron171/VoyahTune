@@ -10,6 +10,7 @@ final class ScenarioPolicy {
         static final int UNKNOWN = Integer.MIN_VALUE;
 
         final int gearValue;
+        final int speedKmh;
         final int lightLevel; // 0..7 или -1
         final double cabinTemperature;
         final int ambientTemp; // °C или UNKNOWN
@@ -46,6 +47,29 @@ final class ScenarioPolicy {
                 int dayOfWeek,
                 int gearValue,
                 double cabinTemperature) {
+            this(
+                    lightLevel,
+                    ambientTemp,
+                    socPercent,
+                    driveMode,
+                    minutesOfDay,
+                    dayOfWeek,
+                    gearValue,
+                    cabinTemperature,
+                    -1);
+        }
+
+        Snapshot(
+                int lightLevel,
+                int ambientTemp,
+                int socPercent,
+                String driveMode,
+                int minutesOfDay,
+                int dayOfWeek,
+                int gearValue,
+                double cabinTemperature,
+                int speedKmh) {
+            this.speedKmh = speedKmh;
             this.cabinTemperature = cabinTemperature;
             this.gearValue = gearValue;
             this.lightLevel = lightLevel;
@@ -95,11 +119,21 @@ final class ScenarioPolicy {
 
     static boolean matchesCabinTemperature(
             ScenarioDefinition.Trigger trigger, double previous, double current) {
-        return trigger.cabinThreshold != null
+        return ScenarioProtocol.TRIGGER_TEMP_IN.equals(trigger.type)
+                && trigger.threshold != null
                 && Double.isFinite(previous)
                 && Double.isFinite(current)
-                && !ScenarioProtocol.compare(previous, trigger.edge, trigger.cabinThreshold)
-                && ScenarioProtocol.compare(current, trigger.edge, trigger.cabinThreshold);
+                && !ScenarioProtocol.compare(previous, trigger.edge, trigger.threshold)
+                && ScenarioProtocol.compare(current, trigger.edge, trigger.threshold);
+    }
+
+    static boolean matchesSpeed(ScenarioDefinition.Trigger trigger, int previous, int current) {
+        return ScenarioProtocol.TRIGGER_SPEED.equals(trigger.type)
+                && trigger.threshold != null
+                && previous >= 0
+                && current >= 0
+                && !ScenarioProtocol.compare(previous, trigger.edge, trigger.threshold)
+                && ScenarioProtocol.compare(current, trigger.edge, trigger.threshold);
     }
 
     static boolean matchesGear(ScenarioDefinition.Trigger trigger, int value) {
@@ -164,6 +198,10 @@ final class ScenarioPolicy {
 
     private static String describeFailure(
             ScenarioDefinition.Condition condition, Snapshot snapshot) {
+        if (ScenarioProtocol.CONDITION_SPEED.equals(condition.type)) {
+            return "скорость (нужно " + symbol(condition.op) + " " + condition.value + " км/ч, "
+                    + current(snapshot.speedKmh, " км/ч") + ")";
+        }
         if (ScenarioProtocol.CONDITION_GEAR.equals(condition.type)) {
             String currentGear = ScenarioProtocol.gearName(snapshot.gearValue);
             return "селектор (нужно "
@@ -254,6 +292,10 @@ final class ScenarioPolicy {
     }
 
     private static boolean conditionMet(ScenarioDefinition.Condition condition, Snapshot snapshot) {
+        if (ScenarioProtocol.CONDITION_SPEED.equals(condition.type)) {
+            return snapshot.speedKmh >= 0
+                    && ScenarioProtocol.compare(snapshot.speedKmh, condition.op, condition.value);
+        }
         if (ScenarioProtocol.CONDITION_GEAR.equals(condition.type)) {
             return ScenarioProtocol.gearName(snapshot.gearValue) != null
                     && ScenarioProtocol.OP_EQ.equals(condition.op)

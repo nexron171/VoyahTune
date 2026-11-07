@@ -17,14 +17,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Predicate;
 
-/**
- * Движок пользовательских сценариев: событийные триггеры (селектор, двери, освещённость),
- * проверка условий и запуск последовательности действий.
- *
- * <p>Работает в процессе Native, поэтому сценарии срабатывают и при закрытом RestoreMode.
- * Определения приходят снимком из RestoreMode через {@link ScenarioConfigReceiver}; запуск
- * вручную (плитка/голос) — через {@link #runNow(String)}.
- */
+/** Runs event-driven scenarios in Native independently of the RestoreMode UI. */
 final class ScenarioEngine {
     private static final String TAG = "$$$ ScenarioEngine $$$";
     /** Антидребезг повторного запуска одного сценария. */
@@ -37,11 +30,12 @@ final class ScenarioEngine {
     private final Handler handler;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService conditionExecutor =
-            Executors.newSingleThreadExecutor(runnable -> {
-                Thread worker = new Thread(runnable, "ScenarioConditions");
-                worker.setDaemon(true);
-                return worker;
-            });
+            Executors.newSingleThreadExecutor(
+                    runnable -> {
+                        Thread worker = new Thread(runnable, "ScenarioConditions");
+                        worker.setDaemon(true);
+                        return worker;
+                    });
 
     private volatile List<ScenarioDefinition> scenarios = Collections.emptyList();
     private ScenarioEnvironment.Subscription lightSubscription;
@@ -55,12 +49,14 @@ final class ScenarioEngine {
     private int previousDoorMask;
     private String lastDriveMode;
     private double lastCabinTemperature = Double.NaN;
+    private int lastSpeedKmh = -1;
     private ScenarioPolicy.LightState lastLight = ScenarioPolicy.LightState.HOLD;
 
     private final ScenarioEnvironment.Subscription gearSubscription;
     private final ScenarioEnvironment.Subscription doorSubscription;
     private final ScenarioEnvironment.Subscription cabinTemperatureSubscription;
     private final ScenarioEnvironment.Subscription driveModeSubscription;
+    private final ScenarioEnvironment.Subscription speedSubscription;
 
     ScenarioEngine(SetModesService service) {
         this(ScenarioEnvironment.oem(service));
@@ -74,8 +70,10 @@ final class ScenarioEngine {
         handler = new Handler(thread.getLooper());
         gearSubscription = environment.gear(handler, this::onGear);
         doorSubscription = environment.doors(handler, this::onDoors);
-        cabinTemperatureSubscription = environment.cabinTemperature(handler, this::onCabinTemperature);
+        cabinTemperatureSubscription =
+                environment.cabinTemperature(handler, this::onCabinTemperature);
         driveModeSubscription = environment.driveMode(handler, this::onDriveMode);
+        speedSubscription = environment.speed(handler, this::onSpeed);
     }
 
     void close() {
@@ -87,6 +85,7 @@ final class ScenarioEngine {
         doorSubscription.close();
         cabinTemperatureSubscription.close();
         driveModeSubscription.close();
+        speedSubscription.close();
         stopLightListening();
         conditionExecutor.shutdownNow();
         thread.quitSafely();
@@ -177,8 +176,10 @@ final class ScenarioEngine {
         lastCabinTemperature = temperature;
         if (closed || temperature == previous || !Double.isFinite(previous)) return;
         for (ScenarioDefinition scenario : enabledScenarios()) {
-            if (acceptTriggers(scenario,
-                    trigger -> ScenarioPolicy.matchesCabinTemperature(trigger, previous, temperature))) {
+            if (acceptTriggers(
+                    scenario,
+                    trigger ->
+                            ScenarioPolicy.matchesCabinTemperature(trigger, previous, temperature))) {
                 evaluateAndRun(scenario, "температура в салоне " + temperature + " °C");
             }
         }
@@ -195,19 +196,33 @@ final class ScenarioEngine {
         }
     }
 
-    private void onLightLevel(int level) {
-        handler.post(() -> {
-            ScenarioPolicy.LightState state = ScenarioPolicy.lightState(level);
-            ScenarioPolicy.LightState previous = lastLight;
-            lastLight = state;
-            if (state == ScenarioPolicy.LightState.HOLD || state == previous) return;
-            for (ScenarioDefinition scenario : enabledScenarios()) {
-                if (acceptTriggers(
-                        scenario, trigger -> ScenarioPolicy.matchesLight(trigger, previous, state))) {
-                    evaluateAndRun(scenario, "освещённость " + state);
-                }
+    private void onSpeed(int speedKmh) {
+        int previous = lastSpeedKmh;
+        lastSpeedKmh = speedKmh;
+        if (closed || speedKmh == previous) return;
+        for (ScenarioDefinition scenario : enabledScenarios()) {
+            if (acceptTriggers(
+                    scenario, trigger -> ScenarioPolicy.matchesSpeed(trigger, previous, speedKmh))) {
+                evaluateAndRun(scenario, "скорость " + speedKmh + " км/ч");
             }
-        });
+        }
+    }
+
+    private void onLightLevel(int level) {
+        handler.post(
+                () -> {
+                    ScenarioPolicy.LightState state = ScenarioPolicy.lightState(level);
+                    ScenarioPolicy.LightState previous = lastLight;
+                    lastLight = state;
+                    if (state == ScenarioPolicy.LightState.HOLD || state == previous) return;
+                    for (ScenarioDefinition scenario : enabledScenarios()) {
+                        if (acceptTriggers(
+                                scenario,
+                                trigger -> ScenarioPolicy.matchesLight(trigger, previous, state))) {
+                            evaluateAndRun(scenario, "освещённость " + state);
+                        }
+                    }
+                });
     }
 
     private boolean acceptTriggers(
@@ -238,22 +253,30 @@ final class ScenarioEngine {
             start(scenario, reason, test);
             return;
         }
-        conditionExecutor.execute(() -> {
-            ScenarioPolicy.Snapshot snapshot = environment.snapshot(scenario);
-            String failure = ScenarioPolicy.firstFailingCondition(scenario, snapshot);
-            handler.post(() -> {
-                if (failure == null) {
-                    start(scenario, reason, test);
-                } else {
-                    Log.i(TAG, "«" + scenario.name + "» (" + reason + "): условия не выполнены — " + failure);
-                    toast("Сценарий не выполнен из-за несоблюдения условия: " + failure);
-                }
-            });
-        });
+        conditionExecutor.execute(
+                () -> {
+                    ScenarioPolicy.Snapshot snapshot = environment.snapshot(scenario);
+                    String failure = ScenarioPolicy.firstFailingCondition(scenario, snapshot);
+                    handler.post(
+                            () -> {
+                                if (failure == null) {
+                                    start(scenario, reason, test);
+                                } else {
+                                    Log.i(
+                                            TAG,
+                                            "«" + scenario.name + "» (" + reason
+                                                    + "): условия не выполнены — " + failure);
+                                    toast("Сценарий не выполнен из-за несоблюдения условия: " + failure);
+                                }
+                            });
+                });
     }
 
     private void toast(String text) {
-        main.post(() -> { if (!closed) environment.notifyUser(text); });
+        main.post(
+                () -> {
+                    if (!closed) environment.notifyUser(text);
+                });
     }
 
     /** Только handler движка: держит running/lastRunElapsed без блокировок. */
@@ -265,10 +288,14 @@ final class ScenarioEngine {
         running.add(scenario.id);
         lastRunElapsed.put(scenario.id, now);
         Log.i(TAG, "Запуск «" + scenario.name + "»: " + reason);
-        runner.run(scenario, id -> handler.post(() -> {
-            running.remove(id);
-            toast("Сценарий " + scenario.name + " выполнен");
-        }));
+        runner.run(
+                scenario,
+                id ->
+                        handler.post(
+                                () -> {
+                                    running.remove(id);
+                                    toast("Сценарий " + scenario.name + " выполнен");
+                                }));
     }
 
     private List<ScenarioDefinition> enabledScenarios() {

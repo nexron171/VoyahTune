@@ -104,6 +104,11 @@ public class WallpaperScenarioIntegrationTest {
         }
 
         @Override
+        public Subscription speed(Handler handler, IntConsumer listener) {
+            return () -> {};
+        }
+
+        @Override
         public Subscription light(IntConsumer listener) {
             return () -> {};
         }

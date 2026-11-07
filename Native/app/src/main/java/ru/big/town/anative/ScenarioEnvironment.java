@@ -26,6 +26,8 @@ interface ScenarioEnvironment {
 
     Subscription cabinTemperature(Handler handler, DoubleConsumer listener);
 
+    Subscription speed(Handler handler, IntConsumer listener);
+
     Subscription light(IntConsumer listener);
 
     ScenarioPolicy.Snapshot snapshot(ScenarioDefinition scenario);
@@ -44,6 +46,7 @@ interface ScenarioEnvironment {
             private final ScenarioActionExecutor actions = new ScenarioActionExecutor(service);
             // Triggers and conditions consume the same ordered feedback stream.
             private volatile String driveMode;
+            private volatile int speedKmh = -1;
 
             @Override
             public Subscription gear(Handler handler, IntConsumer listener) {
@@ -99,6 +102,36 @@ interface ScenarioEnvironment {
             }
 
             @Override
+            public Subscription speed(Handler handler, IntConsumer listener) {
+                CanBusEventHub hub = CanBusEventHub.get(service);
+                CanBusEventHub.Subscription subscription =
+                        hub.subscribe(
+                                CanBusEventRouter.INTEREST_CONNECTION
+                                        | CanBusEventRouter.INTEREST_VEHICLE_SPEED,
+                                new int[0],
+                                handler,
+                                event -> {
+                                    switch (event.kind) {
+                                        case CONNECTION:
+                                        case CONNECTION_LOST:
+                                            speedKmh = -1;
+                                            listener.accept(speedKmh);
+                                            if (event.kind == CanBusEvent.Kind.CONNECTION) {
+                                                hub.requestSpeedSnapshot();
+                                            }
+                                            break;
+                                        case VEHICLE_SPEED:
+                                            speedKmh = event.first >= 0 ? event.first : -1;
+                                            listener.accept(speedKmh);
+                                            break;
+                                        default:
+                                            break;
+                                    }
+                                });
+                return subscription::close;
+            }
+
+            @Override
             public Subscription light(IntConsumer listener) {
                 LightSensorService.LevelListener callback = listener::accept;
                 LightSensorService.addLevelListener(callback);
@@ -142,12 +175,14 @@ interface ScenarioEnvironment {
                         states.gear().currentGear(),
                         ScenarioPolicy.hasCondition(scenario, ScenarioProtocol.CONDITION_TEMP_IN)
                                 ? CabinTemperatureController.get(service).temperature()
-                                : Double.NaN);
+                                : Double.NaN,
+                        speedKmh);
             }
 
             @Override
             public boolean acceptTrigger(
-                    String scenarioId, ScenarioDefinition.Trigger trigger,
+                    String scenarioId,
+                    ScenarioDefinition.Trigger trigger,
                     ScenarioTriggerHistory history) {
                 return !trigger.firstOnly
                         || ScenarioTriggerPersistence.accept(service, scenarioId, trigger);
