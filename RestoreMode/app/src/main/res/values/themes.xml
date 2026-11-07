@@ -5,7 +5,9 @@
         <!-- <item name="colorPrimary">@color/my_light_primary</item> -->
     </style>
 
-    <style name="Theme.RestoreMode" parent="Base.Theme.RestoreMode" />
+    <style name="Theme.RestoreMode" parent="Base.Theme.RestoreMode">
+        <item name="android:windowBackground">@android:color/black</item>
+    </style>
 
     <!-- Тёмный диалог подтверждения с крупными кнопками -->
     <style name="DarkDialog" parent="ThemeOverlay.Material3.MaterialAlertDialog">
