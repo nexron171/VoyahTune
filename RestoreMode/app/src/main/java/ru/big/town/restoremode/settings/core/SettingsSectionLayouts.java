@@ -86,6 +86,8 @@ public final class SettingsSectionLayouts {
         layout(R.layout.settings_apps_add_split),
         layout(R.layout.settings_apps_dock_heading),
         layout(R.layout.settings_apps_dock_slots),
+        layout(R.layout.settings_apps_passenger_dock_heading),
+        layout(R.layout.settings_apps_passenger_dock),
         layout(R.layout.settings_apps_fullscreen_heading),
         layout(R.layout.settings_apps_fullscreen_description),
         dynamic(DynamicContent.FULLSCREEN_APPS),

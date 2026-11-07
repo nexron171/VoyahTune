@@ -5,6 +5,7 @@ import android.content.SharedPreferences;
 import ru.big.town.restoremode.widgets.apps.AppWidgetStore;
 import ru.big.town.restoremode.widgets.clock.ClockWidgetView;
 import ru.big.town.restoremode.widgets.energy.EnergyWidgetLayout;
+import ru.big.town.restoremode.widgets.fragrance.FragranceWidgetLayout;
 import ru.big.town.restoremode.widgets.fuel.FuelFlapWidgetLayout;
 import ru.big.town.restoremode.widgets.headlights.HeadlightWidgetLayout;
 import ru.big.town.restoremode.widgets.media.MediaWidgetLayout;
@@ -54,6 +55,7 @@ public class TileSizeStore {
     }
 
     private static int clampWidth(String widgetId, int value) {
+        if (FragranceWidgetLayout.ID.equals(widgetId)) return FragranceWidgetLayout.fit(value, 1).columns;
         if (FuelFlapWidgetLayout.ID.equals(widgetId))
             return FuelFlapWidgetLayout.fit(value, 1).columns;
         if (ClockWidgetView.ID.equals(widgetId)) {
@@ -80,6 +82,10 @@ public class TileSizeStore {
         if (prefs == null || widgetId == null) {
             return defaultValue;
         }
+        if (FragranceWidgetLayout.ID.equals(widgetId)) {
+            return FragranceWidgetLayout.fit(width(prefs, widgetId, FragranceWidgetLayout.CARD.columns),
+                    prefs.getInt(HEIGHT_KEY_PREFIX + widgetId, defaultValue)).rows;
+        }
         int defaultColumns =
                 FuelFlapWidgetLayout.ID.equals(widgetId)
                         ? FuelFlapWidgetLayout.STANDARD.columns
@@ -95,6 +101,7 @@ public class TileSizeStore {
     }
 
     private static int clampHeight(String widgetId, int columns, int value) {
+        if (FragranceWidgetLayout.ID.equals(widgetId)) return FragranceWidgetLayout.fit(columns, value).rows;
         if (FuelFlapWidgetLayout.ID.equals(widgetId))
             return FuelFlapWidgetLayout.fit(columns, value).rows;
         if (RadioWidgetLayout.ID.equals(widgetId)) {
@@ -115,7 +122,8 @@ public class TileSizeStore {
     }
 
     public static boolean isResizable(String widgetId) {
-        return FuelFlapWidgetLayout.ID.equals(widgetId)
+        return FragranceWidgetLayout.ID.equals(widgetId)
+                || FuelFlapWidgetLayout.ID.equals(widgetId)
                 || EnergyWidgetLayout.isWidget(widgetId)
                 || MediaWidgetLayout.isWidget(widgetId)
                 || ClockWidgetView.ID.equals(widgetId)
@@ -156,6 +164,12 @@ public class TileSizeStore {
             value = Math.max(1, Math.min(5, value));
         }
         if (prefs == null || widgetId == null) {
+            return;
+        }
+        if (FragranceWidgetLayout.ID.equals(widgetId)) {
+            FragranceWidgetLayout size = FragranceWidgetLayout.fit(value,
+                    prefs.getInt(HEIGHT_KEY_PREFIX + widgetId, FragranceWidgetLayout.CARD.rows));
+            setSize(prefs, widgetId, size.columns, size.rows);
             return;
         }
         if (FuelFlapWidgetLayout.ID.equals(widgetId)) {
@@ -215,6 +229,12 @@ public class TileSizeStore {
 
     public static void setHeight(SharedPreferences prefs, String widgetId, int value) {
         if (prefs == null || widgetId == null) {
+            return;
+        }
+        if (FragranceWidgetLayout.ID.equals(widgetId)) {
+            FragranceWidgetLayout size = FragranceWidgetLayout.fit(
+                    width(prefs, widgetId, FragranceWidgetLayout.CARD.columns), value);
+            setSize(prefs, widgetId, size.columns, size.rows);
             return;
         }
         if (FuelFlapWidgetLayout.ID.equals(widgetId)) {

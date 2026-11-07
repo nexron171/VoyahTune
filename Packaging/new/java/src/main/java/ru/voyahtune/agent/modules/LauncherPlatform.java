@@ -41,5 +41,8 @@ public interface LauncherPlatform extends LauncherPresentation.Access {
     default void watchApps(ResourceGroup resources, Events events) throws Exception { watch(resources, events); }
     default boolean image(Object view) { return false; }
     default String resolvePackage(Object intent) throws Exception { return ""; }
+    default void passengerDock(Object bar, Object driver, String first, String second) throws Exception {}
+    default void passengerSelection(String packageName) {}
+    default void clearPassengerDock() throws Exception {}
     void error(Exception failure);
 }

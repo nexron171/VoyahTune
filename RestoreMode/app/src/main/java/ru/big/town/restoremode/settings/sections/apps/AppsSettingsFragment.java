@@ -50,6 +50,29 @@ public final class AppsSettingsFragment extends SettingsSectionFragment {
     private Button dockSplit1Btn, dockSplit2Btn;
     private Button dockIcon1Button, dockIcon2Button;
 
+    private void bindPassengerDockSlot(int slot, int pickerId, int resetId) {
+        Button picker = settingView(pickerId);
+        if (picker == null) return;
+        String key = "passengerDockSlot" + slot;
+        Button reset = settingView(resetId);
+        String stock = "По умолчанию";
+        picker.setText(preferences.getString(key + "Label", stock));
+        reset.setEnabled(!preferences.getString(key, "").isEmpty());
+        picker.setOnClickListener(view -> SettingsAppPicker.show(requireContext(),
+                "Пассажирский док · слот " + slot, true, (packageName, label) -> {
+                    preferences.edit().putString(key, packageName).putString(key + "Label", label).apply();
+                    picker.setText(label);
+                    reset.setEnabled(true);
+                    pushDockConfig();
+                }));
+        reset.setOnClickListener(view -> {
+            preferences.edit().remove(key).remove(key + "Label").apply();
+            picker.setText(stock);
+            reset.setEnabled(false);
+            pushDockConfig();
+        });
+    }
+
     private void initDockOverride() {
         dockApp1Btn = settingView(R.id.buttonDockApp1);
         dockApp2Btn = settingView(R.id.buttonDockApp2);
@@ -622,6 +645,8 @@ public final class AppsSettingsFragment extends SettingsSectionFragment {
     @Override
     protected void bindSettingsRow() {
         bindClusterNavigation();
+        bindPassengerDockSlot(1, R.id.passengerDockApp1, R.id.passengerDockReset1);
+        bindPassengerDockSlot(2, R.id.passengerDockApp2, R.id.passengerDockReset2);
         if (settingView(R.id.dockOverrideBlock) != null) {
             initDockOverride();
             bindClick(R.id.buttonDockApp1, view -> pickDockApp(1));

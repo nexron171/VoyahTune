@@ -56,6 +56,12 @@ public class SetModesConfigReceiver extends BroadcastReceiver {
             SetModesReceiverDynamic.mirrorDock(context, intent, 2);
             SetModesReceiverDynamic.clearLegacyPassengerDock(context);
             for (int slot = 1; slot <= 2; slot++) {
+                String passengerKey = "passengerDockSlot" + slot;
+                String passengerApp = intent.getStringExtra(passengerKey);
+                if (passengerApp != null) {
+                    Settings.Global.putString(context.getContentResolver(), "voyahtune_" + passengerKey,
+                            passengerApp.isEmpty() ? "none" : passengerApp);
+                }
                 String key = DockIconStyle.configKey(slot);
                 DockIconStyle style = DockIconStyle.fromValue(intent.getStringExtra(key));
                 Settings.Global.putString(

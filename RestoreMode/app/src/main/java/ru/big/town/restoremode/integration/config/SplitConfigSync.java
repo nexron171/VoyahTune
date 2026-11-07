@@ -132,6 +132,12 @@ public final class SplitConfigSync {
         i.putExtra("dock1Dpi", p1.isEmpty() ? 0 : AppDpiStore.get(prefs, p1));
         i.putExtra("dock2Dpi", p2.isEmpty() ? 0 : AppDpiStore.get(prefs, p2));
         for (int slot = 1; slot <= 2; slot++) {
+            String passengerKey = "passengerDockSlot" + slot;
+            String passengerApp = prefs.getString(passengerKey, "");
+            if (!carPlayEnabled && ru.big.town.common.CarPlayTarget.isCarPlay(passengerApp)) {
+                passengerApp = "";
+            }
+            i.putExtra(passengerKey, passengerApp.isEmpty() ? "none" : passengerApp);
             DockIconStyle style =
                     DockIconStyle.fromValue(
                             prefs.getString(DockIconStyle.preferenceKey(slot), "default"));

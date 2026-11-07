@@ -118,6 +118,9 @@ public class CarPlayFeatureTest {
         settings.edit().putString("dockOverride1", CarPlayTarget.ID)
                 .putString("dockOverride1Label", "CarPlay")
                 .putString("dockOverride2", "app.music")
+                .putString("passengerDockSlot1", "passenger.app")
+                .putString("passengerDockSlot2", CarPlayTarget.ID)
+                .putString("passengerDockSlot2Label", "CarPlay")
                 .putBoolean(VoiceSteeringPolicy.SIRI_ENABLED, true).commit();
         for (DashboardProfile profile : new DashboardProfile[] {
                 DashboardProfile.driver(), DashboardProfile.passenger()}) {
@@ -153,6 +156,9 @@ public class CarPlayFeatureTest {
                 .reduce((first, second) -> second).get();
         assertFalse(dock.getBooleanExtra(CarPlayTarget.ENABLED, true));
         assertEquals("none", dock.getStringExtra("dock1"));
+        assertEquals("passenger.app", dock.getStringExtra("passengerDockSlot1"));
+        assertEquals("none", dock.getStringExtra("passengerDockSlot2"));
+        assertFalse(settings.contains("passengerDockSlot2Label"));
 
         CarPlayFeature.setEnabled(application, true);
         assertEquals(1, AppWidgetStore.load(settings).size());

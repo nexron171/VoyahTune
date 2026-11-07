@@ -65,6 +65,8 @@ public final class AndroidLauncherPlatform implements LauncherPlatform {
                     "dock2",
                     "dock1Icon",
                     "dock2Icon",
+                    "passengerDockSlot1",
+                    "passengerDockSlot2",
                     "fullscreen_apps",
                     "dockpin",
                     "freeform",
@@ -88,6 +90,7 @@ public final class AndroidLauncherPlatform implements LauncherPlatform {
     private final Map<String, CharSequence> labels = new LinkedHashMap<>();
     private List<String> installed;
     private Object statusBus;
+    private PassengerDockLayout passengerLayout;
 
     public AndroidLauncherPlatform(Context context, MethodAccess methods) {
         if (context == null)
@@ -353,6 +356,33 @@ public final class AndroidLauncherPlatform implements LauncherPlatform {
         drawable.setGravity(Gravity.CENTER);
         drawable.setBounds(0, 0, 50, 50);
         return drawable;
+    }
+
+    @Override
+    public void passengerDock(Object bar, Object driver, String first, String second) throws Exception {
+        if (passengerLayout != null && !passengerLayout.matches(bar)) clearPassengerDock();
+        if (passengerLayout == null) passengerLayout = PassengerDockLayout.attach(bar, driver, this, methods);
+        if (passengerLayout != null) {
+            try {
+                passengerLayout.update(driver, first, second);
+            } catch (Exception failure) {
+                clearPassengerDock();
+                throw failure;
+            }
+        }
+    }
+
+    @Override
+    public void passengerSelection(String packageName) {
+        if (passengerLayout != null) passengerLayout.selected(packageName);
+    }
+
+    @Override
+    public void clearPassengerDock() throws Exception {
+        if (passengerLayout != null) {
+            passengerLayout.close();
+            passengerLayout = null;
+        }
     }
 
     @Override

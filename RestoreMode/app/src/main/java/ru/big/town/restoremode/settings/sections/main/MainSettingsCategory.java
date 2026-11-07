@@ -20,6 +20,7 @@ public enum MainSettingsCategory {
             layout(R.layout.settings_main_wash_mode_auto_light),
             layout(R.layout.settings_main_rear_fog_hotspot),
             layout(R.layout.settings_main_fuel_flap),
+            layout(R.layout.settings_main_fragrance),
             layout(R.layout.settings_main_recirculation),
             layout(R.layout.settings_main_pedestrian_sound_battery_heat),
             layout(R.layout.settings_main_voice_scenarios),

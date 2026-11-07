@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ru.big.town.restoremode.settings.ui.layout.SettingsRow
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical">
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_weight="1">
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Автозапуск пассажирской сетки"
+            android:textSize="22sp"
+            android:textColor="#f3f5fa"
+            android:includeFontPadding="false" />
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Открывать VoyahTune на пассажирском дисплее после загрузки головы и пробуждения автомобиля"
+            android:textSize="17sp"
+            android:textColor="#9aaac0"
+            android:includeFontPadding="false"
+            android:layout_marginTop="7dp"
+            android:lineSpacingMultiplier="1.45" />
+    </LinearLayout>
+    <ru.big.town.restoremode.settings.ui.controls.SettingsToggle
+        android:id="@+id/switchPassengerAutoStart"
+        android:layout_width="58dp"
+        android:layout_height="32dp"
+        android:layout_marginStart="16dp"
+        android:contentDescription="Автозапуск пассажирской сетки"
+        android:thumb="@drawable/switch_thumb"
+        android:track="@drawable/switch_track" />
+</ru.big.town.restoremode.settings.ui.layout.SettingsRow>

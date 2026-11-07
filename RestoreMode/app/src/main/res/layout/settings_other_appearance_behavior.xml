@@ -41,6 +41,7 @@
             android:thumb="@drawable/switch_thumb"
             android:track="@drawable/switch_track" />
     </ru.big.town.restoremode.settings.ui.layout.SettingsRow>
+    <include layout="@layout/settings_passenger_autostart_toggle" />
     <ru.big.town.restoremode.settings.ui.layout.SettingsRow
         android:layout_width="match_parent"
         android:layout_height="wrap_content"

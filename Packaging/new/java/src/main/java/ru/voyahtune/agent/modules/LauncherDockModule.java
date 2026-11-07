@@ -88,6 +88,11 @@ public final class LauncherDockModule implements ModuleRuntime.Module {
         moves("onMoveStop", "move-stop");
         if (shared) bind(SECOND_HOME, "onResume", "second-resume", true);
         else {
+            String passenger = "com.qinggan.launcher.navigation.NavigationBarSecond";
+            bind(passenger, "initScreenUpViews", "paint", false);
+            bind(passenger, "updateTheme", "paint", false);
+            bind(passenger, "initAllAppShow", "paint", false);
+            bind(passenger, "updateSelectedApp", "selected", false, "java.lang.String", "java.lang.String");
             bind(CONTROLLER, "doScreenLift", "lift", false, "int");
             bind(CONTROLLER, "show", "show", false);
             bind(CONTROLLER, "dismiss", "dismiss", false);
@@ -181,6 +186,11 @@ public final class LauncherDockModule implements ModuleRuntime.Module {
             case "selected":
                 int display = screen(receiver);
                 if (physical(display)) foreground[display] = new LauncherPolicy.Top((String) arguments[0], (String) arguments[1], false);
+                if (display == 1) {
+                    Object selected = call.proceed();
+                    platform.passengerSelection((String) arguments[0]);
+                    return selected;
+                }
                 if (display == 0) {
                     if (LauncherPolicy.NATIVE.equals(arguments[0]) && String.valueOf(arguments[1]).contains("SplitHostActivity") && lastSlot > 0) {
                         Object selectedView = field(bar(receiver), "mScreenUpItemView" + lastSlot);
@@ -349,7 +359,21 @@ public final class LauncherDockModule implements ModuleRuntime.Module {
 
     private void paint(Object controller, int lift) throws Exception {
         Object bar = bar(controller);
-        if (bar == null || screen(bar) != 0) return;
+        if (bar == null) return;
+        if (screen(bar) == 1) {
+            Object current = findModel();
+            Object driver = bar(controller(current, 0));
+            if (driver != null) {
+                try {
+                    platform.passengerDock(bar, driver, policy.setting("passengerDockSlot1"),
+                            policy.setting("passengerDockSlot2"));
+                } catch (Exception unavailable) {
+                    error(unavailable);
+                }
+            }
+            return;
+        }
+        if (screen(bar) != 0) return;
         bars.put(bar, true);
         Map<String, Object> views = views(bar);
         presentation.icons(0, Arrays.asList(views.get("slot1"), views.get("slot2")),
@@ -543,6 +567,8 @@ public final class LauncherDockModule implements ModuleRuntime.Module {
                 hidden[display] = false;
             } catch (Exception caught) { if (failure == null) failure = caught; else failure.addSuppressed(caught); }
         }
+        try { platform.clearPassengerDock(); }
+        catch (Exception caught) { if (failure == null) failure = caught; else failure.addSuppressed(caught); }
         try { presentation.close(); }
         catch (Exception caught) { if (failure == null) failure = caught; else failure.addSuppressed(caught); }
         try { visibility.close(); }

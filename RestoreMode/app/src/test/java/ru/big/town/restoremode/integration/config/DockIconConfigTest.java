@@ -70,6 +70,19 @@ public class DockIconConfigTest {
     }
 
     @Test
+    public void passengerAssignmentsArePublishedIndependently() throws Exception {
+        preferences.edit().putString("dockOverride1", "driver.app")
+                .putString("passengerDockSlot1", "passenger.app").commit();
+
+        Intent config = publish();
+        assertEquals("driver.app", config.getStringExtra("dock1"));
+        assertEquals("passenger.app", config.getStringExtra("passengerDockSlot1"));
+        assertEquals("none", config.getStringExtra("passengerDockSlot2"));
+        preferences.edit().remove("passengerDockSlot1").commit();
+        assertEquals("none", publish().getStringExtra("passengerDockSlot1"));
+    }
+
+    @Test
     public void unknownChoiceFallsBackToDefault() throws Exception {
 
         preferences.edit().putString("dockOverride1Icon", "unknown").commit();

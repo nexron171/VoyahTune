@@ -47,6 +47,7 @@ import ru.big.town.restoremode.widgets.climate.RecirculationWidgetLayout;
 import ru.big.town.restoremode.widgets.clock.ClockWidgetView;
 import ru.big.town.restoremode.widgets.dials.DialWidgetStore;
 import ru.big.town.restoremode.widgets.energy.EnergyWidgetPreferences;
+import ru.big.town.restoremode.widgets.fragrance.FragranceWidgetLayout;
 import ru.big.town.restoremode.widgets.fuel.FuelFlapWidgetLayout;
 import ru.big.town.restoremode.widgets.headlights.HeadlightWidgetLayout;
 import ru.big.town.restoremode.widgets.links.LinkBrowserPicker;
@@ -245,6 +246,8 @@ public class MainSettingsFragment extends SettingsSectionFragment {
         bindShowSwitch(R.id.switchShowRecirculation, RecirculationWidgetLayout.VISIBLE, false);
         bindShowSwitch(
                 R.id.switchShowFuelFlap, FuelFlapWidgetLayout.VISIBLE, false, R.id.fuelFlapSizeRow);
+        bindShowSwitch(
+                R.id.switchShowFragrance, FragranceWidgetLayout.VISIBLE, false, R.id.fragranceSizeRow);
         bindShowSwitch(R.id.switchShowBrightness, BrightnessWidgetLayout.VISIBLE, false);
         bindShowSwitch(
                 R.id.switchShowCabinTemperature, CabinTemperatureWidgetLayout.VISIBLE, false);

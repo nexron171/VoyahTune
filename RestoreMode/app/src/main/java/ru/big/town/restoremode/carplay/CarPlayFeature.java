@@ -198,6 +198,10 @@ public final class CarPlayFeature {
         SharedPreferences preferences = DashboardProfile.driver().settingsPreferences(context);
         SharedPreferences.Editor editor = preferences.edit();
         for (int slot = 1; slot <= 2; slot++) {
+            String passengerKey = "passengerDockSlot" + slot;
+            if (CarPlayTarget.isCarPlay(preferences.getString(passengerKey, ""))) {
+                editor.remove(passengerKey).remove(passengerKey + "Label");
+            }
             String key = "dockOverride" + slot;
             if (CarPlayTarget.isCarPlay(preferences.getString(key, ""))) {
                 editor.remove(key)

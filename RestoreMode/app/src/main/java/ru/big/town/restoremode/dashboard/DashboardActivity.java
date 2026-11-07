@@ -105,6 +105,8 @@ import ru.big.town.restoremode.widgets.energy.TripWidgetView;
 import ru.big.town.restoremode.widgets.energy.VehicleWidgetView;
 import ru.big.town.restoremode.widgets.energy.VehicleWidgets;
 import ru.big.town.restoremode.widgets.fuel.FuelFlapWidgetDashboard;
+import ru.big.town.restoremode.widgets.fragrance.FragranceWidgetDashboard;
+import ru.big.town.restoremode.widgets.fragrance.FragranceWidgetLayout;
 import ru.big.town.restoremode.widgets.fuel.FuelFlapWidgetLayout;
 import ru.big.town.restoremode.widgets.headlights.HeadlightWidgetDashboard;
 import ru.big.town.restoremode.widgets.headlights.HeadlightWidgetLayout;
@@ -382,6 +384,7 @@ public class DashboardActivity extends AppCompatActivity {
     private final BrightnessWidgetDashboard brightnessWidget = new BrightnessWidgetDashboard(this);
     private final RecirculationWidgetDashboard recirculationWidget =
             new RecirculationWidgetDashboard(this);
+    private final FragranceWidgetDashboard fragranceWidget = new FragranceWidgetDashboard(this);
     private final FuelFlapWidgetDashboard fuelFlapWidget = new FuelFlapWidgetDashboard(this);
     private final HeadlightWidgetDashboard headlightWidget = new HeadlightWidgetDashboard(this);
 
@@ -444,6 +447,8 @@ public class DashboardActivity extends AppCompatActivity {
         recirculationWidget.watch(
                 suspensionScreenResumed
                         && sharedPreferences.getBoolean(RecirculationWidgetLayout.VISIBLE, false));
+        fragranceWidget.watch(suspensionScreenResumed
+                && sharedPreferences.getBoolean(FragranceWidgetLayout.VISIBLE, false));
         fuelFlapWidget.watch(
                 suspensionScreenResumed
                         && sharedPreferences.getBoolean(FuelFlapWidgetLayout.VISIBLE, false));
@@ -1068,6 +1073,7 @@ public class DashboardActivity extends AppCompatActivity {
         GlobalVars.clientDisconnected();
         systemWidgets.disconnected();
         recirculationWidget.disconnected();
+        fragranceWidget.disconnected();
         fuelFlapWidget.disconnected();
         headlightWidget.disconnected();
         brightnessWidget.disconnected();
@@ -1853,6 +1859,8 @@ public class DashboardActivity extends AppCompatActivity {
                 return RadioWidgetLayout.VISIBLE;
             case RecirculationWidgetLayout.ID:
                 return RecirculationWidgetLayout.VISIBLE;
+            case FragranceWidgetLayout.ID:
+                return FragranceWidgetLayout.VISIBLE;
             case FuelFlapWidgetLayout.ID:
                 return FuelFlapWidgetLayout.VISIBLE;
             case CabinTemperatureWidgetLayout.ID:
@@ -1993,6 +2001,10 @@ public class DashboardActivity extends AppCompatActivity {
         if (RecirculationWidgetLayout.ID.equals(widgetId)) {
             return new int[] {RecirculationWidgetLayout.WIDTH, RecirculationWidgetLayout.HEIGHT};
         }
+        if (FragranceWidgetLayout.ID.equals(widgetId)) {
+            return TileSizeStore.dimensions(sharedPreferences, widgetId,
+                    FragranceWidgetLayout.CARD.columns, FragranceWidgetLayout.CARD.rows);
+        }
         if (FuelFlapWidgetLayout.ID.equals(widgetId)) {
             return TileSizeStore.dimensions(
                     sharedPreferences,
@@ -2096,6 +2108,7 @@ public class DashboardActivity extends AppCompatActivity {
         systemWidgets.resetViews();
         mediaWidgets.resetViews();
         recirculationWidget.resetView();
+        fragranceWidget.resetView();
         fuelFlapWidget.resetView();
         headlightWidget.resetView();
         brightnessWidget.resetView();
@@ -2344,6 +2357,11 @@ public class DashboardActivity extends AppCompatActivity {
                         break;
                     case RecirculationWidgetLayout.ID:
                         widgetView = recirculationWidget.create();
+                        break;
+                    case FragranceWidgetLayout.ID:
+                        if (!isWidgetVisible(tile.id)) continue;
+                        int[] fragranceSize = getWidgetDimensions(tile.id);
+                        widgetView = fragranceWidget.create(FragranceWidgetLayout.fit(fragranceSize[0], fragranceSize[1]));
                         break;
                     case FuelFlapWidgetLayout.ID:
                         int[] fuelSize = getWidgetDimensions(tile.id);
@@ -4507,6 +4525,7 @@ public class DashboardActivity extends AppCompatActivity {
         systemWidgets.close();
         mediaWidgets.close();
         recirculationWidget.close();
+        fragranceWidget.close();
         fuelFlapWidget.close();
         headlightWidget.close();
         brightnessWidget.close();

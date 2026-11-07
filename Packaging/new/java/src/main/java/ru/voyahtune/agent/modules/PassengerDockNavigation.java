@@ -19,6 +19,7 @@ final class PassengerDockNavigation implements AutoCloseable {
     private final Object air;
     private final Object temperature;
     private final boolean created;
+    private final int firstSlotId;
     private final ViewOwnership ownership;
     private final ResourceGroup resources = new ResourceGroup();
     private Object clickListener;
@@ -32,6 +33,9 @@ final class PassengerDockNavigation implements AutoCloseable {
         this.group = group;
         this.button = button;
         this.created = created;
+        Object context = OemAccess.call(group, "getContext");
+        firstSlotId = (Integer) OemAccess.call(OemAccess.call(context, "getResources"), "getIdentifier",
+                "screen_up_icon_1", "id", OemAccess.call(context, "getPackageName"));
         air = PassengerDockModule.field(bar, "mScreenUpAirView");
         temperature = PassengerDockModule.field(bar, "mScreenUpTemperatureContentView");
         ownership = new ViewOwnership(new Properties(platform));
@@ -146,11 +150,14 @@ final class PassengerDockNavigation implements AutoCloseable {
 
     void reconcile() throws Exception {
         managed |= (Integer) OemAccess.call(button, "getVisibility") != 0;
-        if (!managed) return;
-        ownership.write(button, "onClick", clickListener);
-        ownership.write(button, "visibility", 0);
+        Object firstSlot = firstSlot();
+        if (!managed && firstSlot == null) return;
+        if (managed) {
+            ownership.write(button, "onClick", clickListener);
+            ownership.write(button, "visibility", 0);
+        }
         Object seat = PassengerDockModule.field(bar, "mScreenUpSeatView");
-        Object spacing = seat == null ? air : seat;
+        Object spacing = firstSlot != null ? firstSlot : (seat != null ? seat : air);
         if (spacing != null) ownership.write(button, "topMargin",
                 OemAccess.read(OemAccess.call(spacing, "getLayoutParams"), "topMargin"));
         if (created) refreshTheme();
@@ -179,8 +186,12 @@ final class PassengerDockNavigation implements AutoCloseable {
         }
     }
 
+    private Object firstSlot() throws Exception {
+        return firstSlotId == 0 ? null : OemAccess.call(group, "findViewById", firstSlotId);
+    }
+
     private void alignTemperature() throws Exception {
-        if (!managed || air == null || temperature == null
+        if ((!managed && firstSlot() == null) || air == null || temperature == null
                 || (Integer) OemAccess.call(group, "getHeight") <= 0
                 || (Integer) OemAccess.call(air, "getHeight") <= 0
                 || Boolean.TRUE.equals(OemAccess.call(group, "isLayoutRequested"))

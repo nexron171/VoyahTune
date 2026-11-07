@@ -307,6 +307,10 @@ public final class OtherSettingsFragment extends SettingsSectionFragment {
         switchAutoLaunch.setChecked(preferences.getBoolean("autoLaunchOnWake", false));
         switchAutoLaunch.setOnCheckedChangeListener(
                 (b, checked) -> preferences.edit().putBoolean("autoLaunchOnWake", checked).apply());
+        Switch passengerAutoStart = settingView(R.id.switchPassengerAutoStart);
+        passengerAutoStart.setChecked(preferences.getBoolean("passengerAutoStart", false));
+        passengerAutoStart.setOnCheckedChangeListener(
+                (button, checked) -> preferences.edit().putBoolean("passengerAutoStart", checked).apply());
     }
 
     private void bindDockNavigation(int rowId, int switchId, String preference) {

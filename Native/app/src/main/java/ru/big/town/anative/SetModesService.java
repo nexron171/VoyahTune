@@ -121,6 +121,7 @@ public class SetModesService extends Service {
     private SuspensionWidgetController suspensionWidget;
     private HeadlightWidgetController headlightWidget;
     private FuelFlapWidgetController fuelFlapWidget;
+    private FragranceWidgetController fragranceWidget;
     private RecirculationWidgetController recirculationWidget;
     private BrightnessWidgetController brightnessWidget;
     private EnergyWidgetController energyWidgets;
@@ -172,6 +173,17 @@ public class SetModesService extends Service {
                                 new RecirculationWidgetController(SetModesService.this);
                     }
                     recirculationWidget.handle(msg);
+                    break;
+                case ru.big.town.common.FragranceWidgetProtocol.WATCH:
+                case ru.big.town.common.FragranceWidgetProtocol.UNWATCH:
+                case ru.big.town.common.FragranceWidgetProtocol.SCENT:
+                case ru.big.town.common.FragranceWidgetProtocol.POWER:
+                case ru.big.town.common.FragranceWidgetProtocol.LEVEL:
+                case ru.big.town.common.FragranceWidgetProtocol.TIMER:
+                    if (fragranceWidget == null) {
+                        fragranceWidget = new FragranceWidgetController(SetModesService.this);
+                    }
+                    fragranceWidget.handle(msg);
                     break;
                 case ru.big.town.common.FuelFlapWidgetProtocol.WATCH:
                 case ru.big.town.common.FuelFlapWidgetProtocol.UNWATCH:
@@ -2623,6 +2635,7 @@ public class SetModesService extends Service {
         if (recirculationWidget != null) {
             recirculationWidget.close();
         }
+        if (fragranceWidget != null) fragranceWidget.close();
         if (fuelFlapWidget != null) {
             fuelFlapWidget.close();
         }

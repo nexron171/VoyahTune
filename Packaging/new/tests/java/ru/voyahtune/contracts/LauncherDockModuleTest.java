@@ -11,6 +11,7 @@ public final class LauncherDockModuleTest {
 
     static void verify() throws Throwable {
         for (boolean shared : new boolean[] {true, false}) {
+            passengerSlotReload(shared);
             try (LauncherDockContractDriver.Harness harness = new LauncherDockContractDriver.Harness(shared)) {
                 require(harness.runtime.snapshot().phase == ModuleRuntime.Phase.STARTING, "Dock ready before UI initialization");
                 harness.settings.put("dockHomeShortVoyahTune", "1");
@@ -76,6 +77,32 @@ public final class LauncherDockModuleTest {
                 harness.flush(10000);
                 require(harness.runtime.snapshot().phase == ModuleRuntime.Phase.CLOSED, "Stale dock task revived closed module");
             }
+        }
+    }
+
+    private static void passengerSlotReload(boolean shared) throws Exception {
+        java.util.List<String> assignments = new java.util.ArrayList<>();
+        try (LauncherDockContractDriver.Harness harness = new LauncherDockContractDriver.Harness(shared) {
+            @Override
+            public void passengerDock(Object bar, Object source, String first, String second) {
+                require(bar == passenger && source == driver, "Passenger settings applied to the wrong bar");
+                assignments.clear();
+                assignments.add(first);
+                assignments.add(second);
+            }
+        }) {
+            harness.settings.put("dock1", "driver.phone");
+            harness.settings.put("passengerDockSlot2", "passenger.music");
+            harness.flush(350);
+            require(assignments.equals(java.util.List.of("none", "passenger.music")),
+                    "Driver assignment leaked into the passenger dock");
+            harness.settings.remove("passengerDockSlot2");
+            harness.settings.put("passengerDockSlot1", "passenger.maps");
+            harness.events.reload();
+            harness.flush(0);
+            harness.flush(350);
+            require(assignments.equals(java.util.List.of("passenger.maps", "none")),
+                    "Live reload lost the passenger reassignment or reset");
         }
     }
 
