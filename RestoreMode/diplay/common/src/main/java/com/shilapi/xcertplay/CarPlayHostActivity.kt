@@ -7712,6 +7712,8 @@ class CarPlayHostActivity : ComponentActivity() {
         if (!CarPlayBackgroundSession.reconnectTimeout.check()) return
         val size = activeDisplaySize ?: return
         startupRetryBudget.disconnected()
+        // A rebuilt stack starts a new attempt without replenishing its retry budget.
+        startupRetryStopped = false
         startupRetryButton?.visibility = View.GONE
         appendLog(reason)
         activeScreenStreamTypes.clear()
