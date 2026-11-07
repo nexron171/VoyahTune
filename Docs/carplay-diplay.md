@@ -7,7 +7,7 @@
 
 
 Этот документ — контракт адаптации, по которому восстанавливают интеграцию после
-полной замены исходников DiPlay. Он описывает исходники с выборочным переносом DiPlay на **5 ноября 2026**;
+полной замены исходников DiPlay. Он описывает исходники с выборочным переносом DiPlay на **7 ноября 2026**;
 состав конкретного опубликованного релиза определяется его manifest и revision.
 Имена upstream-классов могут измениться: при обновлении сохранять поведение
 и границы ответственности, а не только переносить строки патча.
@@ -32,6 +32,23 @@
   #1131–1134, #1138, #1139, #1141, #1144, #1057, #1058, #1060, #1062, #1066,
   #1097. Это **не полное обновление baseline**; clock trim #1070/#1080,
   OEM-функции и standalone updater не импортированы. Контракты и карта — §9.1/10.1.
+- Дополнительно 7 ноября 2026 адаптированы открытые upstream
+  [PR #1197](https://github.com/shihabal3amri/DiPlay/pull/1197),
+  commit **`bfd5d9f0d91f578d151b2b51a1e9a25c24608a59`** (маскирование паролей iAP2),
+  и [PR #1254](https://github.com/shihabal3amri/DiPlay/pull/1254),
+  commit **`1039015e1994669163da8adbdbea6a891552a5dd`** (новая попытка после
+  остановки retries). Собственный fallback повреждённой Wi-Fi-группы также
+  маскируется. Контракты и карта — §9.2/10.1; baseline main не менялся.
+- Проверка upstream **7 ноября 2026**: main остаётся на `615b32ce`, новых commits
+  относительно источника выборочного переноса нет. Остальные открытые кандидаты:
+  [#1178](https://github.com/shihabal3amri/DiPlay/pull/1178) (ранний RFCOMM EOF),
+  [#1251](https://github.com/shihabal3amri/DiPlay/pull/1251) (USB attach без broadcast)
+  и [#1252](https://github.com/shihabal3amri/DiPlay/pull/1252) (wired pairing нескольких
+  iPhone). [#1124](https://github.com/shihabal3amri/DiPlay/pull/1124)/[#1130](https://github.com/shihabal3amri/DiPlay/pull/1130)
+  требуют сохранения наших MFi4/Ultra и listener ownership;
+  [#1206](https://github.com/shihabal3amri/DiPlay/pull/1206) — адаптации заполнения
+  окончательно потерянного звука **после** собственного UDP recovery, без замены
+  музыкального регулятора. Наличие PR не подтверждает совместимость с Voyah.
 - Копия [RestoreMode/diplay](../RestoreMode/diplay/README.md) — vendored source,
   не submodule. Модули `common` и `shared` импортированы; `mobile` не используется.
 - Иконка `ic_car_home.png` и таблица манёвров взяты/адаптированы из VoyahPlay,
@@ -2050,6 +2067,23 @@ DEFAULT_OEM_LABEL в AirPlayPersistence — **Voyah Free**, в том числе
   Открытый основной screen stream без единого видеокадра за 10 секунд предлагает
   перезапустить iPhone; неподвижное изображение после первого кадра не считается ошибкой.
 
+### 9.2. Пароли iAP2 и повторный запуск, 7 ноября 2026
+
+- **Логи iAP2 (#1197):** `secret` в `Iap2FieldSpec` отмечает passphrase сообщений
+  `0x5701`, `0x5703` и вложенного `wireless` в `0x4301`. Formatter заменяет непустое
+  значение на `<redacted>` до декодирования строки. Для endpoint с секретными полями
+  весь `raw-body` скрывается по схеме, даже при повреждённом TLV. Повреждённая
+  вложенная группа с секретными потомками также не попадает в opaque/hex fallback.
+  Пустой пароль остаётся видимым как `""`; SSID, канал, security и обычные дампы
+  несекретных сообщений сохраняются. Builders/readers и передаваемый пароль не меняются.
+  Маскирование экспортируемого отчёта остаётся отдельным механизмом.
+- **Повторный запуск (#1254):** `restartCarPlay` сбрасывает `startupRetryStopped`
+  только после проверок владельца, shutdown/menu/handshake, общего пятиминутного
+  окна reconnect и доступного размера. Перестройка размера или переход на USB
+  получает обработку ошибок новой попытки и последующих разрывов сессии.
+  Бюджет автоматических повторов не пополняется; старые controller callbacks
+  отсекаются прежней generation-проверкой. Порядок асинхронного teardown сохраняется.
+
 ## 10. Полная карта адаптаций
 
 ### 10.1. Изменённые файлы vendored upstream
@@ -2179,6 +2213,14 @@ Kotlin-файлов выровнено целиком; собственные а
 | `shared/media/AndroidMediaSink.kt`, `common/CarPlayHostActivity.kt` | Получение первого видеокадра, отсутствие изображения, диагностика и сохранение собственной отмены/переноса сессии. Здесь и ниже `common/` обозначает `common/src/main/java/com/shilapi/xcertplay/`. |
 | `common/{DiPlayActivity,LastConnectionProblem,ConnectionFailureGuidance,PhoneBluetoothReceiver}.kt`, девять основных `values*/strings.xml` | Безопасные Intent, последнее подключение и подсказки; app-owned home получает ошибку через существующий facade. |
 | `common/{SessionLogFile,AsyncDiagnosticLog,DiagnosticRedactor}.kt` | Асинхронная запись, ограничение отображения отчёта и маскирование данных. |
+
+Дополнительный перенос 7 ноября (§9.2):
+
+| Файлы | Контракт |
+| --- | --- |
+| `shared/iap2/catalog/Iap2Endpoint.kt`, `shared/iap2/trace/Iap2FrameFormatter.kt` | Метаданные secret и маскирование значений/raw-body, включая fallback повреждённой вложенной группы. Пути `shared/` определены в таблице выше. |
+| `common/CarPlayHostActivity.kt` | Сброс остановки retries только при допустимом новом запуске, без сброса бюджета/общего timeout. |
+| `shared/src/test/java/com/shilapi/xcertplay/iap2/Iap2TraceRedactionTest.kt`, `common/src/test/java/com/shilapi/xcertplay/WirelessStartupRecoveryTest.kt` | Пароли TX/RX, текст/hex и повреждённые данные; отображение новой ошибки, Retry и reconnect после перестройки, сохранение исчерпанного бюджета. |
 
 ### 10.2. Собственные файлы внутри DiPlay
 
@@ -2565,6 +2607,7 @@ UI-тесты и испытания на ГУ выполнять только в
 | Скорость, gear, SWReason | app `CarPlayVehicleSpeedPipelineTest` (Messenger → iAP2); Native `CanBusEventRouterTest` (скорость и timestamp), `CarPlayLightStateTest` (начальный SWReason, события и запоздавшие ответы); common `VoyahCarPlayIntegrationTest`, `CarPlayThemePolicyTest` |
 | Климат VSP | shared `OpackCodecTest` (iPhone/Apple SDK vectors, границы), `VehicleStateProtocolTest` (неизвестные значения, readback, дедупликация, диапазоны, VentCombinations, позиции сидений, цикл рециркуляции и маршрутизация команд), `VehicleStateChannelTest` (шифрование, фрагментация, ACK/token), `VehicleStateDisplayPanelsTest` (панели без дополнительного видеопотока), `VehicleClimateDockTest` и `AirPlayInfoPlistTest` (док, приоритет сохранённого края, main/cluster и геометрия); Native `ClimateCommandTest`, `ClimateAirDistributionTest` (пять абсолютных режимов H97, ручной readback и legacy направления), `OemSeatClimateStateTest` (реальные switch/level, отдельные места, unknown и выключение), `OemSeatMassageStateTest` (цикл 0–3–2–1–0, сохранённая интенсивность и unknown), shared `ultra.VoyahVehicleControlsTest` (кнопка массажа, echo/ready, readback уровня, дедупликация между каналами и ошибки), `OemComfortClimateStateTest` (руль 0/1, ошибка 10, подтверждение и независимость сидений), `CanBusEventRouterTest`; компиляция обеих сторон IPC. На ГУ отдельно проверить принятие SeatFan, все позиции/уровни, физический результат, обратное изменение штатной кнопкой, температуры в доке вне приложения «Климат», потерю CAN и reconnect. |
 | Siri | app `VoiceSteeringPolicyTest`; common `WheelSiriWindowTest` (включает Voyah guard) |
+| Пароли iAP2 и новый запуск | shared `iap2.Iap2TraceRedactionTest`, `iap2.Iap2ProtocolTest`; common `WirelessStartupRecoveryTest`: маскирование без изменения пакетов, повреждённые TLV/группы, ошибка и reconnect новой попытки, сохранение лимита retries. |
 | Манёвры | shared `hud.VoyahNavigationTest`; Native `ClusterNavigationLeaseTest`, `ClusterNavigationSourcesTest`; `Packaging/new/tests/navigation-source-lifecycle.test.js`, `test_cluster_navigation.js` |
 | Аудио | shared `media.VoyahAudioRoutingTest`, `media.NavigationAudioFocusTest`, `media.VoyahAudioFocusTest`, `media.AudioFocusAutoYieldTest`, `media.LegacyAudioFallbackTest`, `airplay.CarPlayAudioStreamIsolationTest`; Native `CarPlayAudioPolicyTest`; app `carplay.CarPlayAudioValuesTest`; common `VoyahAudioDefaultsTest` |
 | Скорость музыки и повторное заполнение | shared `media.MediaClockTrimTest`, `media.MediaClockTrimRecoveryTest`, `media.AudioClockTrimTest`, `media.MediaPacketLagGuardTest`, `media.AudioRebufferCapacityTest`, `media.MediaAudioBufferTest`, `media.MusicPlaybackControlTest`: порции 300/500/1000 мс, дрейф ±0.05/0.15/0.25/0.76% в 15-минутной модели, независимое обучение при tempo recovery, отсутствие штатного PCM skip, пределы темпа/очереди и плавный спад резерва; отказ PlaybackParams/clock API и отсутствие второго контроллера. |
