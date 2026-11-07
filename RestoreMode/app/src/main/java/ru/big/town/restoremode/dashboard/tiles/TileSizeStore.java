@@ -12,13 +12,8 @@ import ru.big.town.restoremode.widgets.media.MediaWidgetLayout;
 import ru.big.town.restoremode.widgets.radio.RadioWidgetLayout;
 import ru.big.town.restoremode.widgets.system.SystemWidgetLayout;
 
-/**
- * Размеры плиток главного экрана в ячейках smart-grid (12 колонок × 5 рядов), изменённые
- * пользователем в «Дополнительно». Плитка без переопределения получает дефолт из {@code
- * MainActivity.getWidgetDimensions()}.
- */
+/** Stores supported dashboard tile dimensions in grid cells. */
 public class TileSizeStore {
-    /** Плитка «Быстрый запуск»: id в TileOrderStore и размер по умолчанию (2×3 ячейки). */
     public static final String LAUNCH_APPS_WIDGET_ID = "launchAppsWidget";
 
     public static final int LAUNCH_APPS_DEFAULT_WIDTH = 2;
@@ -33,7 +28,7 @@ public class TileSizeStore {
 
     private TileSizeStore() {}
 
-    /** Размер плитки {ширина, высота}: пользовательское значение либо дефолт. */
+    /** Returns the saved dimensions or the widget defaults. */
     public static int[] dimensions(
             SharedPreferences prefs, String widgetId, int defaultWidth, int defaultHeight) {
         int columns = width(prefs, widgetId, defaultWidth);
@@ -55,7 +50,9 @@ public class TileSizeStore {
     }
 
     private static int clampWidth(String widgetId, int value) {
-        if (FragranceWidgetLayout.ID.equals(widgetId)) return FragranceWidgetLayout.fit(value, 1).columns;
+        if (SUSPENSION_WIDGET_ID.equals(widgetId)) return Math.max(3, Math.min(4, value));
+        if (FragranceWidgetLayout.ID.equals(widgetId))
+            return FragranceWidgetLayout.fit(value, 1).columns;
         if (FuelFlapWidgetLayout.ID.equals(widgetId))
             return FuelFlapWidgetLayout.fit(value, 1).columns;
         if (ClockWidgetView.ID.equals(widgetId)) {
@@ -83,8 +80,10 @@ public class TileSizeStore {
             return defaultValue;
         }
         if (FragranceWidgetLayout.ID.equals(widgetId)) {
-            return FragranceWidgetLayout.fit(width(prefs, widgetId, FragranceWidgetLayout.CARD.columns),
-                    prefs.getInt(HEIGHT_KEY_PREFIX + widgetId, defaultValue)).rows;
+            return FragranceWidgetLayout.fit(
+                            width(prefs, widgetId, FragranceWidgetLayout.CARD.columns),
+                            prefs.getInt(HEIGHT_KEY_PREFIX + widgetId, defaultValue))
+                    .rows;
         }
         int defaultColumns =
                 FuelFlapWidgetLayout.ID.equals(widgetId)
@@ -101,7 +100,9 @@ public class TileSizeStore {
     }
 
     private static int clampHeight(String widgetId, int columns, int value) {
-        if (FragranceWidgetLayout.ID.equals(widgetId)) return FragranceWidgetLayout.fit(columns, value).rows;
+        if (SUSPENSION_WIDGET_ID.equals(widgetId)) return Math.max(2, Math.min(3, value));
+        if (FragranceWidgetLayout.ID.equals(widgetId))
+            return FragranceWidgetLayout.fit(columns, value).rows;
         if (FuelFlapWidgetLayout.ID.equals(widgetId))
             return FuelFlapWidgetLayout.fit(columns, value).rows;
         if (RadioWidgetLayout.ID.equals(widgetId)) {
@@ -166,9 +167,15 @@ public class TileSizeStore {
         if (prefs == null || widgetId == null) {
             return;
         }
+        if (SUSPENSION_WIDGET_ID.equals(widgetId)) {
+            value = clampWidth(widgetId, value);
+        }
         if (FragranceWidgetLayout.ID.equals(widgetId)) {
-            FragranceWidgetLayout size = FragranceWidgetLayout.fit(value,
-                    prefs.getInt(HEIGHT_KEY_PREFIX + widgetId, FragranceWidgetLayout.CARD.rows));
+            FragranceWidgetLayout size =
+                    FragranceWidgetLayout.fit(
+                            value,
+                            prefs.getInt(
+                                    HEIGHT_KEY_PREFIX + widgetId, FragranceWidgetLayout.CARD.rows));
             setSize(prefs, widgetId, size.columns, size.rows);
             return;
         }
@@ -231,9 +238,13 @@ public class TileSizeStore {
         if (prefs == null || widgetId == null) {
             return;
         }
+        if (SUSPENSION_WIDGET_ID.equals(widgetId)) {
+            value = clampHeight(widgetId, width(prefs, widgetId, SUSPENSION_DEFAULT_WIDTH), value);
+        }
         if (FragranceWidgetLayout.ID.equals(widgetId)) {
-            FragranceWidgetLayout size = FragranceWidgetLayout.fit(
-                    width(prefs, widgetId, FragranceWidgetLayout.CARD.columns), value);
+            FragranceWidgetLayout size =
+                    FragranceWidgetLayout.fit(
+                            width(prefs, widgetId, FragranceWidgetLayout.CARD.columns), value);
             setSize(prefs, widgetId, size.columns, size.rows);
             return;
         }
