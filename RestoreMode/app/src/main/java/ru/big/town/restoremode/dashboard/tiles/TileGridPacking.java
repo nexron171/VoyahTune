@@ -6,6 +6,15 @@ import java.util.List;
 public final class TileGridPacking {
     private TileGridPacking() {}
 
+    public static int rowsForHeight(int availableHeight, int raisedHeight, int fullRows) {
+        if (availableHeight <= 0 || raisedHeight <= 0 || fullRows <= 0) {
+            throw new IllegalArgumentException("Invalid grid height");
+        }
+        return Math.max(
+                1,
+                Math.min(fullRows, Math.round((float) availableHeight * fullRows / raisedHeight)));
+    }
+
     public static int[] place(List<boolean[]> occupied, int rows, int width, int height) {
         if (width < 1 || height < 1 || height > rows) {
             throw new IllegalArgumentException("Invalid tile span");

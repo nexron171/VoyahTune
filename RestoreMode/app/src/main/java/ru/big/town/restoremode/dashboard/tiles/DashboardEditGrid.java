@@ -2,6 +2,7 @@ package ru.big.town.restoremode.dashboard.tiles;
 
 import android.content.Context;
 import android.graphics.Canvas;
+import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.Rect;
@@ -264,8 +265,17 @@ public final class DashboardEditGrid extends GridLayout {
             ViewGroup group = (ViewGroup) view;
             for (int index = group.getChildCount() - 1; index >= 0; index--) {
                 View child = group.getChildAt(index);
-                float childX = x + group.getScrollX() - child.getX();
-                float childY = y + group.getScrollY() - child.getY();
+                float[] point = {
+                    x + group.getScrollX() - child.getLeft(),
+                    y + group.getScrollY() - child.getTop()
+                };
+                Matrix inverse = new Matrix();
+                if (!child.getMatrix().invert(inverse)) {
+                    continue;
+                }
+                inverse.mapPoints(point);
+                float childX = point[0];
+                float childY = point[1];
                 if (child.getVisibility() == VISIBLE
                         && childX >= 0
                         && childY >= 0

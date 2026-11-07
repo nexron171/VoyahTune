@@ -9,6 +9,21 @@ import java.util.List;
 
 public class TileGridPackingTest {
     @Test
+    public void loweredHeightChoosesTheNearestNumberOfNormalRows() {
+        assertEquals(4, TileGridPacking.rowsForHeight(560, 720, 5));
+        assertEquals(4, TileGridPacking.rowsForHeight(512, 672, 5));
+        assertEquals(3, TileGridPacking.rowsForHeight(349, 500, 5));
+        assertEquals(4, TileGridPacking.rowsForHeight(350, 500, 5));
+        assertEquals(1, TileGridPacking.rowsForHeight(1, 720, 5));
+        assertEquals(5, TileGridPacking.rowsForHeight(900, 720, 5));
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void unknownReferenceHeightIsRejected() {
+        TileGridPacking.rowsForHeight(560, 0, 5);
+    }
+
+    @Test
     public void largeTilesLeaveHolesThatSmallTilesCanFill() {
         List<boolean[]> occupied = new ArrayList<>();
         assertArrayEquals(new int[] {0, 0}, TileGridPacking.place(occupied, 5, 3, 2));

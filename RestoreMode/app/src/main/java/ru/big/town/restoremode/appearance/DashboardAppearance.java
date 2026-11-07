@@ -13,6 +13,7 @@ import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
 
 import ru.big.town.restoremode.R;
+import ru.big.town.restoremode.dashboard.tiles.FittedWidgetFrame;
 import ru.big.town.restoremode.widgets.brightness.BrightnessWidgetView;
 import ru.big.town.restoremode.widgets.energy.VehicleWidgetView;
 import ru.big.town.restoremode.widgets.headlights.HeadlightWidgetView;
@@ -272,21 +273,26 @@ public final class DashboardAppearance implements AutoCloseable {
 
     public void styleTile(View tile) {
         clearNestedSurfaces(tile);
+        View content =
+                tile instanceof FittedWidgetFrame ? ((FittedWidgetFrame) tile).content() : tile;
+        if (content != tile) {
+            content.setBackground(null);
+        }
         if (settings.customBackground()) {
             clearBackground(tile.findViewById(R.id.carPlayWidgetPlaceholder));
             clearBackground(tile.findViewById(R.id.carPlayWidgetShortcut));
         }
-        if (tile instanceof RadioWidgetView) {
-            ((RadioWidgetView) tile).setCustomBackground(settings.customBackground());
+        if (content instanceof RadioWidgetView) {
+            ((RadioWidgetView) content).setCustomBackground(settings.customBackground());
         }
-        if (tile instanceof HeadlightWidgetView) {
-            ((HeadlightWidgetView) tile).setSurfaceAlpha(settings.surfaceAlpha());
+        if (content instanceof HeadlightWidgetView) {
+            ((HeadlightWidgetView) content).setSurfaceAlpha(settings.surfaceAlpha());
         }
-        if (tile instanceof BrightnessWidgetView) {
-            ((BrightnessWidgetView) tile).setSurfaceAlpha(settings.surfaceAlpha());
+        if (content instanceof BrightnessWidgetView) {
+            ((BrightnessWidgetView) content).setSurfaceAlpha(settings.surfaceAlpha());
         }
-        if (tile instanceof MediaWidgetView) {
-            ((MediaWidgetView) tile).setTileFrame(settings.borderDp, settings.cornerRadiusDp);
+        if (content instanceof MediaWidgetView) {
+            ((MediaWidgetView) content).setTileFrame(settings.borderDp, settings.cornerRadiusDp);
         }
         int left = tile.getPaddingLeft();
         int top = tile.getPaddingTop();

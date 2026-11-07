@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Button xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/dashboardDebugScreenSize"
+    android:layout_width="220dp"
+    android:layout_height="48dp"
+    android:layout_gravity="top|end"
+    android:layout_marginTop="6dp"
+    android:layout_marginEnd="12dp"
+    android:background="@drawable/settings_field"
+    android:elevation="8dp"
+    android:textAllCaps="false"
+    android:textColor="#FFFFFF"
+    android:textSize="14sp" />

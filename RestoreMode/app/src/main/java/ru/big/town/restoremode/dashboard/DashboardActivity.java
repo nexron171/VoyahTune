@@ -66,6 +66,7 @@ import ru.big.town.common.CarPlayWidgetProtocol;
 import ru.big.town.common.TripProtocol;
 import ru.big.town.restoremode.AdvanceActivity;
 import ru.big.town.restoremode.AdvanceActivityStarButton;
+import ru.big.town.restoremode.BuildConfig;
 import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.TaskManagerActivity;
 import ru.big.town.restoremode.TripHistoryActivity;
@@ -76,6 +77,8 @@ import ru.big.town.restoremode.apps.AppDpiStore;
 import ru.big.town.restoremode.apps.split.SplitStore;
 import ru.big.town.restoremode.carplay.CarPlayWidgetPlaceholder;
 import ru.big.town.restoremode.dashboard.tiles.DashboardEditGrid;
+import ru.big.town.restoremode.dashboard.tiles.FittedWidgetFrame;
+import ru.big.town.restoremode.dashboard.tiles.LoweredTileLayout;
 import ru.big.town.restoremode.dashboard.tiles.TileDragController;
 import ru.big.town.restoremode.dashboard.tiles.TileGridPacking;
 import ru.big.town.restoremode.dashboard.tiles.TileOrderStore;
@@ -104,9 +107,9 @@ import ru.big.town.restoremode.widgets.energy.EnergyWidgetPreferences;
 import ru.big.town.restoremode.widgets.energy.TripWidgetView;
 import ru.big.town.restoremode.widgets.energy.VehicleWidgetView;
 import ru.big.town.restoremode.widgets.energy.VehicleWidgets;
-import ru.big.town.restoremode.widgets.fuel.FuelFlapWidgetDashboard;
 import ru.big.town.restoremode.widgets.fragrance.FragranceWidgetDashboard;
 import ru.big.town.restoremode.widgets.fragrance.FragranceWidgetLayout;
+import ru.big.town.restoremode.widgets.fuel.FuelFlapWidgetDashboard;
 import ru.big.town.restoremode.widgets.fuel.FuelFlapWidgetLayout;
 import ru.big.town.restoremode.widgets.headlights.HeadlightWidgetDashboard;
 import ru.big.town.restoremode.widgets.headlights.HeadlightWidgetLayout;
@@ -141,6 +144,10 @@ public class DashboardActivity extends AppCompatActivity {
 
     private SharedPreferences sharedPreferences;
     private SharedPreferences settingsPreferences;
+    private DashboardScreenLift screenLift;
+    private LoweredTileLayout loweredTileLayout;
+    private static final String STATE_DEBUG_SCREEN_LIFT = "debugScreenLiftType";
+    private Button debugScreenSize;
     private DashboardAppearance appearance;
     private final SharedPreferences.OnSharedPreferenceChangeListener appearancePreferences =
             (preferences, key) -> {
@@ -447,8 +454,9 @@ public class DashboardActivity extends AppCompatActivity {
         recirculationWidget.watch(
                 suspensionScreenResumed
                         && sharedPreferences.getBoolean(RecirculationWidgetLayout.VISIBLE, false));
-        fragranceWidget.watch(suspensionScreenResumed
-                && sharedPreferences.getBoolean(FragranceWidgetLayout.VISIBLE, false));
+        fragranceWidget.watch(
+                suspensionScreenResumed
+                        && sharedPreferences.getBoolean(FragranceWidgetLayout.VISIBLE, false));
         fuelFlapWidget.watch(
                 suspensionScreenResumed
                         && sharedPreferences.getBoolean(FuelFlapWidgetLayout.VISIBLE, false));
@@ -1256,6 +1264,7 @@ public class DashboardActivity extends AppCompatActivity {
                     if (top != contentInsetTop || fullscreen != fullscreenGrid) {
                         contentInsetTop = top;
                         fullscreenGrid = fullscreen;
+                        updateDebugScreenSizeButton();
                         if (splitTilesGrid != null) {
                             splitTilesGrid.post(this::renderSplitTiles);
                         }
@@ -1269,6 +1278,8 @@ public class DashboardActivity extends AppCompatActivity {
         configureDesktopEditor();
         gridPaddingTop = splitTilesGrid.getPaddingTop();
         gridPaddingBottom = splitTilesGrid.getPaddingBottom();
+        screenLift =
+                new DashboardScreenLift(this, findViewById(R.id.main), this::onScreenLiftChanged);
 
         // Автовыравнивание сетки: отсчёт покоя после прокрутки и отмена по касанию.
         contentScroll = findViewById(R.id.contentScroll);
@@ -1290,12 +1301,59 @@ public class DashboardActivity extends AppCompatActivity {
                     });
         }
 
+        configureDebugScreenSize(savedInstanceState);
         editor = settingsPreferences.edit();
         GlobalVars.editor = editor;
 
         initToggleCards();
         initIntent();
         GlobalVars.clientMessenger = clientMessenger;
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        if (BuildConfig.DEBUG) {
+            outState.putInt(STATE_DEBUG_SCREEN_LIFT, screenLift.simulatedLiftType());
+        }
+        super.onSaveInstanceState(outState);
+    }
+
+    private void configureDebugScreenSize(Bundle savedInstanceState) {
+        if (!BuildConfig.DEBUG) {
+            return;
+        }
+        if (savedInstanceState != null) {
+            screenLift.restoreSimulation(savedInstanceState.getInt(STATE_DEBUG_SCREEN_LIFT));
+        }
+        FrameLayout root = findViewById(android.R.id.content);
+        debugScreenSize =
+                (Button)
+                        getLayoutInflater()
+                                .inflate(R.layout.dashboard_debug_screen_size, root, false);
+        debugScreenSize.setOnClickListener(view -> screenLift.toggleSimulation());
+        root.addView(debugScreenSize);
+        updateDebugScreenSizeButton();
+    }
+
+    private void updateDebugScreenSizeButton() {
+        if (debugScreenSize == null) {
+            return;
+        }
+        boolean lowered = screenLift.isLowered();
+        debugScreenSize.setText(
+                getString(
+                        R.string.debug_dashboard_screen_size,
+                        lowered
+                                ? DashboardScreenLift.LOWERED_HEIGHT_PX
+                                : DashboardScreenLift.RAISED_HEIGHT_PX,
+                        lowered
+                                ? DashboardScreenLift.RAISED_HEIGHT_PX
+                                : DashboardScreenLift.LOWERED_HEIGHT_PX));
+        FrameLayout.LayoutParams parameters =
+                (FrameLayout.LayoutParams) debugScreenSize.getLayoutParams();
+        parameters.topMargin =
+                contentInsetTop + Math.round(6 * getResources().getDisplayMetrics().density);
+        debugScreenSize.setLayoutParams(parameters);
     }
 
     public void initIntent() {
@@ -1477,10 +1535,7 @@ public class DashboardActivity extends AppCompatActivity {
                         1,
                         Math.min(
                                 LAUNCH_APPS_MAX_COLUMNS,
-                                TileSizeStore.width(
-                                        sharedPreferences,
-                                        TileSizeStore.LAUNCH_APPS_WIDGET_ID,
-                                        TileSizeStore.LAUNCH_APPS_DEFAULT_WIDTH)));
+                                getWidgetDimensions(TileSizeStore.LAUNCH_APPS_WIDGET_ID)[0]));
         if (grid instanceof GridLayout) {
             ((GridLayout) grid).setColumnCount(columns);
         }
@@ -1683,6 +1738,7 @@ public class DashboardActivity extends AppCompatActivity {
             recreate();
             return;
         }
+        screenLift.refresh();
         ru.big.town.restoremode.carplay.CarPlayDashboardLauncher.rememberDisplay(
                 getWindowManager().getDefaultDisplay().getDisplayId());
         TripLocationPermission.atStartup(this);
@@ -1996,14 +2052,78 @@ public class DashboardActivity extends AppCompatActivity {
      */
     private static final int LAUNCH_APPS_MAX_COLUMNS = 4;
 
-    /** Получить размеры элемента в ячейках smart-grid: {ширина, высота}. */
+    private void onScreenLiftChanged() {
+        updateDebugScreenSizeButton();
+        if (!suspensionScreenResumed || destroyed) {
+            return;
+        }
+        if (splitTilesGrid.isEditing()) {
+            splitTilesGrid.setEditing(false);
+        } else {
+            renderSplitTiles();
+        }
+        contentScroll.scrollTo(0, 0);
+    }
+
+    private int[] getAppWidgetDimensions(AppWidgetStore.Entry entry) {
+        return loweredTileLayout == null
+                ? new int[] {
+                    AppWidgetStore.clampWidth(entry.width), AppWidgetStore.clampHeight(entry.height)
+                }
+                : loweredTileLayout.dimensions(
+                        new TileOrderStore.Tile(TileOrderStore.Tile.TYPE_APP_WIDGET, entry.id));
+    }
+
+    private boolean appWidgetOpensActivity(AppWidgetStore.Entry entry, String packageName) {
+        int[] size = getAppWidgetDimensions(entry);
+        return CarPlayTarget.opensActivity(packageName, size[0], size[1]);
+    }
+
+    private int[] getStandardTileDimensions(TileOrderStore.Tile tile) {
+        switch (tile.type) {
+            case TileOrderStore.Tile.TYPE_WIDGET:
+                return getStandardWidgetDimensions(tile.id);
+            case TileOrderStore.Tile.TYPE_APP_WIDGET:
+                AppWidgetStore.Entry entry = AppWidgetStore.find(sharedPreferences, tile.id);
+                return entry == null
+                        ? new int[] {1, 1}
+                        : new int[] {
+                            AppWidgetStore.clampWidth(entry.width),
+                            AppWidgetStore.clampHeight(entry.height)
+                        };
+            case TileOrderStore.Tile.TYPE_SPLIT:
+            case TileOrderStore.Tile.TYPE_DIAL:
+            case TileOrderStore.Tile.TYPE_SCENARIO:
+                return new int[] {2, 1};
+            default:
+                return new int[] {1, 1};
+        }
+    }
+
     private int[] getWidgetDimensions(String widgetId) {
+        return loweredTileLayout == null
+                ? getStandardWidgetDimensions(widgetId)
+                : loweredTileLayout.dimensions(
+                        new TileOrderStore.Tile(TileOrderStore.Tile.TYPE_WIDGET, widgetId));
+    }
+
+    private int[] getWidgetContentDimensions(String widgetId) {
+        return loweredTileLayout == null
+                ? getStandardWidgetDimensions(widgetId)
+                : loweredTileLayout.contentDimensions(
+                        new TileOrderStore.Tile(TileOrderStore.Tile.TYPE_WIDGET, widgetId));
+    }
+
+    private int[] getStandardWidgetDimensions(String widgetId) {
         if (RecirculationWidgetLayout.ID.equals(widgetId)) {
             return new int[] {RecirculationWidgetLayout.WIDTH, RecirculationWidgetLayout.HEIGHT};
         }
         if (FragranceWidgetLayout.ID.equals(widgetId)) {
-            return TileSizeStore.dimensions(sharedPreferences, widgetId,
-                    FragranceWidgetLayout.CARD.columns, FragranceWidgetLayout.CARD.rows);
+            return TileSizeStore.dimensions(
+                    sharedPreferences,
+                    widgetId,
+                    FragranceWidgetLayout.CARD.columns,
+                    FragranceWidgetLayout.CARD.rows);
         }
         if (FuelFlapWidgetLayout.ID.equals(widgetId)) {
             return TileSizeStore.dimensions(
@@ -2130,17 +2250,31 @@ public class DashboardActivity extends AppCompatActivity {
         DisplayMetrics metrics = getResources().getDisplayMetrics();
         int nativeDock = Math.round(metrics.density * 145f);
         int availableW = metrics.widthPixels - nativeDock - Math.round(metrics.density * 4f);
-        // Высота ряда считается от того же места, что реально получает сетка: высота экрана
-        // минус верхний инсет и собственные вертикальные отступы сетки.
-        int availableH = 720 - contentInsetTop - splitTilesGrid.getPaddingTop() - 0;
+        int verticalInsets = contentInsetTop + splitTilesGrid.getPaddingTop() + gridPaddingBottom;
+        int availableH = Math.max(1, screenLift.viewportHeight() - verticalInsets);
+        int raisedHeight = Math.max(1, DashboardScreenLift.RAISED_HEIGHT_PX - verticalInsets);
+        final int rows =
+                screenLift.isLowered()
+                        ? TileGridPacking.rowsForHeight(
+                                availableH, raisedHeight, LoweredTileLayout.FULL_ROWS)
+                        : LoweredTileLayout.FULL_ROWS;
+        splitTilesGrid.setRowCount(rows);
+        List<TileOrderStore.Tile> tiles = TileOrderStore.load(sharedPreferences);
+        loweredTileLayout =
+                screenLift.isLowered()
+                        ? new LoweredTileLayout(
+                                sharedPreferences, tiles, rows, this::getStandardTileDimensions)
+                        : null;
+        if (loweredTileLayout != null) {
+            tiles = loweredTileLayout.tiles();
+        }
         int spacingDp = AppearanceSettings.spacingDp(settingsPreferences);
         int m = Math.round(spacingDp * metrics.density);
         int tileW = (availableW / 12) - 2 * m;
-        int tileH = (availableH / 5) - 2 * m;
+        int tileH = (availableH / rows) - 2 * m;
         // Шаг колонки: ширина плитки плюс её отступы слева и справа.
         tilePitchPx = tileW + 2 * m;
         splitTilesGrid.beginLayout(tilePitchPx, tileH + 2 * m);
-        final int rows = 5;
         // Высота сетки не делится на число рядов нацело. Остаток (до 4px) раздаём по
         // одному пикселю верхним рядам, иначе под нижним рядом остаётся пустая полоса.
         final int rowRemainder = availableH - (availableH / rows) * rows;
@@ -2172,9 +2306,6 @@ public class DashboardActivity extends AppCompatActivity {
                             insertTileAt(from, before);
                             renderSplitTiles();
                         });
-
-        // Загружаем единый список всех плиток в нужном порядке
-        List<TileOrderStore.Tile> tiles = TileOrderStore.load(sharedPreferences);
 
         // Создаём карту сплитов по id для быстрого доступа
         Map<String, SplitStore.Preset> splitMap = new HashMap<>();
@@ -2323,8 +2454,8 @@ public class DashboardActivity extends AppCompatActivity {
                                         this,
                                         tile.id,
                                         CarAppearance.savedColor(settingsPreferences),
-                                        getWidgetDimensions(tile.id)[0],
-                                        getWidgetDimensions(tile.id)[1]);
+                                        getWidgetContentDimensions(tile.id)[0],
+                                        getWidgetContentDimensions(tile.id)[1]);
                         energyView.update(energyWidgetState);
                         energyWidgetViews.add(energyView);
                         updateTripTimer();
@@ -2352,7 +2483,7 @@ public class DashboardActivity extends AppCompatActivity {
                         }
                         break;
                     case RadioWidgetLayout.ID:
-                        int[] radioSize = getWidgetDimensions(tile.id);
+                        int[] radioSize = getWidgetContentDimensions(tile.id);
                         widgetView = radioWidget.create(radioSize[0], radioSize[1]);
                         break;
                     case RecirculationWidgetLayout.ID:
@@ -2360,11 +2491,14 @@ public class DashboardActivity extends AppCompatActivity {
                         break;
                     case FragranceWidgetLayout.ID:
                         if (!isWidgetVisible(tile.id)) continue;
-                        int[] fragranceSize = getWidgetDimensions(tile.id);
-                        widgetView = fragranceWidget.create(FragranceWidgetLayout.fit(fragranceSize[0], fragranceSize[1]));
+                        int[] fragranceSize = getWidgetContentDimensions(tile.id);
+                        widgetView =
+                                fragranceWidget.create(
+                                        FragranceWidgetLayout.fit(
+                                                fragranceSize[0], fragranceSize[1]));
                         break;
                     case FuelFlapWidgetLayout.ID:
-                        int[] fuelSize = getWidgetDimensions(tile.id);
+                        int[] fuelSize = getWidgetContentDimensions(tile.id);
                         widgetView =
                                 fuelFlapWidget.create(
                                         FuelFlapWidgetLayout.fit(fuelSize[0], fuelSize[1]));
@@ -2378,8 +2512,8 @@ public class DashboardActivity extends AppCompatActivity {
                     case HeadlightWidgetLayout.ID:
                         widgetView =
                                 headlightWidget.create(
-                                        getWidgetDimensions(tile.id)[0],
-                                        getWidgetDimensions(tile.id)[1]);
+                                        getWidgetContentDimensions(tile.id)[0],
+                                        getWidgetContentDimensions(tile.id)[1]);
                         break;
                     case "suspensionWidget":
                         suspensionWidgetView =
@@ -2526,7 +2660,6 @@ public class DashboardActivity extends AppCompatActivity {
                     requestTaskCount();
                 }
 
-
                 // Установить размер виджета в сетке
                 int[] dims = getWidgetDimensions(tile.id);
                 int[] gridPosition = TileGridPacking.place(occupied, rows, dims[0], dims[1]);
@@ -2543,6 +2676,15 @@ public class DashboardActivity extends AppCompatActivity {
                         rowRemainder,
                         topInset,
                         stretchedColumns);
+                int contentRows = getWidgetContentDimensions(tile.id)[1];
+                if (contentRows > dims[1]) {
+                    int contentHeight =
+                            lp.height
+                                    + tileHeight(
+                                            tileH, m, gridPosition[1], contentRows, rowRemainder)
+                                    - tileHeight(tileH, m, gridPosition[1], dims[1], rowRemainder);
+                    widgetView = new FittedWidgetFrame(widgetView, contentHeight);
+                }
                 widgetView.setLayoutParams(lp);
 
                 splitTilesGrid.addView(widgetView);
@@ -2565,8 +2707,9 @@ public class DashboardActivity extends AppCompatActivity {
                     populateAppWidgetLauncher(appWidgetView, entry);
                 }
 
-                int widgetWidth = AppWidgetStore.clampWidth(entry.width);
-                int widgetHeight = AppWidgetStore.clampHeight(entry.height);
+                int[] widgetSize = getAppWidgetDimensions(entry);
+                int widgetWidth = widgetSize[0];
+                int widgetHeight = widgetSize[1];
                 int[] gridPosition =
                         TileGridPacking.place(occupied, rows, widgetWidth, widgetHeight);
                 GridLayout.LayoutParams lp = new GridLayout.LayoutParams();
@@ -2633,7 +2776,6 @@ public class DashboardActivity extends AppCompatActivity {
                 state.setText("");
                 tileView.setOnClickListener(v -> onSplitTileClick(finalPreset));
 
-
                 int[] gridPosition = TileGridPacking.place(occupied, rows, 2, 1);
                 GridLayout.LayoutParams lp = new GridLayout.LayoutParams();
                 lp.width = tileW * 2 + m * 2;
@@ -2653,10 +2795,11 @@ public class DashboardActivity extends AppCompatActivity {
                 try {
                     pm.getApplicationInfo(pkg, 0);
                 } catch (Exception e) {
-                    // Приложение удалено — пропускаем и удаляем из списка
-                    tiles.remove(pos);
-                    TileOrderStore.save(sharedPreferences, tiles);
-                    pos--;
+                    if (loweredTileLayout == null) {
+                        tiles.remove(pos);
+                        TileOrderStore.save(sharedPreferences, tiles);
+                        pos--;
+                    }
                     continue;
                 }
 
@@ -2673,7 +2816,6 @@ public class DashboardActivity extends AppCompatActivity {
                 }
                 title.setText(name);
                 tileView.setOnClickListener(v -> onAppTileClick(pkg));
-
 
                 int[] gridPosition = TileGridPacking.place(occupied, rows, 1, 1);
                 GridLayout.LayoutParams lp = new GridLayout.LayoutParams();
@@ -3027,6 +3169,10 @@ public class DashboardActivity extends AppCompatActivity {
 
     /** Drop между карточками вставляет элемент в найденную позицию и сдвигает остальные. */
     private void insertTileAt(int fromPos, int insertionPos) {
+        if (loweredTileLayout != null) {
+            loweredTileLayout.move(fromPos, insertionPos);
+            return;
+        }
         List<TileOrderStore.Tile> tiles = TileOrderStore.load(sharedPreferences);
         if (fromPos < 0 || fromPos >= tiles.size()) {
             return;
@@ -3095,6 +3241,11 @@ public class DashboardActivity extends AppCompatActivity {
 
                     @Override
                     public void resize(TileOrderStore.Tile tile, int columns, int rows) {
+                        if (loweredTileLayout != null) {
+                            loweredTileLayout.resize(tile, columns, rows);
+                            animateDesktopLayout();
+                            return;
+                        }
                         if (TileOrderStore.Tile.TYPE_APP_WIDGET.equals(tile.type)) {
                             AppWidgetStore.Entry entry =
                                     AppWidgetStore.find(sharedPreferences, tile.id);
@@ -3126,7 +3277,11 @@ public class DashboardActivity extends AppCompatActivity {
         DashboardEditGrid.Sizes sizes = null;
         if (TileOrderStore.Tile.TYPE_WIDGET.equals(tile.type)
                 && TileSizeStore.isResizable(tile.id)) {
-            sizes = (width, height) -> TileSizeStore.supportsSize(tile.id, width, height);
+            sizes =
+                    (width, height) ->
+                            loweredTileLayout == null
+                                    ? TileSizeStore.supportsSize(tile.id, width, height)
+                                    : loweredTileLayout.supportsWidgetSize(tile.id, width, height);
         } else if (TileOrderStore.Tile.TYPE_APP_WIDGET.equals(tile.type)) {
             AppWidgetStore.Entry entry = AppWidgetStore.find(sharedPreferences, tile.id);
             if (entry != null) {
@@ -3142,7 +3297,17 @@ public class DashboardActivity extends AppCompatActivity {
                 }
             }
         }
-        splitTilesGrid.register(view, tile, columns, rows, sizes);
+        DashboardEditGrid.Sizes supportedSizes = sizes;
+        splitTilesGrid.register(
+                view,
+                tile,
+                columns,
+                rows,
+                supportedSizes == null
+                        ? null
+                        : (width, height) ->
+                                height <= splitTilesGrid.getRowCount()
+                                        && supportedSizes.allows(width, height));
     }
 
     private void animateDesktopLayout() {
@@ -3159,6 +3324,9 @@ public class DashboardActivity extends AppCompatActivity {
     }
 
     private void removeDesktopTile(TileOrderStore.Tile tile, View view) {
+        if (loweredTileLayout != null) {
+            loweredTileLayout.save();
+        }
         switch (tile.type) {
             case TileOrderStore.Tile.TYPE_WIDGET:
                 String key = visibilityKey(tile.id);
@@ -3426,7 +3594,7 @@ public class DashboardActivity extends AppCompatActivity {
                 && !ru.big.town.restoremode.carplay.CarPlayFeature.isEnabled(this)) {
             return;
         }
-        if (CarPlayTarget.opensActivity(packageName, entry.width, entry.height)) {
+        if (appWidgetOpensActivity(entry, packageName)) {
             if (GlobalVars.isBound && GlobalVars.serviceMessenger != null) {
                 openAppOnDashboardDisplay(packageName);
             } else {
@@ -4090,7 +4258,8 @@ public class DashboardActivity extends AppCompatActivity {
             data.putString("left", pkg);
             data.putString("widgetId", widgetId);
             data.putBoolean("embeddedSurface", true);
-            data.putSize(CarPlayWidgetProtocol.GRID_SIZE, new Size(entry.width, entry.height));
+            int[] size = getAppWidgetDimensions(entry);
+            data.putSize(CarPlayWidgetProtocol.GRID_SIZE, new Size(size[0], size[1]));
             data.putParcelable("surface", surface);
             data.putInt("width", width);
             data.putInt("height", height);
@@ -4324,8 +4493,7 @@ public class DashboardActivity extends AppCompatActivity {
             }
             AppWidgetStore.Entry entry = AppWidgetStore.find(sharedPreferences, id);
             View view = appWidgetTileViews.get(id);
-            if (entry == null
-                    || CarPlayTarget.opensActivity(CarPlayTarget.ID, entry.width, entry.height)) {
+            if (entry == null || appWidgetOpensActivity(entry, CarPlayTarget.ID)) {
                 sendEmbeddedRelease(
                         id); // The user deleted the widget or turned it into a shortcut.
             } else if (view != null && !embeddedWidgetSurfaces.containsKey(id)) {
@@ -4346,7 +4514,7 @@ public class DashboardActivity extends AppCompatActivity {
             if (entry != null
                     && entry.autoStart
                     && CarPlayTarget.isCarPlay(entry.packageName)
-                    && !CarPlayTarget.opensActivity(entry.packageName, entry.width, entry.height)
+                    && !appWidgetOpensActivity(entry, entry.packageName)
                     && tile.getValue().isShown()
                     && !embeddedWidgetSurfaces.containsKey(entry.id)) {
                 showEmbeddedAppWidget(tile.getValue(), entry);
@@ -4499,6 +4667,7 @@ public class DashboardActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         destroyed = true;
+        screenLift.close();
         unregisterLiveDashboard();
         settingsPreferences.unregisterOnSharedPreferenceChangeListener(appearancePreferences);
         appearance.close();
