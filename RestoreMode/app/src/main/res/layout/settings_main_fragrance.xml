@@ -7,19 +7,45 @@
     android:orientation="vertical"
     android:background="@drawable/settings_card"
     app:settingsToggleRef="@id/switchShowFragrance"
-    android:padding="24dp">
+    android:padding="1dp">
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:orientation="horizontal">
-        <TextView
+        android:paddingHorizontal="24dp"
+        android:paddingVertical="22dp"
+        android:minHeight="100dp">
+        <ImageView
+            android:layout_width="52dp"
+            android:layout_height="52dp"
+            android:padding="12dp"
+            android:src="@drawable/settings_icon_spray"
+            android:background="@drawable/settings_icon"
+            android:importantForAccessibility="no"
+            android:layout_marginEnd="16dp" />
+        <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="Ароматизатор\nАромат, интенсивность и таймер"
-            android:textSize="23sp"
-            android:textColor="#f3f5fa" />
+            android:orientation="vertical"
+            android:layout_weight="1">
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Ароматизатор"
+                android:textSize="23sp"
+                android:textColor="#f3f5fa"
+                android:includeFontPadding="false" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Аромат, интенсивность и таймер"
+                android:textSize="16sp"
+                android:textColor="#95a5bd"
+                android:includeFontPadding="false"
+                android:layout_marginTop="7dp"
+                android:lineSpacingMultiplier="1.45" />
+        </LinearLayout>
         <ru.big.town.restoremode.settings.ui.controls.SettingsToggle
             android:id="@+id/switchShowFragrance"
             android:layout_width="58dp"
@@ -32,7 +58,8 @@
         android:id="@+id/fragranceSizeRow"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
+        android:layout_marginHorizontal="24dp"
+        android:layout_marginBottom="22dp"
         android:visibility="gone"
         app:settingsTileKey="fragranceWidget"
         app:settingsTileWidth="2"
