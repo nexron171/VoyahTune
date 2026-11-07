@@ -1,16 +1,17 @@
 package ru.voyahtune.agent.modules;
 
-import java.lang.ref.WeakReference;
-import java.lang.reflect.Method;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
 import ru.voyahtune.agent.HookRegistry;
 import ru.voyahtune.agent.runtime.MethodAccess;
 import ru.voyahtune.agent.runtime.ModuleRuntime;
 import ru.voyahtune.agent.runtime.ModuleScope;
 import ru.voyahtune.agent.runtime.OemAccess;
 import ru.voyahtune.agent.runtime.WeakIdentityMap;
+
+import java.lang.ref.WeakReference;
+import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 
 public final class PassengerDockModule implements ModuleRuntime.Module {
     private static final String NAVIGATION = "com.qinggan.launcher.navigation.NavigationBarSecond";
@@ -25,7 +26,8 @@ public final class PassengerDockModule implements ModuleRuntime.Module {
     private final WeakIdentityMap<Object, Boolean> pending = new WeakIdentityMap<>();
     private Class<?> navigationType;
 
-    public PassengerDockModule(MethodAccess methods, HookRegistry hooks, LauncherPlatform platform) {
+    public PassengerDockModule(
+            MethodAccess methods, HookRegistry hooks, LauncherPlatform platform) {
         this.methods = methods;
         this.hooks = hooks;
         this.platform = platform;
@@ -40,8 +42,12 @@ public final class PassengerDockModule implements ModuleRuntime.Module {
             methods.type("android.view.View$OnClickListener");
             methods.type("android.view.View$OnLayoutChangeListener");
             OemAccess.field(candidate, "mScreenUpRadioGroup");
-            for (String name : List.of("initScreenUpViews", "updateTheme", "initAllAppShow",
-                    "getScreenUpView")) bind(name);
+            for (String name :
+                    List.of(
+                            "initScreenUpViews",
+                            "updateTheme",
+                            "initAllAppShow",
+                            "getScreenUpView")) bind(name);
             bind("showScreenAllAPPTab", "int", "boolean");
             bind("updateSelectedApp", "java.lang.String", "java.lang.String");
             navigationType = candidate;
@@ -61,12 +67,24 @@ public final class PassengerDockModule implements ModuleRuntime.Module {
         scope.own(() -> platform.drainMain(this::release));
         for (Method method : lifecycle) {
             try {
-                scope.own(hooks.install("launcher-passenger", method, scope.callback(invocation -> {
-                    Object result = invocation.proceed();
-                    Object receiver = invocation.receiver();
-                    if (navigationType.isInstance(receiver)) queue(scope, receiver);
-                    return result;
-                })));
+                scope.own(
+                        hooks.install(
+                                "launcher-passenger",
+                                method,
+                                scope.callback(
+                                        invocation -> {
+                                            Object receiver = invocation.receiver();
+                                            if (method.getName().equals("initAllAppShow")
+                                                    && usesApplicationLayout(receiver)) {
+                                                // The OEM 3/4-button spacing must not resize the
+                                                // customized radio group.
+                                                return null;
+                                            }
+                                            Object result = invocation.proceed();
+                                            if (navigationType.isInstance(receiver))
+                                                queue(scope, receiver);
+                                            return result;
+                                        })));
             } catch (HookRegistry.RejectedException unsupported) {
                 error(unsupported);
             }
@@ -77,17 +95,33 @@ public final class PassengerDockModule implements ModuleRuntime.Module {
     public void configure(ModuleScope scope, Map<String, String> configuration) throws Exception {
         if (navigationType == null) return;
         pending.keys().forEach(pending::remove);
-        for (long delay : BOOT_PASSES) scope.schedule(delay, () -> post(scope, () -> {
-            try {
-                Object model = platform.model();
-                Object controller = field(model, "mSecondScreenNavigationBar");
-                Object nested = field(controller, "mNavigationBar");
-                Object bar = nested == null ? controller : nested;
-                if (navigationType.isInstance(bar)) reconcile(scope, bar);
-            } catch (Exception failure) {
-                error(failure);
-            }
-        }));
+        for (long delay : BOOT_PASSES)
+            scope.schedule(
+                    delay,
+                    () ->
+                            post(
+                                    scope,
+                                    () -> {
+                                        try {
+                                            Object model = platform.model();
+                                            Object controller =
+                                                    field(model, "mSecondScreenNavigationBar");
+                                            Object nested = field(controller, "mNavigationBar");
+                                            Object bar = nested == null ? controller : nested;
+                                            if (navigationType.isInstance(bar))
+                                                reconcile(scope, bar);
+                                        } catch (Exception failure) {
+                                            error(failure);
+                                        }
+                                    }));
+    }
+
+    private boolean usesApplicationLayout(Object bar) throws Exception {
+        WeakReference<PassengerDockNavigation> reference = navigation.get(bar);
+        PassengerDockNavigation current = reference == null ? null : reference.get();
+        return current != null
+                && current.matches(field(bar, "mScreenUpRadioGroup"))
+                && current.usesApplicationLayout();
     }
 
     private void queue(ModuleScope scope, Object bar) {
@@ -95,10 +129,12 @@ public final class PassengerDockModule implements ModuleRuntime.Module {
             if (pending.get(bar) != null) return;
             pending.put(bar, true);
         }
-        post(scope, () -> {
-            pending.remove(bar);
-            reconcile(scope, bar);
-        });
+        post(
+                scope,
+                () -> {
+                    pending.remove(bar);
+                    reconcile(scope, bar);
+                });
     }
 
     private void reconcile(ModuleScope scope, Object bar) {

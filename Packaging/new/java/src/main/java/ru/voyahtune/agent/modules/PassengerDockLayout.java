@@ -7,14 +7,16 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.RadioButton;
 
-import java.util.ArrayList;
-import java.util.List;
-
 import ru.voyahtune.agent.policy.LauncherCatalog;
 import ru.voyahtune.agent.policy.LauncherCommand;
+import ru.voyahtune.agent.policy.LauncherNavigation;
+import ru.voyahtune.agent.policy.LauncherPolicy;
 import ru.voyahtune.agent.runtime.MethodAccess;
 import ru.voyahtune.agent.runtime.OemAccess;
 import ru.voyahtune.agent.runtime.ViewOwnership;
+
+import java.util.ArrayList;
+import java.util.List;
 
 final class PassengerDockLayout implements AutoCloseable {
     private final ViewGroup group;
@@ -27,13 +29,16 @@ final class PassengerDockLayout implements AutoCloseable {
     private final View air;
     private final View seat;
     private final View home;
-    private final View menu;
+    private View menu;
+    private NavigationButton homeNavigation;
+    private NavigationButton menuNavigation;
     private View vehicle;
     private boolean replacedSeat;
     private final boolean separateBar;
 
-    private PassengerDockLayout(Object bar, ViewGroup group, LauncherPlatform platform,
-            MethodAccess methods) throws Exception {
+    private PassengerDockLayout(
+            Object bar, ViewGroup group, LauncherPlatform platform, MethodAccess methods)
+            throws Exception {
         this.group = group;
         this.platform = platform;
         this.methods = methods;
@@ -48,8 +53,9 @@ final class PassengerDockLayout implements AutoCloseable {
         vehicle = field(bar, "mScreenUpItemView4");
     }
 
-    static PassengerDockLayout attach(Object bar, Object driver, LauncherPlatform platform,
-            MethodAccess methods) throws Exception {
+    static PassengerDockLayout attach(
+            Object bar, Object driver, LauncherPlatform platform, MethodAccess methods)
+            throws Exception {
         ViewGroup group = (ViewGroup) field(bar, "mScreenUpRadioGroup");
         if (group == null || field(driver, "mScreenUpItemView4") == null) return null;
         PassengerDockLayout layout = new PassengerDockLayout(bar, group, platform, methods);
@@ -71,7 +77,9 @@ final class PassengerDockLayout implements AutoCloseable {
 
     private boolean install() throws Exception {
         View originalVehicle = separateBar ? seat : vehicle;
-        if (air == null || originalVehicle == null || air.getParent() != group
+        if (air == null
+                || originalVehicle == null
+                || air.getParent() != group
                 || originalVehicle.getParent() != group) return false;
         if (separateBar) {
             Context context = group.getContext();
@@ -93,12 +101,12 @@ final class PassengerDockLayout implements AutoCloseable {
             if (slots[0] == null || slots[1] == null) return false;
             bind(air, () -> openSubtype("AC"));
             owned.write(air, "description", "Климат");
-            if (home != null) bind(home, () -> launch(LauncherCommand.Kind.DASHBOARD, ""));
             if (menu != null) {
-                bind(menu, () -> launch(LauncherCommand.Kind.PASSENGER_ALL_APPS, ""));
                 owned.write(menu, "description", "Меню приложений");
             }
         }
+        if (home != null)
+            homeNavigation = new NavigationButton(home, LauncherNavigation.Button.HOME);
         bind(vehicle, () -> openSubtype("Vehicle"));
         owned.write(vehicle, "description", "Машина");
         return true;
@@ -111,14 +119,16 @@ final class PassengerDockLayout implements AutoCloseable {
     }
 
     void update(Object driver, String first, String second) throws Exception {
-        updateSlot(driver, 0, first);
-        updateSlot(driver, 1, second);
+        updateNavigation();
+        updateSlot(0, first);
+        updateSlot(1, second);
         View stockVehicle = field(driver, "mScreenUpItemView4");
         stockIcon(vehicle, stockVehicle);
         if (separateBar) {
             // The driver template supplies the spacing for six rows at this OEM density.
             int margin = ((ViewGroup.MarginLayoutParams) slots[0].getLayoutParams()).topMargin;
             owned.write(air, "topMargin", margin);
+            if (menu != null) owned.write(menu, "topMargin", margin);
         } else {
             owned.write(air, "background", platform.icon("com.qinggan.app.vehicle", 0, "default"));
             namedIcon(home, "home_icon_bg");
@@ -126,35 +136,102 @@ final class PassengerDockLayout implements AutoCloseable {
         }
     }
 
-    private void updateSlot(Object driver, int index, String configured) throws Exception {
-        View slot = slots[index];
-        View stock = field(driver, "mScreenUpItemView" + (index + 1));
-        String target = platform.available(configured) ? configured : "";
-        String subtype = String.valueOf(stock.getTag(resource("id", "screen_up_item_app_sub_type")));
-        if (target.isEmpty()) {
-            stockIcon(slot, stock);
-            owned.write(slot, "description", stock.getContentDescription());
-            targets[index] = String.valueOf(stock.getTag(resource("id", "screen_up_item_package")));
-            bind(slot, () -> openSubtype(subtype));
-        } else {
-            owned.write(slot, "background", platform.icon(target, index + 1, "default"));
-            owned.write(slot, "description", platform.label(target));
-            targets[index] = target;
-            LauncherCommand.Kind kind = LauncherCatalog.RESTORE.equals(target)
-                    ? LauncherCommand.Kind.DASHBOARD : LauncherCommand.Kind.EMBEDDED;
-            bind(slot, () -> launch(kind, target));
+    private void updateNavigation() throws Exception {
+        View currentMenu = group.findViewById(resource("id", "screen_up_all_app_icon"));
+        if (menuNavigation == null || menu != currentMenu) {
+            if (menuNavigation != null) menuNavigation.close();
+            menu = currentMenu;
+            menuNavigation =
+                    menu == null
+                            ? null
+                            : new NavigationButton(menu, LauncherNavigation.Button.ALL_APPS);
+        }
+        if (homeNavigation != null) homeNavigation.bind();
+        if (menuNavigation != null) {
+            menuNavigation.bind();
+            owned.write(menu, "visibility", View.VISIBLE);
         }
     }
 
+    private final class NavigationButton implements AutoCloseable {
+        private final View view;
+        private final LauncherNavigation.Button role;
+        private final View.OnClickListener click = ignored -> invoke(false);
+        private final View.OnLongClickListener longClick =
+                ignored -> {
+                    invoke(true);
+                    return true;
+                };
+        private View.OnClickListener stockClick;
+
+        NavigationButton(View view, LauncherNavigation.Button role) {
+            this.view = view;
+            this.role = role;
+        }
+
+        void bind() throws Exception {
+            View.OnClickListener current = (View.OnClickListener) platform.read(view, "onClick");
+            if (current != click) stockClick = current;
+            owned.write(view, "onClick", click);
+            owned.write(view, "longClickable", true);
+            owned.write(view, "longClick", longClick);
+        }
+
+        private void invoke(boolean longPress) {
+            try {
+                LauncherPolicy policy = new LauncherPolicy(false, platform.settings());
+                if (policy.dashboardShort(role) != longPress) {
+                    launch(LauncherCommand.Kind.DASHBOARD, "");
+                } else if (role == LauncherNavigation.Button.ALL_APPS) {
+                    launch(LauncherCommand.Kind.PASSENGER_ALL_APPS, "");
+                } else if (stockClick != null) {
+                    stockClick.onClick(view);
+                }
+            } catch (Exception failure) {
+                platform.error(failure);
+            }
+        }
+
+        @Override
+        public void close() throws Exception {
+            // Setting a long-click listener can enable longClickable; restore the flag last.
+            owned.restore(view, "longClick");
+            owned.restore(view, "longClickable");
+            owned.restore(view, "onClick");
+        }
+    }
+
+    private void updateSlot(int index, String configured) throws Exception {
+        View slot = slots[index];
+        String target = platform.available(configured) ? configured : "";
+        targets[index] = target;
+        owned.write(slot, "visibility", target.isEmpty() ? View.GONE : View.VISIBLE);
+        if (target.isEmpty()) {
+            owned.write(slot, "background", null);
+            owned.write(slot, "description", null);
+            owned.write(slot, "onClick", null);
+            if (slot instanceof RadioButton) owned.write(slot, "checked", false);
+            return;
+        }
+        owned.write(slot, "background", platform.icon(target, index + 1, "default"));
+        owned.write(slot, "description", platform.label(target));
+        LauncherCommand.Kind kind =
+                LauncherCatalog.RESTORE.equals(target)
+                        ? LauncherCommand.Kind.DASHBOARD
+                        : LauncherCommand.Kind.EMBEDDED;
+        bind(slot, () -> launch(kind, target));
+    }
+
     void selected(String packageName) {
-        if (packageName == null) return;
+        if (packageName == null || packageName.isEmpty()) return;
         for (int i = 0; i < slots.length; i++) {
             if (packageName.equals(targets[i]) && slots[i] instanceof RadioButton) {
                 ((RadioButton) slots[i]).setChecked(true);
                 return;
             }
         }
-        if ("com.qinggan.app.vehiclesetting".equals(packageName) && vehicle instanceof RadioButton) {
+        if ("com.qinggan.app.vehiclesetting".equals(packageName)
+                && vehicle instanceof RadioButton) {
             ((RadioButton) vehicle).setChecked(true);
         } else if ("com.qinggan.app.vehicle".equals(packageName) && air instanceof RadioButton) {
             ((RadioButton) air).setChecked(true);
@@ -175,8 +252,11 @@ final class PassengerDockLayout implements AutoCloseable {
     private Drawable drawable(int id) throws Exception {
         Context context = group.getContext();
         try {
-            Object manager = OemAccess.call(methods.type("com.qinggan.theme.SkinResourceManager"),
-                    "getInstance", context);
+            Object manager =
+                    OemAccess.call(
+                            methods.type("com.qinggan.theme.SkinResourceManager"),
+                            "getInstance",
+                            context);
             return (Drawable) OemAccess.call(manager, "getDrawable", id);
         } catch (ReflectiveOperationException unavailable) {
             return context.getDrawable(id);
@@ -189,13 +269,17 @@ final class PassengerDockLayout implements AutoCloseable {
     }
 
     private void bind(View button, Action action) throws Exception {
-        owned.write(button, "onClick", (View.OnClickListener) view -> {
-            try {
-                action.run();
-            } catch (Exception failure) {
-                platform.error(failure);
-            }
-        });
+        owned.write(
+                button,
+                "onClick",
+                (View.OnClickListener)
+                        view -> {
+                            try {
+                                action.run();
+                            } catch (Exception failure) {
+                                platform.error(failure);
+                            }
+                        });
     }
 
     private void launch(LauncherCommand.Kind kind, String target) throws Exception {
@@ -205,8 +289,12 @@ final class PassengerDockLayout implements AutoCloseable {
     }
 
     private void openSubtype(String subtype) throws Exception {
-        OemAccess.call(methods.type("com.qinggan.launcher.base.utils.AppLauncher"),
-                "startAppBySubType", group.getContext(), subtype, 1);
+        OemAccess.call(
+                methods.type("com.qinggan.launcher.base.utils.AppLauncher"),
+                "startAppBySubType",
+                group.getContext(),
+                subtype,
+                1);
     }
 
     @Override
@@ -215,6 +303,8 @@ final class PassengerDockLayout implements AutoCloseable {
             group.addView(seat, group.indexOfChild(vehicle));
             replacedSeat = false;
         }
+        if (homeNavigation != null) homeNavigation.close();
+        if (menuNavigation != null) menuNavigation.close();
         for (View child : inserted) group.removeView(child);
         owned.close();
     }
