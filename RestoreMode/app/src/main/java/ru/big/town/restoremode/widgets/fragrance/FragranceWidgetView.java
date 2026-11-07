@@ -31,9 +31,13 @@ public final class FragranceWidgetView extends FrameLayout {
     private static final String[] INTENSITIES = {"Низкая", "Средняя", "Высокая"};
     private static final String[] DURATIONS = {"30 мин", "60 мин", "Безлимит"};
     private static final int[] TIMER_VALUES = {1, 2, 0};
+    // VehicleAir positions its mist in this panorama coordinate space.
+    private static final int SCENE_WIDTH = 1920;
+    private static final int SCENE_HEIGHT = 720;
     private final FragranceWidgetLayout layout;
     private final Command command;
     private final ImageView background;
+    private final View artworkShade;
     private final TextView title;
     private final FragranceTileGraphics graphics;
     private final TextView[] scents = new TextView[3];
@@ -63,19 +67,27 @@ public final class FragranceWidgetView extends FrameLayout {
         setBackground(shape);
         setClipToOutline(true);
 
-        background = image(0, 0, layout.width, layout.height);
+        background =
+                image(
+                        0,
+                        0,
+                        layout.expanded() ? SCENE_WIDTH : layout.width,
+                        layout.expanded() ? SCENE_HEIGHT : layout.height);
         ImageView mist =
-                layout.panoramic()
-                        ? image(
-                                layout.width * .659f,
-                                layout.height / 12f,
-                                layout.width * .2068f,
-                                layout.height * .589f)
-                        : image(
-                                layout.width * .3597f,
-                                0,
-                                layout.width * .528f,
-                                layout.height * .7257f);
+                layout.expanded()
+                        ? image(1265, 60, 397, 424)
+                        : layout.panoramic()
+                                ? image(
+                                        layout.width * .659f,
+                                        layout.height / 12f,
+                                        layout.width * .2068f,
+                                        layout.height * .589f)
+                                : image(
+                                        layout.width * .3597f,
+                                        0,
+                                        layout.width * .528f,
+                                        layout.height * .7257f);
+        artworkShade = layout.expanded() ? addArtworkShade() : null;
         graphics = new FragranceTileGraphics(context, layout, mist, this::render);
         switch (layout) {
             case MINI:
@@ -98,7 +110,7 @@ public final class FragranceWidgetView extends FrameLayout {
             case PANEL_5X4:
                 int controlsWidth = Math.round(layout.width * .57f);
                 title = label(24, 24, controlsWidth - 63, 48, 21);
-                power = button(controlsWidth - 30, 24, 39, 38, 12, this::toggle);
+                power = button(controlsWidth - 30, 24, 39, 39, 12, this::toggle);
                 addScents(24, 88, 64, 74);
                 levelTrack =
                         addSegments(
@@ -122,6 +134,17 @@ public final class FragranceWidgetView extends FrameLayout {
         }
         title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         render();
+    }
+
+    private View addArtworkShade() {
+        View shade = new View(getContext());
+        shade.setBackground(
+                new GradientDrawable(
+                        GradientDrawable.Orientation.LEFT_RIGHT,
+                        new int[] {0xdd000000, 0x99000000, 0x00000000}));
+        shade.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
+        addView(shade, new Placement(0, 0, 0, 0, 0));
+        return shade;
     }
 
     private ImageView image(float x, float y, float width, float height) {
@@ -173,12 +196,16 @@ public final class FragranceWidgetView extends FrameLayout {
 
     private View addSegments(
             int y, String name, TextView[] buttons, String[] labels, int command, int[] values) {
-        int segmentWidth = Math.round(layout.width * .57f / 3);
+        int availableHeight = layout.height - 24 - Math.round(layout.height * .49f);
+        int segmentHeight =
+                Math.min(36, (availableHeight - 2 * 27 - 12) / 2);
+        int segmentWidth = segmentHeight * 2;
+        y = Math.min(y, layout.height - 24 - 27 - segmentHeight);
         TextView caption = label(24, y, segmentWidth * 3, 22, 14);
         caption.setTextColor(0xffcacaca);
         caption.setText(name);
         View track = new View(getContext());
-        addView(track, new Placement(24, y + 27, segmentWidth * 3, 38, 0));
+        addView(track, new Placement(24, y + 27, segmentWidth * 3, segmentHeight, 0));
         for (int i = 0; i < buttons.length; i++) {
             int value = values[i];
             TextView item =
@@ -186,7 +213,7 @@ public final class FragranceWidgetView extends FrameLayout {
                             24 + segmentWidth * i,
                             y + 27,
                             segmentWidth,
-                            38,
+                            segmentHeight,
                             14,
                             () -> send(command, value));
             item.setText(labels[i]);
@@ -408,20 +435,40 @@ public final class FragranceWidgetView extends FrameLayout {
 
     @Override
     protected void onMeasure(int widthSpec, int heightSpec) {
-        float scaleX = MeasureSpec.getSize(widthSpec) / (float) layout.width;
-        float scaleY = MeasureSpec.getSize(heightSpec) / (float) layout.height;
+        int width = MeasureSpec.getSize(widthSpec);
+        int height = MeasureSpec.getSize(heightSpec);
+        float scaleX = width / (float) layout.width;
+        float scaleY = height / (float) layout.height;
+        float controlScale = Math.min(scaleX, scaleY);
+        float artworkScale = Math.max(width / (float) SCENE_WIDTH, height / (float) SCENE_HEIGHT);
         for (int i = 0; i < getChildCount(); i++) {
             View child = getChildAt(i);
             Placement box = (Placement) child.getLayoutParams();
-            box.width = Math.round(box.baseWidth * scaleX);
-            box.height = Math.round(box.baseHeight * scaleY);
-            box.leftMargin = Math.round(box.x * scaleX);
-            box.topMargin = Math.round(box.y * scaleY);
+            if (child == artworkShade) {
+                box.width = Math.round(width / 2f);
+                box.height = height;
+            } else if (layout.expanded() && child instanceof ImageView) {
+                box.width = Math.round(box.baseWidth * artworkScale);
+                box.height = Math.round(box.baseHeight * artworkScale);
+                box.leftMargin =
+                        width
+                                - Math.round(SCENE_WIDTH * artworkScale)
+                                + Math.round(box.x * artworkScale);
+                box.topMargin =
+                        height
+                                - Math.round(SCENE_HEIGHT * artworkScale)
+                                + Math.round(box.y * artworkScale);
+            } else {
+                float horizontalScale = layout.expanded() ? controlScale : scaleX;
+                float verticalScale = layout.expanded() ? controlScale : scaleY;
+                box.width = Math.round(box.baseWidth * horizontalScale);
+                box.height = Math.round(box.baseHeight * verticalScale);
+                box.leftMargin = Math.round(box.x * horizontalScale);
+                box.topMargin = Math.round(box.y * verticalScale);
+            }
             if (box.fontSize > 0) {
                 ((TextView) child)
-                        .setTextSize(
-                                TypedValue.COMPLEX_UNIT_PX,
-                                box.fontSize * Math.min(scaleX, scaleY));
+                        .setTextSize(TypedValue.COMPLEX_UNIT_PX, box.fontSize * controlScale);
             }
         }
         super.onMeasure(widthSpec, heightSpec);

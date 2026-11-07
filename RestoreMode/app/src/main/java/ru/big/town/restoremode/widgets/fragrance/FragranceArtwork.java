@@ -56,6 +56,7 @@ final class FragranceArtwork {
             int height,
             BooleanSupplier current) {
         FragranceArtwork art = new FragranceArtwork(context);
+        if (layout.expanded()) width = Math.max(width, Math.round(height * (1920f / 720)));
         for (int scent = 1; scent <= 3; scent++) {
             if (!current.getAsBoolean()) return null;
             art.names[scent - 1] = art.name(context, scent);

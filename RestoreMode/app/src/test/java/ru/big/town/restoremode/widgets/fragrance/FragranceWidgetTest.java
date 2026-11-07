@@ -10,6 +10,10 @@ import android.content.Context;
 import android.content.ContextWrapper;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.drawable.ColorDrawable;
 import android.hardware.display.DisplayManager;
 import android.os.Bundle;
 import android.os.Handler;
@@ -19,6 +23,8 @@ import android.os.Messenger;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
+import android.widget.TextView;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -41,6 +47,80 @@ import java.util.List;
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = 30, application = Application.class)
 public class FragranceWidgetTest {
+    @Test
+    public void expandedArtworkFillsFromBottomRightWithoutDistortingControls() {
+        for (FragranceWidgetLayout size : FragranceWidgetLayout.values()) {
+            if (!size.expanded()) continue;
+            FragranceWidgetView tile =
+                    new FragranceWidgetView(
+                            RuntimeEnvironment.getApplication(), size, (command, value) -> {});
+            tile.update(new Snapshot(2, 1, 2, 1), false, "");
+            for (int[] bounds :
+                    new int[][] {{size.width, size.height}, {size.width + 130, size.height - 60}}) {
+                int width = bounds[0], height = bounds[1];
+                tile.measure(
+                        View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                        View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY));
+                tile.layout(0, 0, width, height);
+                View background = tile.getChildAt(0);
+                View mist = tile.getChildAt(1);
+                assertEquals(
+                        1920f / 720, background.getWidth() / (float) background.getHeight(), .015f);
+                assertEquals(width, background.getRight());
+                assertEquals(height, background.getBottom());
+                assertTrue(background.getLeft() <= 0 && background.getTop() <= 0);
+                float scale = background.getHeight() / 720f;
+                assertEquals(background.getLeft() + 1265 * scale, mist.getLeft(), 1f);
+                assertEquals(background.getTop() + 60 * scale, mist.getTop(), 1f);
+                assertEquals(397f / 424, mist.getWidth() / (float) mist.getHeight(), .015f);
+                View scent = control(tile, "Свежесть бамбука");
+                assertEquals(scent.getWidth(), scent.getHeight());
+                View power = control(tile, "Выключить ароматизатор");
+                assertEquals(power.getWidth(), power.getHeight());
+                View segment = control(tile, "30 мин");
+                assertEquals(segment.getWidth(), segment.getHeight() * 2, 1f);
+                View level = control(tile, "Средняя");
+                assertTrue(
+                        level.getBottom()
+                                < segment.getTop()
+                                        - 20
+                                                * Math.min(
+                                                        width / (float) size.width,
+                                                        height / (float) size.height));
+                assertTrue(segment.getBottom() <= height);
+                TextView unlimited = (TextView) control(tile, "Безлимит");
+                assertEquals(1, unlimited.getLineCount());
+                assertEquals(0, unlimited.getLayout().getEllipsisCount(0));
+            }
+        }
+    }
+
+    @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    @Test
+    public void leftHalfGradientDimsArtworkButNotControls() {
+        FragranceWidgetView tile =
+                new FragranceWidgetView(
+                        RuntimeEnvironment.getApplication(),
+                        FragranceWidgetLayout.PANEL_4X3,
+                        (command, value) -> {});
+        tile.update(new Snapshot(2, 1, 2, 1), false, "");
+        ((ImageView) tile.getChildAt(0)).setImageDrawable(new ColorDrawable(Color.WHITE));
+        View scent = control(tile, "Свежесть бамбука");
+        scent.setBackgroundColor(Color.WHITE);
+        tile.measure(
+                View.MeasureSpec.makeMeasureSpec(540, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(361, View.MeasureSpec.EXACTLY));
+        tile.layout(0, 0, 540, 361);
+        Bitmap image = Bitmap.createBitmap(540, 361, Bitmap.Config.ARGB_8888);
+        tile.draw(new Canvas(image));
+        int left = Color.red(image.getPixel(8, 170));
+        int middle = Color.red(image.getPixel(135, 170));
+        assertTrue(left < middle);
+        assertTrue(middle < 200);
+        assertEquals(Color.WHITE, image.getPixel(405, 170));
+        assertEquals(Color.WHITE, image.getPixel(scent.getLeft() + 4, scent.getTop() + 4));
+    }
+
     @Test
     public void onlySevenSizesAreSelectableAndPersistIndependently() {
         Application app = RuntimeEnvironment.getApplication();
