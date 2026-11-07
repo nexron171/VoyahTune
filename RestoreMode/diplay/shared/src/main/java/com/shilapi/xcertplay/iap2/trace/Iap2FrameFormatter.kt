@@ -25,6 +25,7 @@ object Iap2FrameFormatter {
     private const val MAX_PARAMETERS = 80
     private const val MAX_STRING_CHARS = 240
     private const val MAX_HEX_BYTES = 24
+    private const val REDACTED = "<redacted>"
 
     fun format(
         direction: Iap2TraceDirection,
@@ -49,7 +50,11 @@ object Iap2FrameFormatter {
                 lines = lines,
             )
         }
-        lines += "  raw-body=${hexPreview(frame.payload)}"
+        // Use the schema so malformed bodies cannot bypass secret redaction.
+        val rawBody =
+            if (endpoint?.fields.orEmpty().any { it.containsSecret() }) REDACTED
+            else hexPreview(frame.payload)
+        lines += "  raw-body=$rawBody"
 
         val endpointText = endpoint?.let { " ${it.name}" }.orEmpty()
         return buildString {
@@ -101,10 +106,10 @@ object Iap2FrameFormatter {
         parameters.asList().take(MAX_PARAMETERS).forEach { parameter ->
             val field = fields[parameter.id]
             val name = field?.name ?: "param"
-            val value = if (field == null) {
-                formatOpaque(parameter.payload)
-            } else {
-                formatKnown(parameter.payload, field, depth)
+            val value = when {
+                field == null -> formatOpaque(parameter.payload)
+                field.secret -> formatSecret(parameter.payload)
+                else -> formatKnown(parameter.payload, field, depth)
             }
             lines += "${indent(depth)}[${parameter.id}] $name: $value"
         }
@@ -142,8 +147,14 @@ object Iap2FrameFormatter {
             Iap2WireType.OPAQUE -> formatOpaque(payload)
         }
     } catch (_: Exception) {
-        formatOpaque(payload)
+        if (spec.containsSecret()) REDACTED else formatOpaque(payload)
     }
+
+    private fun formatSecret(payload: ByteArray): String =
+        if (payload.contentEquals(Iap2WireCodec.string(""))) quote("") else REDACTED
+
+    private fun Iap2FieldSpec.containsSecret(): Boolean =
+        secret || children.any { it.containsSecret() }
 
     private fun formatOpaque(payload: ByteArray): String {
         if (payload.isEmpty()) return "void"

@@ -42,6 +42,7 @@ data class Iap2FieldSpec(
     val required: Boolean = false,
     val repeatable: Boolean = false,
     val children: List<Iap2FieldSpec> = emptyList(),
+    val secret: Boolean = false,
 )
 
 /**
@@ -310,7 +311,7 @@ object Iap2Endpoints {
                 Iap2WireType.GROUP,
                 children = listOf(
                     field(0, "SSID", Iap2WireType.STRING),
-                    field(1, "passphrase", Iap2WireType.STRING),
+                    field(1, "passphrase", Iap2WireType.STRING, secret = true),
                     field(2, "channel", Iap2WireType.U8),
                     field(3, "wirelessIP", Iap2WireType.STRING, repeatable = true),
                     field(4, "securityType", Iap2WireType.U8),
@@ -361,7 +362,7 @@ object Iap2Endpoints {
             field(0, "status", Iap2WireType.U8, required = true),
             field(1, "securityType", Iap2WireType.U8),
             field(2, "SSID", Iap2WireType.STRING),
-            field(3, "passphrase", Iap2WireType.STRING),
+            field(3, "passphrase", Iap2WireType.STRING, secret = true),
         ),
     )
     val REQUEST_ACCESSORY_WIFI_CONFIGURATION = endpoint(
@@ -378,7 +379,7 @@ object Iap2Endpoints {
         fields = listOf(
             field(0, "BSSID", Iap2WireType.BYTES),
             field(1, "SSID", Iap2WireType.STRING),
-            field(2, "passphrase", Iap2WireType.STRING),
+            field(2, "passphrase", Iap2WireType.STRING, secret = true),
             field(3, "securityType", Iap2WireType.U8),
             field(4, "channel", Iap2WireType.U8),
         ),
@@ -930,5 +931,6 @@ object Iap2Endpoints {
         required: Boolean = false,
         repeatable: Boolean = false,
         children: List<Iap2FieldSpec> = emptyList(),
-    ): Iap2FieldSpec = Iap2FieldSpec(id, name, type, required, repeatable, children)
+        secret: Boolean = false,
+    ): Iap2FieldSpec = Iap2FieldSpec(id, name, type, required, repeatable, children, secret)
 }
