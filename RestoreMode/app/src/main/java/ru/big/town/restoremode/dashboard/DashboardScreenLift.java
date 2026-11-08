@@ -5,9 +5,11 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.provider.Settings;
+import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowManager;
 
 import androidx.core.content.ContextCompat;
 
@@ -88,8 +90,17 @@ final class DashboardScreenLift implements AutoCloseable {
     }
 
     int viewportHeight() {
-        int windowHeight = root.getResources().getDisplayMetrics().heightPixels;
-        return Math.min(windowHeight, lowered ? LOWERED_HEIGHT_PX : RAISED_HEIGHT_PX);
+        WindowManager manager = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
+        int displayHeight = RAISED_HEIGHT_PX;
+        if (manager != null) {
+            DisplayMetrics metrics = new DisplayMetrics();
+            // OEM app metrics reserve system UI space even for our fullscreen window.
+            manager.getDefaultDisplay().getRealMetrics(metrics);
+            if (metrics.heightPixels > 0) {
+                displayHeight = metrics.heightPixels;
+            }
+        }
+        return Math.min(displayHeight, lowered ? LOWERED_HEIGHT_PX : RAISED_HEIGHT_PX);
     }
 
     private void apply(int type) {

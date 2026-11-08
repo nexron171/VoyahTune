@@ -24,6 +24,31 @@ public class DashboardScreenLiftTest {
     private static final String PROPERTY = "persist.qg.canbus.bcm_screenAutoLiftFdb";
 
     @Test
+    public void reducedAppMetricsDoNotShrinkFullscreenViewportAfterLiftCycle() {
+        Context context = RuntimeEnvironment.getApplication();
+        android.util.DisplayMetrics metrics = context.getResources().getDisplayMetrics();
+        int originalHeight = metrics.heightPixels;
+        metrics.heightPixels = 640;
+        ShadowSystemProperties.override(PROPERTY, "2");
+        View root = root(context);
+        root.layout(0, 0, 1920, 720);
+        try (DashboardScreenLift lift = new DashboardScreenLift(context, root, () -> {})) {
+            assertEquals(720, lift.viewportHeight());
+            ShadowSystemProperties.override(PROPERTY, "1");
+            send(context, 1);
+            assertEquals(560, lift.viewportHeight());
+            assertEquals(560, root.getLayoutParams().height);
+            root.layout(0, 0, 1920, 560);
+            ShadowSystemProperties.override(PROPERTY, "2");
+            send(context, 2);
+            assertEquals(720, lift.viewportHeight());
+            assertEquals(ViewGroup.LayoutParams.MATCH_PARENT, root.getLayoutParams().height);
+        } finally {
+            metrics.heightPixels = originalHeight;
+        }
+    }
+
+    @Test
     public void canPropertyWinsOverStaleSavedState() {
         Context context = RuntimeEnvironment.getApplication();
         Settings.Global.putInt(context.getContentResolver(), "voyahtune_screen_lift_type", 2);
