@@ -38,6 +38,7 @@ type nativeSupervisor struct {
 	mutex                  sync.Mutex
 	agents                 map[string]nativeAgentConfig
 	wanted                 map[string]bool
+	activeAttempts         map[string]processIdentity
 	apolloPath             string
 	readSetting            func(context.Context, string) string
 	restartLauncherProcess func(agentwire.Target) error
@@ -45,13 +46,10 @@ type nativeSupervisor struct {
 	migrationBoot          string
 }
 
-func (manager *nativeSupervisor) report(agent nativeAgentConfig, identity processIdentity, state, reason string, ack *agentwire.Status, modules []string) {
+func (manager *nativeSupervisor) report(agent nativeAgentConfig, identity processIdentity, state, reason string, ack *agentwire.Status, modules []string, architecture remoteattach.Architecture) {
 	value := agentStatus{Identity: identity, Target: agent.Target, State: state, Reason: reason}
 	value.UpdatedUptime, _ = uptimeSeconds(manager.procRoot)
-	if identity.PID > 0 {
-		architecture, _ := remoteattach.DetectArchitecture(manager.procRoot, identity.PID)
-		value.Architecture = string(architecture)
-	}
+	value.Architecture = string(architecture)
 	if ack != nil {
 		value.UID = ack.UID
 		value.NativeID = ack.NativeID
@@ -120,17 +118,22 @@ func (manager *nativeSupervisor) selection(ctx context.Context, definitions []na
 }
 
 func (manager *nativeSupervisor) cycle(ctx context.Context, name string) {
+	identity, err := findProcess(manager.procRoot, name)
+	manager.cycleProcess(ctx, name, identity, err)
+}
+
+func (manager *nativeSupervisor) cycleProcess(ctx context.Context, name string, identity processIdentity, err error) {
 	definitions := manager.definitions(name)
 	byID := map[string]nativeAgentConfig{}
 	for _, agent := range definitions {
 		byID[agent.ID] = agent
 	}
+	var architecture remoteattach.Architecture
 	reportAll := func(identity processIdentity, state, reason string) {
 		for _, agent := range definitions {
-			manager.report(agent, identity, state, reason, nil, nil)
+			manager.report(agent, identity, state, reason, nil, nil, architecture)
 		}
 	}
-	identity, err := findProcess(manager.procRoot, name)
 	if err != nil {
 		reportAll(identity, "failed", err.Error())
 		return
@@ -157,7 +160,8 @@ func (manager *nativeSupervisor) cycle(ctx context.Context, name string) {
 		reportAll(identity, "unsupported", "target identity or Android user changed")
 		return
 	}
-	if err := requireAndroidARM(manager.procRoot, identity.PID); err != nil {
+	architecture, err = remoteattach.DetectArchitecture(manager.procRoot, identity.PID)
+	if err != nil {
 		reportAll(identity, "unsupported", err.Error())
 		return
 	}
@@ -175,7 +179,7 @@ func (manager *nativeSupervisor) cycle(ctx context.Context, name string) {
 			previous := manager.status.agents[member.ID]
 			manager.status.mutex.Unlock()
 			if previous.Identity != identity || previous.State != "active" {
-				manager.report(byID[member.ID], identity, "injecting", "", nil, nil)
+				manager.report(byID[member.ID], identity, "injecting", "", nil, nil, architecture)
 			}
 		}
 	}
@@ -216,7 +220,7 @@ func (manager *nativeSupervisor) cycle(ctx context.Context, name string) {
 		if member.Enabled {
 			state = "active"
 		}
-		manager.report(byID[member.ID], identity, state, "", &ack, group.Modules)
+		manager.report(byID[member.ID], identity, state, "", &ack, group.Modules, architecture)
 	}
 	if len(group.Modules) > 0 {
 		manager.recordAttemptResult(name, identity, true, nil)
@@ -289,6 +293,15 @@ func (manager *nativeSupervisor) admit(target agentwire.Target) error {
 }
 
 func (manager *nativeSupervisor) recordAttemptResult(name string, identity processIdentity, active bool, failure error) bool {
+	manager.mutex.Lock()
+	recorded := active && failure == nil && manager.activeAttempts[name] == identity
+	if !active || failure != nil {
+		delete(manager.activeAttempts, name)
+	}
+	manager.mutex.Unlock()
+	if recorded {
+		return false
+	}
 	var record attemptRecord
 	if err := readJSON(manager.attemptPath(name), &record); err != nil || record.Boot != manager.boot || record.Identity != identity {
 		return false
@@ -315,12 +328,19 @@ func (manager *nativeSupervisor) recordAttemptResult(name string, identity proce
 	}
 	record.State = state
 	record.LastError = reason
-	if record == previous {
-		return deferred
+	if record != previous {
+		if err := writeAtomic(manager.attemptPath(name), record); err != nil {
+			log.Printf("persist native attempt: %v", err)
+			return false
+		}
 	}
-	if err := writeAtomic(manager.attemptPath(name), record); err != nil {
-		log.Printf("persist native attempt: %v", err)
-		return false
+	if active && failure == nil && record.State == "active" {
+		manager.mutex.Lock()
+		if manager.activeAttempts == nil {
+			manager.activeAttempts = make(map[string]processIdentity)
+		}
+		manager.activeAttempts[name] = identity
+		manager.mutex.Unlock()
 	}
 	return deferred
 }

@@ -255,6 +255,14 @@ func (backend *NativeBackend) Attach(ctx context.Context, record Record) (agentw
 	return *receipt.Status, nil
 }
 
+func (backend *NativeBackend) Status(ctx context.Context, target agentwire.Target) (agentwire.Status, error) {
+	client, err := backend.client(target)
+	if err != nil {
+		return agentwire.Status{}, err
+	}
+	return client.Status(ctx)
+}
+
 func (backend *NativeBackend) Apply(ctx context.Context, record Record) (agentwire.Status, error) {
 	client, err := backend.client(record.Target)
 	if err != nil {

@@ -43,7 +43,12 @@ type Backend interface {
 	Quiesce(context.Context, agentwire.Target) (agentwire.Status, error)
 }
 
+type statusBackend interface {
+	Status(context.Context, agentwire.Target) (agentwire.Status, error)
+}
+
 type session struct {
+	confirmed bool
 	mutex     sync.Mutex
 	record    Record
 	admission *lifecycle.Operation
@@ -165,7 +170,7 @@ func (manager *Manager) Ensure(ctx context.Context, target agentwire.Target, des
 			return agentwire.Status{}, err
 		}
 	}
-	recovery, err := manager.backend.Recover(ctx, cloneRecord(current.record))
+	recovery, err := manager.recoverSession(ctx, current)
 	if err != nil {
 		return agentwire.Status{}, err
 	}
@@ -196,6 +201,7 @@ func (manager *Manager) Ensure(ctx context.Context, target agentwire.Target, des
 			if manager.isStopping() {
 				return observed, ErrQuiescing
 			}
+			current.confirmed = true
 			return observed, nil
 		}
 	} else if !recovery.SafeToAttach {
@@ -251,7 +257,20 @@ func (manager *Manager) Ensure(ctx context.Context, target agentwire.Target, des
 	if manager.isStopping() {
 		return status, ErrQuiescing
 	}
+	current.confirmed = true
 	return status, nil
+}
+
+func (manager *Manager) recoverSession(ctx context.Context, current *session) (Recovery, error) {
+	confirmed := current.confirmed
+	current.confirmed = false
+	if backend, supported := manager.backend.(statusBackend); supported && confirmed {
+		status, err := backend.Status(ctx, current.record.Target)
+		if err == nil || errors.Is(err, agentwire.ErrRuntimeChanged) {
+			return Recovery{Status: &status}, nil
+		}
+	}
+	return manager.backend.Recover(ctx, cloneRecord(current.record))
 }
 
 func confirm(status agentwire.Status, target agentwire.Target, plan agentwire.Plan) error {

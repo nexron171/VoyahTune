@@ -9,10 +9,11 @@ import (
 )
 
 type agentWorkers struct {
-	manager *nativeSupervisor
-	context context.Context
-	group   *sync.WaitGroup
-	targets map[string]bool
+	manager   *nativeSupervisor
+	context   context.Context
+	group     *sync.WaitGroup
+	processes *processCatalog
+	targets   map[string]bool
 }
 
 func (workers *agentWorkers) watchDynamic() {
@@ -27,12 +28,17 @@ func (workers *agentWorkers) watchDynamic() {
 }
 
 func (workers *agentWorkers) refreshDynamic() {
+	workers.prepareCatalog()
 	manager := workers.manager
 	dynamic := nativeDynamicAgents(
 		manager.readSetting(workers.context, "voyahtune_fullscreen_apps"),
 	)
 	audio := navigationAudioAgents(manager.readSetting(workers.context, "voyahtune_navigation_audio_apps"))
-	dynamic = append(dynamic, navigationAudioProcesses(manager.procRoot, audio)...)
+	processes, err := workers.processes.snapshot()
+	if err != nil {
+		return
+	}
+	dynamic = append(dynamic, navigationAudioFromProcesses(processes, audio)...)
 	wanted := make(map[string]bool, len(dynamic))
 	for _, agent := range dynamic {
 		wanted[agent.ID] = true
@@ -53,10 +59,17 @@ func (workers *agentWorkers) refreshDynamic() {
 	workers.start(added)
 }
 
+func (workers *agentWorkers) prepareCatalog() {
+	if workers.processes == nil {
+		workers.processes = &processCatalog{procRoot: workers.manager.procRoot}
+	}
+}
+
 func (workers *agentWorkers) start(agents []nativeAgentConfig) {
 	if workers.context.Err() != nil {
 		return
 	}
+	workers.prepareCatalog()
 	manager := workers.manager
 	manager.mutex.Lock()
 	for _, agent := range agents {
@@ -65,7 +78,7 @@ func (workers *agentWorkers) start(agents []nativeAgentConfig) {
 	}
 	manager.mutex.Unlock()
 	for _, agent := range agents {
-		manager.report(agent, processIdentity{}, "waiting", "", nil, nil)
+		manager.report(agent, processIdentity{}, "waiting", "", nil, nil, "")
 	}
 	for _, agent := range agents {
 		if workers.targets[agent.Target] {
@@ -76,7 +89,8 @@ func (workers *agentWorkers) start(agents []nativeAgentConfig) {
 		go func() {
 			defer workers.group.Done()
 			for workers.context.Err() == nil {
-				manager.cycle(workers.context, agent.Target)
+				identity, err := workers.processes.find(agent.Target)
+				manager.cycleProcess(workers.context, agent.Target, identity, err)
 				if !wait(workers.context, time.Second) {
 					return
 				}
