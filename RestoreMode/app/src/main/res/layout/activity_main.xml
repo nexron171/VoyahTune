@@ -29,8 +29,8 @@
                 android:layout_height="match_parent"
                 android:rowCount="5"
                 android:orientation="vertical"
-                android:paddingHorizontal="6dp"
-                android:paddingVertical="6dp" />
+                android:paddingTop="3dp"
+                />
 
         </HorizontalScrollView>
 
