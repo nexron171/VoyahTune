@@ -526,6 +526,20 @@ CarPlayHostActivity **не принимает старую сессию**: вы�
 Отложенные startup/teardown callbacks завершающейся или уничтоженной Host Activity
 не запускают и не принимают сессию заново; поздний bind launcher также игнорируется.
 
+При потере транспорта у уже уничтоженного/закрытого host старый controller/sink
+сначала завершают teardown, затем освобождается только их прежний startup-owner.
+При отсутствии нового владельца пустой FGS и executors старого host завершаются.
+Пятиминутный recovery deadline сохраняется во время передачи: новый host может
+автоматически начать подключение, вместо бесконечного ожидания `hasSession=true`
+без snapshot. Если окно истекает без host/controller/stopAction, idle-stop атомарно
+завершает recovery и снимает expired до вызова completion; следующий обычный запуск
+получает новое окно. Поздний completion не очищает нового владельца и не продлевает
+его deadline. Поздний stopAction проверяет одновременно host и controller; старое завершение не закрывает
+уже принятую другой Activity сессию и не останавливает её foreground service.
+Ошибки controller/media teardown журналируются отдельно и не оставляют cleanup
+незавершённым из-за исключения рабочего потока. Это восстановление при следующем
+появлении host, а не запуск нового UI из фона и не сохранение сессии после смерти процесса.
+
 Пассивный уход отдельной Activity в фон не завершает controller, USB/iAP2, VPN или
 службу сессии. В Voyah-интеграции уничтожение **TextureView и SurfaceView** сначала
 согласованно отсоединяет живые/retiring decoders от поверхности: живой main decoder
@@ -535,8 +549,11 @@ surfaceDestroyed; не ставить следом clearSurface(null), кото�
 припаркованный decoder. При новой поверхности/adopt меняется только outputSurface
 и запрашивается кадр неподвижного экрана. Если codec не принимает setOutputSurface,
 штатный fallback пересоздаёт decoder, сохраняя phone/controller session.
-Отложенная смена размера скрытого окна не перезапускает активный controller;
-в onStart размер заново берётся из видимого View. Реальная смена дисплея по-прежнему
+Отложенная смена размера скрытого окна не перезапускает активный controller:
+`onStop` сбрасывает ожидающий resize, а последующие layout скрытого Voyah-окна
+не создают новый. Это также не даёт устаревшему `pendingDisplaySize` блокировать
+повторное подключение живого host в фоне после реального разрыва транспорта.
+В `onStart` размер заново берётся из видимого View. Реальная смена дисплея по-прежнему
 выполняет отдельный последовательный transfer, описанный выше.
 
 В `DiPlaySessionService.onTaskRemoved` при выключенной `vehicleIntegrationEnabled`
@@ -546,6 +563,12 @@ surfaceDestroyed; не ставить следом clearSurface(null), кото�
 `onCreate` вызывает `VoyahCarPlayIntegration.start`, `onDestroy` — `stop` и reset.
 Сервис START_NOT_STICKY; сохранение в рамках процесса не обещает восстановление
 после force-stop, смерти процесса или перезагрузки.
+Foreground service сам по себе не удерживает CPU/Wi-Fi от сна. Отдельного бессрочного
+WakeLock здесь нет: его добавление без связи с питанием автомобиля могло бы мешать
+штатному засыпанию. Без журнала конкретного отказа сон/потеря радио и уничтожение
+процесса остаются отдельными возможными причинами; исправление ownership не доказывает,
+что все пользовательские разрывы вызваны именно им. No-picture-индикатор лишь
+показывает подсказку; отсутствие кадров скрытого UI не запускает teardown транспорта.
 
 На OD `Packaging/new/agents/windows.js` усиливает защиту на время foreground-службы
 `DiPlaySessionService`: перед штатным `OomAdjuster.applyOomAdjLocked` ограничивает
@@ -1838,6 +1861,20 @@ AudioTrack, плавно за `durationMs`; навигация, звонки и 
 Клиент громкости в настройках создаётся вместе с View секции, до `onResume`,
 а не при отложенной отрисовке строки RecyclerView. Последний снимок уровней
 применяется и к заново созданной строке; уход с экрана освобождает binding.
+RDS получает отдельное приглушение в Native через общий
+[NavigationMediaDucking](../Native/app/src/main/java/ru/big/town/anative/NavigationMediaDucking.java):
+навигационная роль CarPlay и выбранные приложения совместно удерживают коэффициент
+**0,2** для внешних media AudioTrack с переходом **150 мс**. CarPlay-владелец
+исключает собственную музыку RestoreMode: ей управляет `duckAudio`; навигация
+выбранного внешнего приложения может приглушить и музыку RestoreMode. Потоки
+навигации/звонка/Siri **1/6/22** исключены.
+Последний владелец восстанавливает коэффициент; обычная громкость OEM остаётся
+прежней. Это дополняет системный аудиофокус независимо от переключателя iPhone
+`duckAudio`. В AR.01.20260318170344.rc1 AdayoDAB воспроизводит RDS через stream 3,
+но его обработчик не выполняет `LOSS_TRANSIENT_CAN_DUCK`; отдельного канала RDS
+для этой проблемы не обнаружено. Подробности и границы —
+[в описании навигационного звука](app-navigation-audio.md).
+
 API success, проверка Android focus в JVM и реальная реакция кнопок ГУ — разные
 уровни доказательства; новая регулировка ещё требует проверки на автомобиле.
 
@@ -2594,7 +2631,7 @@ UI-тесты и испытания на ГУ выполнять только в
 | Исключение Hiboard OD | `test_hiboard_is_not_injected_even_when_selected_for_fullscreen` в `test_parallel_hook_loader.py`: отсутствие injection при обоих ABI, с выбором fullscreen и без него. |
 | Темы и штатный док | common `CarPlayHostResolutionTest`: классический/нижний край и Aston Martin только с Ultra, fixed canvas и масштаб; `CarPlaySettingsAccessTest`: default false у скрытия, зависимости и сброс без скрытого восстановления. app `CarPlaySettingsLifecycleTest`: реальные переключатели, блокировка/возврат классической темы, extras DOCK_CONFIG. `CarPlaySystemDockTest`: видимость/возврат, 132/16dp, OEM-команды и PM2.5/boot/unknown. На ГУ: вид штатных иконок, расположение дока, Home/климат/автомобиль на 0/1, отображение воздуха и переходы в другие окна. |
 | Виджеты CarPlay | app `widgets.apps.AppWidgetStoreTest`, `carplay.CarPlayDashboardScrollTouchListenerTest` (pinch в CarPlay, горизонтальная прокрутка Dashboard двумя пальцами и отсутствие захвата трёхпальцевых свайпов); отдельно сверить настройки режима/автозапуска и QUERY → retained VD → fresh launch, UI-проверки только по запросу |
-| Возврат на главную и фон | `Packaging/new/tests/carplay-dashboard-navigation.test.js`; app `carplay.CarPlayDashboardDisplayTest`: настоящий startActivity с DiPlayActivity/page=home и физическим экраном 0/1, включая VD; common `CarPlayHostUiNavigationTest` (requestUI/controller без Activity), `VoyahSessionTransferTest`; shared `media.VideoSurfaceHandoffTest` |
+| Возврат на главную и фон | common `CarPlayBackgroundRecoveryTest`: освобождение retired owner после teardown, поздние stop/teardown callbacks при новом владельце, скрытый resize и ошибка закрытия; `Packaging/new/tests/carplay-dashboard-navigation.test.js`; app `carplay.CarPlayDashboardDisplayTest`: настоящий startActivity с DiPlayActivity/page=home и физическим экраном 0/1, включая VD; common `CarPlayHostUiNavigationTest` (requestUI/controller без Activity), `VoyahSessionTransferTest`; shared `media.VideoSurfaceHandoffTest` |
 | Независимые сетки и перенос OD | app `DashboardTaskIsolationTest` (manifest без launcher-демо, affinity, маршруты и плитка настроек), `DashboardTransferPolicyTest` (пиннинг экранов и исключения CarPlay); Native `AppDisplayTaskPlanTest` (сохранение соседней сетки и CarPlay); `Packaging/new/tests/carplay-dashboard-navigation.test.js` (оба OEM-входа, сохранённый компонент voice preview, дисплеи 0/1 и сохранение маршрутов CarPlay/VoiceActivity) |
 | Task/component/display | Native `CarPlayTargetTest` (выбор компонента home на 0/1 и projection на VD со старым ID; полноэкранные входы направляются в VD-хост до разрешения intent), `AppDisplayTaskPlanTest`, `SplitHostTaskSnapshotTest` (CarPlay на своём VD, исключение Dashboard/launcher, unknown display); app `CarPlayDashboardDisplayTest` (возврат с полноэкранного VD на физический экран хоста); common `VoyahSessionTransferTest`, `SmoothVideoHostLifecycleTest`, `LauncherIntentTest` |
 | Выключатель и темы CarPlay | app `CarPlayFeatureTest`, `CarPlaySettingsLifecycleTest`: default true, компоненты/независимый Dashboard, оба профиля виджетов, док, скрытие контента, сохранение трёх тем; common `CarPlayEntryActivityTest`: выключенные entry/home/projection не запускают транспорт. OD `test_carplay_allapps.js`: включение/выключение, stale cache, отсутствие дублей, независимые клики на 0/1. |
