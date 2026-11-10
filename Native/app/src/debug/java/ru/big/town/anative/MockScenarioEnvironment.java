@@ -43,7 +43,7 @@ final class MockScenarioEnvironment implements ScenarioEnvironment {
                         main,
                         event -> {
                             if (event.kind == CanBusEvent.Kind.CONNECTION) {
-                                gears.accept(vehicle.gear);
+                                gears.accept(vehicle.gear, GearStateController.Source.SNAPSHOT);
                                 doors.accept(vehicle.doors);
                                 for (Consumer<String> listener : driveListeners) {
                                     listener.accept(drive);
@@ -61,7 +61,13 @@ final class MockScenarioEnvironment implements ScenarioEnvironment {
                                     listener.accept(-1);
                                 }
                             } else if (event.kind == CanBusEvent.Kind.GEAR) {
-                                gears.accept(event.first);
+                                gears.accept(
+                                        event.first,
+                                        event.origin == CanBusEvent.Origin.LIVE
+                                                ? GearStateController.Source.LIVE
+                                                : event.origin == CanBusEvent.Origin.SEED
+                                                        ? GearStateController.Source.SNAPSHOT
+                                                        : GearStateController.Source.REPLAY);
                             } else if (event.kind == CanBusEvent.Kind.DOOR) {
                                 doors.accept(event.second);
                             }

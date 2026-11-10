@@ -1872,29 +1872,15 @@ public class SetModesService extends Service {
         service.updateLightSensorObservation();
     }
 
-    /**
-     * На power on: если включена опция «Сервисный режим дворников в холодную погоду», отправляем
-     * {@link WiperColdService} команду reset (вернуть дворники в обычный режим). Сам сервис решит,
-     * слать ли toggle (только если считает режим активным).
-     */
-    private void resetWiperColdOnPowerOn() {
-        // Шлём reset, если опция включена ЛИБО персист говорит, что дворники в сервисном
-        // режиме (wiperServiceActive). Второе условие важно: если опцию выключили, пока
-        // дворники подняты, их всё равно надо вернуть на power on — безусловно, независимо
-        // от температуры (решение о самой отправке принимает WiperColdService по флагу).
+    /** Wake refreshes the door reactor without releasing its persisted wiper position. */
+    private void reconcileWiperColdOnPowerOn() {
         boolean enabled = prefs().getBoolean("wiperCold", false);
         boolean active = prefs().getBoolean("wiperServiceActive", false);
         if (!enabled && !active) return;
         Intent intent = new Intent(this, WiperColdService.class);
-        intent.setAction(WiperColdService.ACTION_POWER_ON_RESET);
+        intent.setAction(WiperColdService.ACTION_POWER_ON_RECONCILE);
         startForegroundService(intent);
-        Log.i(
-                TAG,
-                "resetWiperColdOnPowerOn: sent POWER_ON_RESET (enabled="
-                        + enabled
-                        + " active="
-                        + active
-                        + ")");
+        Log.i(TAG, "Cold wiper wake reconciliation: enabled=" + enabled + " active=" + active);
     }
 
     /** Wake keeps the persistent trip collector running; it does not close the trip. */
@@ -1930,7 +1916,8 @@ public class SetModesService extends Service {
         Log.i(TAG, "restoreWiperColdState: wiperCold=" + wiper + " pauseMediaOnDoor=" + pauseMedia);
         boolean playMedia =
                 prefs().getBoolean(ru.big.town.common.DoorMediaSettings.PLAY_ON_DOOR, false);
-        if (wiper || pauseMedia || playMedia) {
+        boolean activeWipers = prefs().getBoolean("wiperServiceActive", false);
+        if (wiper || activeWipers || pauseMedia || playMedia) {
             Intent intent = new Intent(this, WiperColdService.class);
             startForegroundService(intent);
         }
@@ -2093,7 +2080,7 @@ public class SetModesService extends Service {
         if (beginWakeSession()) {
             requestSavedConfigSync("physical wake");
             restoreAutoLightState();
-            resetWiperColdOnPowerOn();
+            reconcileWiperColdOnPowerOn();
             forwardPowerOnToTripStats();
             BatteryHeatService.requestPhysicalWake(this);
             scheduleAncillaryWakeTasks();

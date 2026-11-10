@@ -748,12 +748,16 @@ public class MainActivity extends AppCompatActivity {
                 .putBoolean(ru.big.town.common.DoorMediaSettings.PLAY_ON_DOOR, playMediaOnDoor)
                 .apply();
         Intent intent = new Intent(context, WiperColdService.class);
-        if (wiperEnabled || pauseMediaOnDoor || playMediaOnDoor) {
+        boolean activeWipers =
+                context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE)
+                        .getBoolean("wiperServiceActive", false);
+        if (wiperEnabled
+                || activeWipers
+                || WiperColdService.hasPendingWiperToggle()
+                || pauseMediaOnDoor
+                || playMediaOnDoor) {
             context.startForegroundService(intent);
         } else {
-            // НЕ сбрасываем wiperServiceActive: если дворники по нашей оценке в сервисном
-            // режиме, их надо вернуть на ближайшем power on (даже с выключенной опцией) —
-            // SetModesService.resetWiperColdOnPowerOn учитывает этот флаг.
             context.stopService(intent);
         }
     }

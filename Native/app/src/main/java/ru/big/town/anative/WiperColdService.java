@@ -7,6 +7,7 @@ import android.app.Service;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.media.AudioManager;
 import android.net.Uri;
 import android.os.Bundle;
@@ -20,68 +21,32 @@ import android.view.KeyEvent;
 
 import androidx.core.app.NotificationCompat;
 
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+
 import ru.big.town.common.DoorMediaSettings;
 
-/**
- * Сервис «Сервисный режим дворников» (для холодного сезона).
- *
- * <p>Задача: при открытии водительской двери перевести дворники в сервисное (поднятое) положение —
- * чтобы при парковке в мороз они не примерзали к стеклу. При включении автомобиля (power on) —
- * вернуть дворники в обычный режим.
- *
- * <p><b>Без завязки на температуру.</b> Изначально условие включало проверку мороза, но температура
- * в момент открытия двери не предсказывает ночную (припарковался в +10, ночью −10). Поэтому триггер
- * — только открытие водительской двери; включать опцию пользователь сам на холодный сезон.
- *
- * <p><b>Особенность CAN-команды:</b> одна и та же команда {@code 65 08 00 00 c1 c0 00 00 40 00}
- * работает как <i>переключатель</i> (toggle): первый раз включает сервисный режим, второй —
- * выключает. Поэтому слать её вслепую нельзя (иначе на power on без активного режима мы его
- * наоборот включим). Держим собственную оценку текущего состояния во флаге {@link
- * #PREF_SERVICE_ACTIVE} (персистится в NativePrefs, чтобы пережить перезапуск процесса) и шлём
- * toggle только когда нужен реальный флип:
- *
- * <ul>
- *   <li>дверь водителя ОТКРЫТА + режим НЕ активен → toggle → активен;
- *   <li>power on + режим активен → toggle → выключен (если не активен — не шлём).
- * </ul>
- *
- * <p><b>Сигнал</b> берём из {@code CanBusService} (тот же сервис, что и автосвет, проверен
- * декомпиляцией — см. память reference-canbus-door-temp):
- *
- * <ul>
- *   <li>{@link DriverDoorStateController} и {@link GearStateController} отдают типизированные
- *       состояния без зависимости сервиса от CAN callback-кодов;
- *   <li>seed двери TX=2 централизован в {@link VehicleStateControllers} — OEM-колбэки delta-only,
- *       начальное значение не отдают.
- * </ul>
- *
- * Логика <i>level-triggered</i> с guard'ом по флагу активности: это заодно ловит сценарий, когда
- * голова просыпается именно от открытия двери — на seed мы уже видим дверь открытой и срабатываем.
- *
- * <p>Водительская дверь на Voyah Free (левый руль) — передняя левая, поле {@code DoorStatus.fLDoor}
- * (индекс 1). OPEN=1, CLOSED=0.
- *
- * <p>Ограничение: команда — toggle без обратной связи, поэтому наша оценка состояния может
- * разойтись с реальностью, если пользователь переключит сервисный режим вручную подрулевым рычагом.
- * Также требуется, чтобы штатный режим дворников НЕ стоял в Auto.
- */
+/** Door-triggered parking position; a confirmed Drive is the only automatic release. */
 public class WiperColdService extends Service {
 
     private static final String TAG = "$$$ WiperColdService $$$";
     private static final String CHANNEL_ID = "wiper_cold_channel";
 
-    /** Отправить toggle-команду ВЫКЛ при power on (если режим считается активным). */
+    public static final String ACTION_POWER_ON_RECONCILE =
+            "ru.big.town.anative.WIPER_COLD_POWER_ON_RECONCILE";
     public static final String ACTION_POWER_ON_RESET =
             "ru.big.town.anative.WIPER_COLD_POWER_ON_RESET";
 
-    // Наша оценка текущего состояния сервисного режима (персист — переживает рестарт процесса)
     private static final String PREFS_NAME = "NativePrefs";
     private static final String PREF_SERVICE_ACTIVE = "wiperServiceActive";
-    // Флаги-потребители сигнала двери (пишет MainActivity.applyDoorReactor). Сервис может быть
-    // запущен
-    // ради любого из них, поэтому каждое действие гейтим своим флагом.
+    private static final String PREF_WAIT_FOR_DOOR_CLOSE = "wiperWaitForDoorClose";
+    private static final String PREF_POSITION_UNCERTAIN = "wiperPositionUncertain";
     private static final String PREF_WIPER_ENABLED = "wiperCold";
     private static final String PREF_MEDIA_PAUSE = "pauseMediaOnDoor";
+    private static final int MAX_SAFE_RETRIES = 6;
+    private static final long WIPER_RETRY_MILLIS = 1000;
+    private static final AtomicInteger PENDING_WIPER_TOGGLES = new AtomicInteger();
 
     // Пауза музыки при открытии двери водителя. Команду отправляем сразу, fade идёт параллельно, а
     // нулевую громкость держим дольше типичного 1–1.5-секундного буфера wireless
@@ -104,21 +69,12 @@ public class WiperColdService extends Service {
     private static final String WIPER_TOGGLE_FRAME = "65 08 00 00 c1 c0 00 00 40 00";
     private static final int CAN_CMD_NUM = 1;
 
-    // GearState.value: Parking=0, Reverse=1, Neutral=2, Drive=3, Battery=4, Unknown=-1.
-    // «Готов ехать» = передача из Parking (>=1). Это единственный надёжный сигнал зажигания
-    // на этой голове: ACC/engine/vehicleKey/ignition-колбэки CanBus не шлёт вообще (проверено
-    // логами).
-    private static final int GEAR_MIN_MOVING = 1;
-
-    // DoorStatus: флаг наличия, bonnet, затем водительская fLDoor.
     private static final int DOOR_OPEN = 1;
-    // Окно после power-on reset, в течение которого не поднимаем дворники заново: гасит
-    // гонку «сбросили флаг → seed видит дверь всё ещё открытой → снова включает».
-    private static final long POWER_ON_RESET_SUPPRESS_MS = 10_000L;
 
     private volatile Handler timerHandler;
     private volatile Handler mediaHandler;
     private HandlerThread mediaThread;
+    private VehicleStateControllers vehicleState;
     private GearStateController.Subscription gearStateSubscription;
     private DriverDoorStateController.Subscription driverDoorSubscription;
 
@@ -126,13 +82,15 @@ public class WiperColdService extends Service {
     private final DoorPauseWorkGate mediaPauseWorkGate = new DoorPauseWorkGate();
     private AudioManager mediaFadeAudioManager = null;
     private volatile boolean destroyed = false;
-    private boolean wiperTogglePending = false;
-    private Boolean queuedWiperTarget = null;
+    private boolean wiperTogglePending;
+    private ColdWiperState wiperState;
+    private SharedPreferences preferences;
+    private SharedPreferences.OnSharedPreferenceChangeListener preferenceListener;
+    private int safeRetriesRemaining;
+    private final Runnable retryWipers = () -> evaluate("retry", false);
 
     // Последнее наблюдаемое состояние водительской двери: -1 неизвестно, 0 закрыта, 1 открыта
     private int lastFLDoor = -1;
-    private long lastPowerOnResetElapsed =
-            0L; // когда последний раз возвращали дворники по power on
 
     private void onDriverDoorState(DriverDoorStateController.State state) {
         if (destroyed) return;
@@ -143,9 +101,11 @@ public class WiperColdService extends Service {
     private void applyDoorSeed(int frontLeft) {
         if (frontLeft < 0) return;
         lastFLDoor = frontLeft;
+        wiperState.onDoor(frontLeft);
+        persistDoorCloseGuard();
         Log.i(TAG, "seed: fLDoor=" + lastFLDoor + " active=" + isServiceActive());
-        // A snapshot establishes the level but is not a real open edge: never pause media here.
-        if (isWiperEnabled()) evaluate("seed");
+        // A snapshot establishes the level but never pauses media.
+        evaluate("seed");
     }
 
     // -------------------------------------------------------------------------
@@ -174,119 +134,139 @@ public class WiperColdService extends Service {
                         + " active="
                         + isServiceActive());
         if (openedNow && (mediaOn || isMediaPlayEnabled())) requestDoorMediaAction();
-        if (isWiperEnabled()) evaluate("door");
+        wiperState.onDoor(fLDoor);
+        persistDoorCloseGuard();
+        evaluate("door");
     }
 
-    /**
-     * Level-triggered решение: если водительская дверь открыта И режим ещё не активен — включаем
-     * сервисный режим (toggle). Guard по флагу активности не даёт слать повторно, пока не сбросим
-     * на power on.
-     */
     private void evaluate(String source) {
-        boolean active = isServiceActive();
-        Log.i(TAG, "evaluate(" + source + "): fLDoor=" + lastFLDoor + " active=" + active);
-        if (active) { // уже включён — ждём power on
-            Log.i(TAG, "evaluate: пропуск — режим уже активен (wiperServiceActive=true)");
-            return;
-        }
-        // Только что вернули дворники по power on — не поднимаем их сразу обратно
-        long sinceReset = SystemClock.elapsedRealtime() - lastPowerOnResetElapsed;
-        if (sinceReset < POWER_ON_RESET_SUPPRESS_MS) {
-            Log.i(TAG, "evaluate: пропуск — окно после power-on reset (" + sinceReset + "ms)");
-            return;
-        }
-        if (lastFLDoor != DOOR_OPEN) { // дверь водителя не открыта
-            Log.i(
-                    TAG,
-                    "evaluate: пропуск — водительская дверь не открыта (fLDoor="
-                            + lastFLDoor
-                            + ")");
-            return;
-        }
-        Log.i(
-                TAG,
-                "★ условие выполнено ("
-                        + source
-                        + "): дверь водителя открыта"
-                        + " → включаем сервисный режим дворников");
-        requestServiceActive(true, "wiper service ON (driver door open)");
+        evaluate(source, true);
     }
 
-    /**
-     * Передача сменилась. Когда уходит из Parking (>=1: R/N/D/B) — машина готова ехать, возвращаем
-     * дворники в обычный режим. Это замена ненадёжного STATE_ON головы: голова уже включена, когда
-     * открываешь дверь, поэтому нового power on при зажигании не происходит; а вот передача
-     * начинает публиковаться именно при готовности машины.
-     */
-    private void onGearState(int gearVal) {
-        Log.i(TAG, "gear=" + gearVal + " active=" + isServiceActive());
-        if (gearVal >= GEAR_MIN_MOVING) {
-            returnWipersIfActive("gear→" + gearVal + " (готов ехать)");
+    private void evaluate(String source, boolean resetRetries) {
+        if (destroyed) return;
+        if (resetRetries) safeRetriesRemaining = MAX_SAFE_RETRIES;
+        boolean settled = reconcileWiperPosition();
+        wiperState.setEnabled(isWiperEnabled());
+        Boolean target = wiperState.nextTarget();
+        Log.i(TAG, "evaluate(" + source + "): target=" + target + " active=" + isServiceActive()
+                + " uncertain=" + wiperState.positionUncertain());
+        if (wiperTogglePending) return;
+        if (!settled) {
+            scheduleSafeRetry();
+            return;
         }
+        if (target == null) {
+            timerHandler.removeCallbacks(retryWipers);
+            stopIfIdle();
+            return;
+        }
+        if (!PENDING_WIPER_TOGGLES.compareAndSet(0, 1)) {
+            scheduleSafeRetry();
+            return;
+        }
+        requestServiceActive(target, "wiper service " + (target ? "ON" : "OFF") + " (" + source + ")");
     }
 
-    /**
-     * Power on головы (backup-путь). Если персист говорит, что дворники в сервисном режиме —
-     * БЕЗУСЛОВНО возвращаем их (toggle), независимо от температуры.
-     */
-    private void onPowerOnReset() {
-        returnWipersIfActive("power on");
+    private boolean reconcileWiperPosition() {
+        if (hasPendingWiperToggle()) return false;
+        Map<String, ?> saved = preferences.getAll();
+        if (hasPendingWiperToggle()) return false;
+        // The terminal writer commits this pair before releasing the process-wide send owner.
+        wiperState.reconcile(
+                Boolean.TRUE.equals(saved.get(PREF_SERVICE_ACTIVE)),
+                Boolean.TRUE.equals(saved.get(PREF_POSITION_UNCERTAIN)));
+        return true;
     }
 
-    /**
-     * Общий возврат: если по нашей оценке дворники подняты — шлём toggle (опускаем), сбрасываем
-     * флаг и включаем окно подавления, чтобы seed/дверь не подняли их обратно.
-     */
-    private void returnWipersIfActive(String reason) {
-        if (isServiceActive()) {
-            lastPowerOnResetElapsed = SystemClock.elapsedRealtime();
-            Log.i(TAG, reason + " → возвращаем дворники в обычный режим (toggle)");
-            requestServiceActive(false, "wiper service OFF (" + reason + ")");
-        } else {
-            Log.i(TAG, reason + " → сервисный режим не активен, команду не шлём");
-        }
+    private void onGearState(GearStateController.State state) {
+        if (destroyed) return;
+        wiperState.onGear(state.value, state.isFresh());
+        persistDoorCloseGuard();
+        evaluate("gear " + state.value + " " + state.source);
+    }
+
+    static boolean hasPendingWiperToggle() {
+        return PENDING_WIPER_TOGGLES.get() != 0;
     }
 
     private void requestServiceActive(boolean targetActive, String label) {
-        if (wiperTogglePending) {
-            queuedWiperTarget = targetActive;
-            Log.i(TAG, "wiper toggle coalesced, target=" + targetActive);
-            return;
-        }
-        if (isServiceActive() == targetActive) return;
         wiperTogglePending = true;
+        wiperState.onRequested(targetActive);
+        AtomicBoolean receiptWritten = new AtomicBoolean();
+        AtomicBoolean frameAttempted = new AtomicBoolean();
         ApplyEngine.postWakeAction(
                 label,
-                () -> {
-                    byte[] frame = MainActivity.parseHexBinary(WIPER_TOGGLE_FRAME);
-                    Log.i(TAG, "sendToggle: [" + label + "] frame=" + WIPER_TOGGLE_FRAME);
-                    return CanSender.send(CAN_CMD_NUM, frame, label);
-                },
+                () -> CanSender.runGuardedSend(
+                        () -> !destroyed && wiperState.canSend(targetActive),
+                        () -> {
+                            frameAttempted.set(true);
+                            wiperState.onFrameAttempted();
+                        },
+                        () -> {
+                            byte[] frame = MainActivity.parseHexBinary(WIPER_TOGGLE_FRAME);
+                            receiptWritten.set(true);
+                            persistWiperAttemptReceipt();
+                            Log.i(TAG, "sendToggle: [" + label + "] frame=" + WIPER_TOGGLE_FRAME);
+                            // CanSender rechecks the target after the synchronous receipt write.
+                            return CanSender.send(CAN_CMD_NUM, frame, label);
+                        }),
                 result -> {
+                    boolean sent = result == ApplyEngine.WakeActionResult.SUCCESS;
+                    try {
+                        // Persist accepted sends before the service callback; its host can die meanwhile.
+                        if (sent) {
+                            setServiceActive(targetActive);
+                        } else if (receiptWritten.get() && !frameAttempted.get()) {
+                            clearUnattemptedWiperReceipt();
+                        }
+                    } finally {
+                        PENDING_WIPER_TOGGLES.decrementAndGet();
+                    }
                     if (!destroyed) {
                         timerHandler.post(
-                                () ->
-                                        finishWiperToggle(
-                                                targetActive,
-                                                label,
-                                                result == ApplyEngine.WakeActionResult.SUCCESS));
+                                () -> finishWiperToggle(targetActive, label, sent, frameAttempted.get()));
                     }
                 });
     }
 
-    private void finishWiperToggle(boolean targetActive, String label, boolean sent) {
+    private void finishWiperToggle(
+            boolean targetActive, String label, boolean sent, boolean frameAttempted) {
         if (destroyed) return;
         wiperTogglePending = false;
         if (sent) {
-            setServiceActive(targetActive);
-        } else {
-            Log.w(TAG, "wiper toggle failed/cancelled: " + label);
+            wiperState.onSent(targetActive);
+            evaluate("completion", false);
+            return;
         }
-        Boolean queued = queuedWiperTarget;
-        queuedWiperTarget = null;
-        if (queued != null && queued != isServiceActive()) {
-            requestServiceActive(queued, "wiper coalesced target " + queued);
+        wiperState.onFailed();
+        Log.w(TAG, "wiper toggle failed/cancelled: " + label + " attempted=" + frameAttempted);
+        if (!frameAttempted && wiperState.nextTarget() != null) {
+            // Only retry a suppressed frame. A failed toggle attempt has no reliable position feedback.
+            scheduleSafeRetry();
         }
+        stopIfIdle();
+    }
+
+    private void scheduleSafeRetry() {
+        timerHandler.removeCallbacks(retryWipers);
+        if (safeRetriesRemaining <= 0) return;
+        safeRetriesRemaining--;
+        timerHandler.postDelayed(retryWipers, WIPER_RETRY_MILLIS);
+    }
+
+    private void persistDoorCloseGuard() {
+        preferences.edit()
+                .putBoolean(PREF_WAIT_FOR_DOOR_CLOSE, wiperState.waitForDoorClose())
+                .apply();
+    }
+
+    private void stopIfIdle() {
+        if (!isServiceActive()
+                && !hasPendingWiperToggle()
+                && !isWiperEnabled()
+                && !isMediaPauseEnabled()
+                && !isMediaPlayEnabled()) stopSelf();
     }
 
     // -------------------------------------------------------------------------
@@ -641,11 +621,28 @@ public class WiperColdService extends Service {
         }
     }
 
+    private void persistWiperAttemptReceipt() {
+        // A restart between JNI and its result must not retry an already transmitted toggle.
+        if (!preferences.edit().putBoolean(PREF_POSITION_UNCERTAIN, true).commit()) {
+            throw new IllegalStateException("Cannot persist wiper position uncertainty before CAN");
+        }
+    }
+
+    private void clearUnattemptedWiperReceipt() {
+        if (!preferences.edit().putBoolean(PREF_POSITION_UNCERTAIN, false).commit()) {
+            wiperState.onFrameAttempted();
+            Log.w(TAG, "Cannot clear a cancelled wiper attempt receipt");
+        }
+    }
+
     private void setServiceActive(boolean active) {
-        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        if (!getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
                 .edit()
                 .putBoolean(PREF_SERVICE_ACTIVE, active)
-                .apply();
+                .putBoolean(PREF_POSITION_UNCERTAIN, false)
+                .commit()) {
+            Log.w(TAG, "Cannot persist accepted wiper service position=" + active);
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -657,6 +654,22 @@ public class WiperColdService extends Service {
         super.onCreate();
         Log.i(TAG, "onCreate() — WiperColdService, wiperServiceActive=" + isServiceActive());
         timerHandler = new Handler(Looper.getMainLooper());
+        preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        Map<String, ?> saved = preferences.getAll();
+        wiperState = new ColdWiperState(
+                Boolean.TRUE.equals(saved.get(PREF_SERVICE_ACTIVE)),
+                Boolean.TRUE.equals(saved.get(PREF_WAIT_FOR_DOOR_CLOSE)),
+                Boolean.TRUE.equals(saved.get(PREF_POSITION_UNCERTAIN)));
+        wiperState.setEnabled(isWiperEnabled());
+        preferenceListener = (changed, key) -> {
+            if (PREF_WIPER_ENABLED.equals(key)
+                    || PREF_SERVICE_ACTIVE.equals(key)
+                    || PREF_POSITION_UNCERTAIN.equals(key)) {
+                // SharedPreferences delivers listeners on main, before this sender's completion.
+                evaluate("preference " + key, PREF_WIPER_ENABLED.equals(key) || !wiperTogglePending);
+            }
+        };
+        preferences.registerOnSharedPreferenceChangeListener(preferenceListener);
 
         createNotificationChannel();
         Notification notification =
@@ -671,8 +684,8 @@ public class WiperColdService extends Service {
         mediaThread.start();
         mediaHandler = new Handler(mediaThread.getLooper());
 
-        VehicleStateControllers vehicleState = VehicleStateControllers.get(this);
-        gearStateSubscription = vehicleState.gear().subscribe(timerHandler, this::onGearState);
+        vehicleState = VehicleStateControllers.get(this);
+        gearStateSubscription = vehicleState.gear().subscribeState(timerHandler, this::onGearState);
         driverDoorSubscription =
                 vehicleState.driverDoor().subscribe(timerHandler, this::onDriverDoorState);
     }
@@ -681,9 +694,9 @@ public class WiperColdService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent != null ? intent.getAction() : null;
         Log.i(TAG, "onStartCommand() action=" + action);
-        if (ACTION_POWER_ON_RESET.equals(action)) {
-            timerHandler.post(this::onPowerOnReset);
-        }
+        vehicleState.requestGearSnapshot();
+        // Wake, sticky recreation and option changes reconcile the saved latch without toggling it off.
+        timerHandler.post(() -> evaluate("start " + action));
         return START_STICKY;
     }
 
@@ -696,6 +709,9 @@ public class WiperColdService extends Service {
     public void onDestroy() {
         Log.i(TAG, "onDestroy()");
         destroyed = true;
+        if (preferences != null && preferenceListener != null) {
+            preferences.unregisterOnSharedPreferenceChangeListener(preferenceListener);
+        }
         mediaPauseWorkGate.close();
         GearStateController.Subscription gearSubscription = gearStateSubscription;
         DriverDoorStateController.Subscription doorSubscription = driverDoorSubscription;

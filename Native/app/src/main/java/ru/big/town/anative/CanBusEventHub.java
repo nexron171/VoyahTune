@@ -1261,12 +1261,20 @@ final class CanBusEventHub {
         }
 
         void forgetLightStatus() {
+            forgetSignal(CanBusEvent.Kind.LIGHT_STATUS);
+        }
+
+        void forgetGearStatus() {
+            forgetSignal(CanBusEvent.Kind.GEAR);
+        }
+
+        private void forgetSignal(CanBusEvent.Kind kind) {
             CanBusEventRouter.Subscription current;
             synchronized (this) {
                 if (closed) return;
                 current = routed;
             }
-            if (current != null) current.forgetSignal(CanBusEvent.Kind.LIGHT_STATUS);
+            if (current != null) current.forgetSignal(kind);
         }
 
         @Override

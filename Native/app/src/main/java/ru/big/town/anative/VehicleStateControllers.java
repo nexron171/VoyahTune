@@ -98,6 +98,14 @@ final class VehicleStateControllers {
         return gearStateController;
     }
 
+    void requestGearSnapshot() {
+        stateHandler.post(() -> {
+            if (canBusSubscription == null) return;
+            canBusSubscription.forgetGearStatus();
+            canBusEventHub.requestGearSnapshot();
+        });
+    }
+
     DriverDoorStateController driverDoor() {
         return driverDoorStateController;
     }
@@ -127,6 +135,7 @@ final class VehicleStateControllers {
                 latestAmbientTemperature = NO_AMBIENT_TEMPERATURE;
                 latestDriveModeValue = -1;
                 canBusEventHub.requestDriverDoorSeed();
+                requestGearSnapshot();
                 if (modeFeedbackController != null) modeFeedbackController.onConnected();
                 break;
             case CONNECTION_LOST:
@@ -158,7 +167,13 @@ final class VehicleStateControllers {
                         ApplyEngine.scheduleNativeApply("gear Drive");
                     ApplyEngine.noteGear(event.first);
                 }
-                gearStateController.accept(event.first);
+                gearStateController.accept(
+                        event.first,
+                        event.origin == CanBusEvent.Origin.LIVE
+                                ? GearStateController.Source.LIVE
+                                : event.origin == CanBusEvent.Origin.SEED
+                                        ? GearStateController.Source.SNAPSHOT
+                                        : GearStateController.Source.REPLAY);
                 break;
             case VEHICLE_STATE:
                 if (event.first == ModeFeedbackDecoder.DRIVE_MODE_VSTATE_ID) {

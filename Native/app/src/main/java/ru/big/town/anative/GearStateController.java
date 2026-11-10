@@ -8,8 +8,32 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Typed, process-wide gear state source. It contains no CAN transport knowledge. */
 final class GearStateController {
+    enum Source {
+        LIVE,
+        SNAPSHOT,
+        REPLAY
+    }
+
+    static final class State {
+        final int value;
+        final Source source;
+
+        State(int value, Source source) {
+            this.value = value;
+            this.source = source;
+        }
+
+        boolean isFresh() {
+            return source != Source.REPLAY;
+        }
+    }
+
     interface Listener {
         void onGearChanged(int gearValue);
+    }
+
+    interface StateListener {
+        void onGearChanged(State state);
     }
 
     private final Handler serialHandler;
@@ -21,15 +45,25 @@ final class GearStateController {
     }
 
     Subscription subscribe(Handler deliveryHandler, Listener listener) {
+        if (listener == null) throw new IllegalArgumentException("listener required");
+        return subscribe(deliveryHandler, state -> listener.onGearChanged(state.value), false);
+    }
+
+    Subscription subscribeState(Handler deliveryHandler, StateListener listener) {
+        return subscribe(deliveryHandler, listener, true);
+    }
+
+    private Subscription subscribe(
+            Handler deliveryHandler, StateListener listener, boolean repeatFreshSamples) {
         if (deliveryHandler == null || listener == null) {
             throw new IllegalArgumentException("deliveryHandler/listener required");
         }
-        Registration registration = new Registration(deliveryHandler, listener);
+        Registration registration = new Registration(deliveryHandler, listener, repeatFreshSamples);
         serialHandler.post(() -> {
             if (!registration.active.get()) return;
             registrations.add(registration);
             int snapshot = currentGear;
-            if (snapshot >= 0) registration.deliver(snapshot);
+            if (snapshot >= 0) registration.deliver(new State(snapshot, Source.REPLAY));
         });
         return new Subscription(this, registration);
     }
@@ -42,10 +76,14 @@ final class GearStateController {
         currentGear = -1;
     }
 
-    void accept(int gearValue) {
-        if (gearValue < 0 || gearValue == currentGear) return;
+    void accept(int gearValue, Source source) {
+        if (gearValue < 0 || gearValue > 4) return;
+        boolean changed = gearValue != currentGear;
         currentGear = gearValue;
-        for (Registration registration : registrations) registration.deliver(gearValue);
+        State state = new State(gearValue, source);
+        for (Registration registration : registrations) {
+            if (changed || registration.repeatFreshSamples) registration.deliver(state);
+        }
     }
 
     private void remove(Registration registration) {
@@ -70,17 +108,19 @@ final class GearStateController {
 
     private static final class Registration {
         final Handler deliveryHandler;
-        final Listener listener;
+        final StateListener listener;
+        final boolean repeatFreshSamples;
         final AtomicBoolean active = new AtomicBoolean(true);
 
-        Registration(Handler deliveryHandler, Listener listener) {
+        Registration(Handler deliveryHandler, StateListener listener, boolean repeatFreshSamples) {
             this.deliveryHandler = deliveryHandler;
             this.listener = listener;
+            this.repeatFreshSamples = repeatFreshSamples;
         }
 
-        void deliver(int gearValue) {
+        void deliver(State state) {
             deliveryHandler.post(() -> {
-                if (active.get()) listener.onGearChanged(gearValue);
+                if (active.get()) listener.onGearChanged(state);
             });
         }
     }
