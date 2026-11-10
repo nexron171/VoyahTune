@@ -386,7 +386,8 @@ public class SetModesService extends Service {
                                     d.getInt("width", 0),
                                     d.getInt("height", 0),
                                     lDpi,
-                                    d.getSize(CarPlayWidgetProtocol.GRID_SIZE));
+                                    d.getSize(CarPlayWidgetProtocol.GRID_SIZE),
+                                    d.getBoolean("embeddedRestart", false));
                         } else if (d != null && d.getBoolean("embeddedTouch", false)) {
                             injectEmbeddedTouch(
                                     d.getString("widgetId", ""), d.getParcelable("event"));
@@ -1374,6 +1375,18 @@ public class SetModesService extends Service {
             int height,
             int dpi,
             Size gridSize) {
+        startEmbeddedDisplay(widgetId, packageName, surface, width, height, dpi, gridSize, false);
+    }
+
+    protected void startEmbeddedDisplay(
+            String widgetId,
+            String packageName,
+            Surface surface,
+            int width,
+            int height,
+            int dpi,
+            Size gridSize,
+            boolean restart) {
         if (CarPlayTarget.isCarPlay(packageName) && !CarPlayTarget.isEnabled(this)) return;
         if (widgetId == null
                 || widgetId.isEmpty()
@@ -1384,6 +1397,10 @@ public class SetModesService extends Service {
                 || width <= 0
                 || height <= 0) return;
         try {
+            if (restart && packageName.equals(embeddedPackages.get(widgetId))) {
+                WidgetSupport.stopApp(this, packageName);
+                releaseEmbeddedDisplay(widgetId);
+            }
             VirtualDisplay display = retainEmbeddedDisplay(widgetId, packageName, gridSize);
             if (display != null) {
                 boolean parked = embeddedParkedOutputs.containsKey(display);

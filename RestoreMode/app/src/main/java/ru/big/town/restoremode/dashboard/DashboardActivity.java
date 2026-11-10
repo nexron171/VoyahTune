@@ -92,6 +92,7 @@ import ru.big.town.restoremode.settings.core.SettingsSection;
 import ru.big.town.restoremode.trips.location.TripLocationPermission;
 import ru.big.town.restoremode.voice.commands.VoiceCommands;
 import ru.big.town.restoremode.widgets.apps.AppShortcutStore;
+import ru.big.town.restoremode.widgets.apps.AppWidgetDpiPreview;
 import ru.big.town.restoremode.widgets.apps.AppWidgetSessionStore;
 import ru.big.town.restoremode.widgets.apps.AppWidgetStore;
 import ru.big.town.restoremode.widgets.brightness.BrightnessWidgetDashboard;
@@ -319,6 +320,7 @@ public class DashboardActivity extends AppCompatActivity {
     // потому что экземпляр можно перенести в другой виджет, а после обмена — обновляются.
     private final Map<String, String> embeddedWidgetPackages = new HashMap<>();
     private final Map<String, Integer> embeddedWidgetDpi = new HashMap<>();
+    private final Map<String, AppWidgetDpiPreview> embeddedDpiPreviews = new HashMap<>();
     // Виджеты, экран которых снимается для переноса: их дисплей освобождать не нужно.
     private final Set<String> embeddedSuppressRelease = new HashSet<>();
     // View плиток app_widget по id записи: нужен, чтобы запустить приложение в первом виджете.
@@ -3649,6 +3651,7 @@ public class DashboardActivity extends AppCompatActivity {
                 });
         bindWindowAction(
                 widgetView, R.id.appWidgetSwap, view -> showSwapAppWidgetMenu(view, widgetId));
+        cancelAppWidgetDpiPreview(widgetId);
         bindWindowAction(
                 widgetView, R.id.appWidgetDpiPlus, view -> changeAppWidgetDpi(widgetId, 1));
         bindWindowAction(
@@ -3757,6 +3760,7 @@ public class DashboardActivity extends AppCompatActivity {
                     @Override
                     public boolean onSurfaceTextureDestroyed(SurfaceTexture texture) {
                         if (embeddedWidgetSurfaces.get(widgetId) != textureView) return true;
+                        cancelAppWidgetDpiPreview(widgetId);
                         embeddedWidgetSurfaces.remove(widgetId);
                         Surface output = embeddedWidgetOutputs.remove(widgetId);
                         if (output != null) {
@@ -3777,7 +3781,6 @@ public class DashboardActivity extends AppCompatActivity {
                 });
         View.OnTouchListener embeddedTouchListener =
                 new View.OnTouchListener() {
-                    private boolean handlingWindowHold;
                     private final GestureDetector holds =
                             new GestureDetector(
                                     DashboardActivity.this,
@@ -3786,11 +3789,6 @@ public class DashboardActivity extends AppCompatActivity {
                                         public void onLongPress(MotionEvent event) {
                                             if (embeddedWidgetSurfaces.get(widgetId) != textureView)
                                                 return;
-                                            handlingWindowHold = true;
-                                            MotionEvent cancel = MotionEvent.obtain(event);
-                                            cancel.setAction(MotionEvent.ACTION_CANCEL);
-                                            sendEmbeddedTouch(widgetId, cancel);
-                                            cancel.recycle();
                                             textureView.performLongClick();
                                         }
                                     });
@@ -3798,9 +3796,6 @@ public class DashboardActivity extends AppCompatActivity {
                     @Override
                     public boolean onTouch(View view, MotionEvent event) {
                         int action = event.getActionMasked();
-                        if (action == MotionEvent.ACTION_DOWN) {
-                            handlingWindowHold = false;
-                        }
                         holds.onTouchEvent(event);
                         boolean finished =
                                 action == MotionEvent.ACTION_UP
@@ -3813,9 +3808,7 @@ public class DashboardActivity extends AppCompatActivity {
                             }
                         }
                         view.getParent().requestDisallowInterceptTouchEvent(!finished);
-                        if (!handlingWindowHold) {
-                            sendEmbeddedTouch(widgetId, event);
-                        }
+                        sendEmbeddedTouch(widgetId, event);
                         return true;
                     }
                 };
@@ -3834,29 +3827,33 @@ public class DashboardActivity extends AppCompatActivity {
         return dpi == null ? 0 : dpi;
     }
 
-    /** Изменить DPI запущенного в виджете приложения на соседнее значение из списка. */
     private void changeAppWidgetDpi(String widgetId, int direction) {
+        View widget = appWidgetTileViews.get(widgetId);
+        if (widget == null || !embeddedWidgetPackages.containsKey(widgetId)) return;
+        AppWidgetDpiPreview preview = embeddedDpiPreviews.get(widgetId);
+        if (preview == null) {
+            preview =
+                    new AppWidgetDpiPreview(
+                            uiHandler,
+                            widget.findViewById(R.id.appWidgetDpiPreview),
+                            runningDpi(widgetId),
+                            value -> applyAppWidgetDpi(widgetId, value));
+            embeddedDpiPreviews.put(widgetId, preview);
+        }
+        preview.change(direction);
+        showWindowControls(widget, true);
+        revealWindowControls(widget);
+    }
+
+    private void cancelAppWidgetDpiPreview(String widgetId) {
+        AppWidgetDpiPreview preview = embeddedDpiPreviews.remove(widgetId);
+        if (preview != null) preview.close();
+    }
+
+    private void applyAppWidgetDpi(String widgetId, int value) {
         String runningPackage = embeddedWidgetPackages.get(widgetId);
-        if (runningPackage == null || runningPackage.isEmpty()) {
-            return;
-        }
         AppWidgetStore.Entry entry = AppWidgetStore.find(sharedPreferences, widgetId);
-        if (entry == null) {
-            return;
-        }
-        int current = AppWidgetStore.normalizeDpi(runningDpi(widgetId));
-        int index = 0;
-        for (int i = 0; i < AppWidgetStore.DPI_VALUES.length; i++) {
-            if (AppWidgetStore.DPI_VALUES[i] == current) {
-                index = i;
-                break;
-            }
-        }
-        int next = Math.max(0, Math.min(AppWidgetStore.DPI_VALUES.length - 1, index + direction));
-        if (next == index) {
-            return;
-        }
-        int value = AppWidgetStore.DPI_VALUES[next];
+        if (runningPackage == null || entry == null || runningDpi(widgetId) == value) return;
 
         // A swap/move keeps widget configuration intact. Update only this package's profile;
         // a temporarily hosted app uses the per-app setting when launched here again.
@@ -3866,8 +3863,10 @@ public class DashboardActivity extends AppCompatActivity {
             AppDpiStore.set(settingsPreferences, runningPackage, value);
         }
 
-        // Переподключаем поверхность: Native пересчитывает плотность дисплея по новому DPI.
+        // Native restarts the embedded app after a committed DPI selection.
         embeddedWidgetDpi.put(widgetId, value);
+        AppWidgetSessionStore.saveLaunch(
+                sharedPreferences, currentWidgetSessionId(), widgetId, runningPackage, value);
         Surface output = embeddedWidgetOutputs.get(widgetId);
         if (output != null) {
             sendEmbeddedSurface(
@@ -3876,9 +3875,9 @@ public class DashboardActivity extends AppCompatActivity {
                     value,
                     output,
                     embeddedPixelWidth(widgetId),
-                    embeddedPixelHeight(widgetId));
+                    embeddedPixelHeight(widgetId),
+                    true);
         }
-        showSnack(value == 0 ? "DPI: Авто" : "DPI: " + value);
     }
 
     private void releaseEmbeddedWidget(String widgetId, View widgetView) {
@@ -3897,6 +3896,7 @@ public class DashboardActivity extends AppCompatActivity {
 
     /** Убрать TextureView виджета и вернуть его лончер; очистить карты запущенного состояния. */
     private void removeEmbeddedSurface(String widgetId, View widgetView) {
+        cancelAppWidgetDpiPreview(widgetId);
         if (windowControlsTile == widgetView) {
             dismissWindowControls();
         }
@@ -4125,6 +4125,8 @@ public class DashboardActivity extends AppCompatActivity {
             showSnack("CarPlay нельзя обменять между экранами");
             return;
         }
+        cancelAppWidgetDpiPreview(idA);
+        other.cancelAppWidgetDpiPreview(idB);
         int dpiA = runningDpi(idA);
         int dpiB = other.runningDpi(idB);
         sendEmbeddedSwap(
@@ -4188,6 +4190,8 @@ public class DashboardActivity extends AppCompatActivity {
             showSnack("Для обмена нужны запущенные приложения в обоих виджетах");
             return;
         }
+        cancelAppWidgetDpiPreview(idA);
+        cancelAppWidgetDpiPreview(idB);
         sendEmbeddedSwap(idA, idB);
         embeddedWidgetPackages.put(idA, packageB);
         embeddedWidgetPackages.put(idB, packageA);
@@ -4245,6 +4249,17 @@ public class DashboardActivity extends AppCompatActivity {
             Surface surface,
             int width,
             int height) {
+        sendEmbeddedSurface(entry, pkg, dpi, surface, width, height, false);
+    }
+
+    private void sendEmbeddedSurface(
+            AppWidgetStore.Entry entry,
+            String pkg,
+            int dpi,
+            Surface surface,
+            int width,
+            int height,
+            boolean restart) {
         String widgetId = entry.id;
         if (!GlobalVars.isBound || GlobalVars.serviceMessenger == null || surface == null) {
             return;
@@ -4258,6 +4273,7 @@ public class DashboardActivity extends AppCompatActivity {
             data.putString("left", pkg);
             data.putString("widgetId", widgetId);
             data.putBoolean("embeddedSurface", true);
+            data.putBoolean("embeddedRestart", restart);
             int[] size = getAppWidgetDimensions(entry);
             data.putSize(CarPlayWidgetProtocol.GRID_SIZE, new Size(size[0], size[1]));
             data.putParcelable("surface", surface);
@@ -4443,6 +4459,9 @@ public class DashboardActivity extends AppCompatActivity {
     }
 
     private void detachEmbeddedSurfaces() {
+        for (String widgetId : new ArrayList<>(embeddedDpiPreviews.keySet())) {
+            cancelAppWidgetDpiPreview(widgetId);
+        }
         dismissWindowControls();
         for (String widgetId : new ArrayList<>(embeddedWidgetSurfaces.keySet())) {
             sendEmbeddedDetach(widgetId);

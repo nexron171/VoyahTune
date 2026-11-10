@@ -66,6 +66,18 @@
         android:textStyle="bold"
         android:visibility="gone" />
 
+    <TextView
+        android:id="@+id/appWidgetDpiPreview"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#B3000000"
+        android:clickable="true"
+        android:gravity="center"
+        android:textColor="#FFFFFF"
+        android:textSize="64sp"
+        android:textStyle="bold"
+        android:visibility="gone" />
+
     <LinearLayout
         android:id="@+id/appWidgetOverlayControls"
         android:layout_width="wrap_content"

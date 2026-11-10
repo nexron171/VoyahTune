@@ -21,6 +21,7 @@ import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.widget.Button;
+import android.widget.TextView;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -53,7 +54,7 @@ public class DashboardEditModeTest {
         app.width = 4;
         AppWidgetStore.addProfile(app, "another.profile", 200);
         AppWidgetStore.update(prefs, app);
-        bindNativeService();
+        List<Bundle> requests = bindNativeService();
         ActivityController<MainActivity> controller =
                 Robolectric.buildActivity(MainActivity.class).setup();
         try {
@@ -163,15 +164,29 @@ public class DashboardEditModeTest {
             holdWidget(grid, appTile);
             assertFalse(grid.isEditing());
             assertEquals(View.VISIBLE, controls.getVisibility());
+            shadowOf(Looper.getMainLooper()).idle();
+            List<Integer> touchActions = new ArrayList<>();
+            for (Bundle request : requests) {
+                if (request.getBoolean("embeddedTouch")) {
+                    MotionEvent event = request.getParcelable("event");
+                    touchActions.add(event.getActionMasked());
+                }
+            }
+            assertEquals(List.of(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP), touchActions);
             layout(grid);
             int originalDpi = AppWidgetStore.find(prefs, app.id).selected().dpi;
             shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2));
             tapControl(grid, appTile.findViewById(R.id.appWidgetDpiPlus));
-            assertTrue(AppWidgetStore.find(prefs, app.id).selected().dpi > originalDpi);
+            assertEquals(originalDpi, AppWidgetStore.find(prefs, app.id).selected().dpi);
+            TextView preview = appTile.findViewById(R.id.appWidgetDpiPreview);
+            assertEquals(View.VISIBLE, preview.getVisibility());
+            assertTrue(preview.getText().toString().contains("DPI"));
             shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2));
             assertEquals(View.VISIBLE, controls.getVisibility());
             shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(1));
             assertEquals(View.GONE, controls.getVisibility());
+            assertEquals(View.GONE, preview.getVisibility());
+            assertTrue(AppWidgetStore.find(prefs, app.id).selected().dpi > originalDpi);
 
             holdWidget(grid, appTile);
             layout(grid);
@@ -282,6 +297,56 @@ public class DashboardEditModeTest {
             assertEquals(
                     window.getHeight() - window.getPaddingTop() - window.getPaddingBottom(),
                     attached.getInt("height"));
+        }
+    }
+
+    @Test
+    public void dpiSelectionResendsSurfaceOnceAndClosingCancelsTheNextSelection() {
+        Context context = RuntimeEnvironment.getApplication();
+        SharedPreferences preferences = context.getSharedPreferences("DrivePreferences", 0);
+        AppWidgetStore.Entry app = AppWidgetStore.add(preferences, context.getPackageName(), "");
+        app.width = 4;
+        app.selected().dpi = 200;
+        AppWidgetStore.update(preferences, app);
+        List<Bundle> requests = bindNativeService();
+        try (ActivityController<MainActivity> controller =
+                Robolectric.buildActivity(MainActivity.class).setup()) {
+            DashboardEditGrid grid = controller.get().findViewById(R.id.splitTilesGrid);
+            shadowOf(Looper.getMainLooper()).idle();
+            layout(grid);
+            View window = tile(grid, "appWidget:" + app.id);
+            ((ViewGroup) window.findViewById(R.id.appWidgetList)).getChildAt(0).performClick();
+            attachSurface(grid, window);
+            requests.clear();
+
+            holdWidget(grid, window);
+            shadowOf(Looper.getMainLooper()).idle();
+            requests.clear();
+            View increaseDpi = window.findViewById(R.id.appWidgetDpiPlus);
+            increaseDpi.performClick();
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2));
+            increaseDpi.performClick();
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(2999));
+            assertEquals(200, AppWidgetStore.find(preferences, app.id).selected().dpi);
+            assertTrue(requests.isEmpty());
+            TextView preview = window.findViewById(R.id.appWidgetDpiPreview);
+            assertEquals("DPI: 240", preview.getText().toString());
+            assertEquals(View.VISIBLE, preview.getVisibility());
+
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1));
+            assertEquals(240, AppWidgetStore.find(preferences, app.id).selected().dpi);
+            assertEquals(1, requests.size());
+            assertTrue(requests.get(0).getBoolean("embeddedSurface"));
+            assertEquals(240, requests.get(0).getInt("leftDpi"));
+            assertTrue(requests.get(0).getBoolean("embeddedRestart"));
+            assertEquals(View.GONE, preview.getVisibility());
+
+            increaseDpi.performClick();
+            window.findViewById(R.id.appWidgetClose).performClick();
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(3));
+            assertEquals(240, AppWidgetStore.find(preferences, app.id).selected().dpi);
+            assertEquals(1, requests.size());
+            assertEquals(View.GONE, preview.getVisibility());
         }
     }
 
