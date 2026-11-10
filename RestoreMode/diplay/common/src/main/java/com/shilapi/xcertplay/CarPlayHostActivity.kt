@@ -2258,7 +2258,10 @@ class CarPlayHostActivity : ComponentActivity() {
         closePicturePanel()
         // The controller, USB/iAP2 link, and VPN attachment intentionally outlive the UI.
         isActivityStarted = false
-        if (VoyahCarPlayIntegration.available) mainHandler.removeCallbacks(applyDisplaySize)
+        if (VoyahCarPlayIntegration.available) {
+            mainHandler.removeCallbacks(applyDisplaySize)
+            pendingDisplaySize = null
+        }
         logThemeState(ThemeModeDiagnostics.Source.STOP, resources.configuration)
         mainHandler.removeCallbacks(pollConfiguration)
         super.onStop()
@@ -6927,6 +6930,10 @@ class CarPlayHostActivity : ComponentActivity() {
             snapshot.display,
         ) { completion ->
             runOnUiThread {
+                if (!CarPlayBackgroundSession.isOwner(this) || controller !== snapshot.controller) {
+                    completion()
+                    return@runOnUiThread
+                }
                 shutdown(false, "DiPlay disconnect", completion)
                 finishAndRemoveTask()
             }
@@ -7127,6 +7134,10 @@ class CarPlayHostActivity : ComponentActivity() {
         CarPlayBackgroundSession.store(next, renderer, size.width, size.height, this, display) {
             completion ->
             runOnUiThread {
+                if (!CarPlayBackgroundSession.isOwner(this) || controller !== next) {
+                    completion()
+                    return@runOnUiThread
+                }
                 shutdown(
                     terminateProcess = false,
                     reason = "DiPlay disconnect",
@@ -7227,6 +7238,7 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun scheduleDisplaySize(width: Int, height: Int) {
         if (width <= 0 || height <= 0 || shuttingDown.get()) return
+        if (VoyahCarPlayIntegration.available && !isActivityStarted && controller != null) return
         val size = DisplaySize(width, height)
         if (size == pendingDisplaySize) return
         mainHandler.removeCallbacks(applyDisplaySize)
@@ -7738,21 +7750,28 @@ class CarPlayHostActivity : ComponentActivity() {
         val diagnosticLog = sessionLog
         teardownExecutor.execute {
             val started = System.nanoTime()
-            oldController?.close()
-            val completed = oldController?.awaitClosed(CONTROLLER_CLOSE_TIMEOUT_MILLIS) ?: true
+            val completed = closeSessionResources(oldController, oldSink)
             AsyncDiagnosticLog.append(
                 diagnosticLog,
                 "${CarPlayController.CONNECTION_DIAGNOSTIC_PREFIX} generation=$generation " +
                     "restart teardownWaitCompleted=$completed " +
                     "elapsedMs=${((System.nanoTime() - started) / 1_000_000L).coerceAtLeast(0)}",
             )
-            oldSink?.let(::closeRetiringSink)
             runOnUiThread {
-                if (!shuttingDown.get() && generation == restartGeneration) {
+                if (!shuttingDown.get() && generation == restartGeneration &&
+                    CarPlayBackgroundSession.isOwner(this)) {
                     handshakeResetInProgress = false
-                    // The display can rotate again while the old stack is closing. Use the
-                    // latest accepted size, and wait for any pending resize to settle first.
-                    maybeStartCarPlay()
+                    if (isDestroyed || isFinishing) {
+                        // A new host can resume recovery after this retired owner's teardown.
+                        if (CarPlayBackgroundSession.releaseRecoveryOwner(this)) {
+                            stopSessionServiceIfIdle()
+                            airPlayCommandExecutor.shutdown()
+                            teardownExecutor.shutdown()
+                        }
+                    } else {
+                        // The display may change while teardown waits; use its latest accepted size.
+                        maybeStartCarPlay()
+                    }
                 }
             }
         }
@@ -7767,6 +7786,25 @@ class CarPlayHostActivity : ComponentActivity() {
                 .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
             ::appendLog,
         )
+    }
+
+    private fun closeSessionResources(
+        oldController: CarPlayController?,
+        oldSink: AndroidMediaSink?,
+    ): Boolean {
+        val completed = try {
+            oldController?.close()
+            oldController?.awaitClosed(CONTROLLER_CLOSE_TIMEOUT_MILLIS) ?: true
+        } catch (failure: RuntimeException) {
+            Log.w(TAG, "CarPlay controller teardown failed", failure)
+            false
+        }
+        try {
+            oldSink?.let(::closeRetiringSink)
+        } catch (failure: RuntimeException) {
+            Log.w(TAG, "CarPlay media teardown failed", failure)
+        }
+        return completed
     }
 
     /**
@@ -8002,9 +8040,7 @@ class CarPlayHostActivity : ComponentActivity() {
         discardLastPicture()
         Log.i(TAG, "shutdown reason=$reason terminateProcess=$terminateProcess")
         teardownExecutor.execute {
-            oldController?.close()
-            val clean = oldController?.awaitClosed(CONTROLLER_CLOSE_TIMEOUT_MILLIS) ?: true
-            oldSink?.let(::closeRetiringSink)
+            val clean = closeSessionResources(oldController, oldSink)
             airPlayCommandExecutor.shutdown()
             if (terminateProcess) {
                 applicationContext.stopService(
@@ -8012,12 +8048,20 @@ class CarPlayHostActivity : ComponentActivity() {
                 )
             }
             Log.i(TAG, "shutdown complete clean=$clean")
+            teardownExecutor.shutdown()
+            mainHandler.post {
+                stopSessionServiceIfIdle()
+                completion()
+            }
+            if (terminateProcess) Process.killProcess(Process.myPid())
+        }
+    }
+
+    private fun stopSessionServiceIfIdle() {
+        if (!CarPlayBackgroundSession.hasSession()) {
             applicationContext.stopService(
                 Intent(applicationContext, DiPlaySessionService::class.java)
             )
-            teardownExecutor.shutdown()
-            mainHandler.post { completion() }
-            if (terminateProcess) Process.killProcess(Process.myPid())
         }
     }
 
@@ -8966,6 +9010,9 @@ internal object CarPlayBackgroundSession {
             if (action != null) {
                 stopping = true
                 stopWaiters.add(completion)
+            } else if (owner == null && controller == null && sink == null) {
+                // End an idle recovery before a later host claims its own connection window.
+                clear()
             }
         }
         if (action == null) {
@@ -9036,6 +9083,14 @@ internal object CarPlayBackgroundSession {
         this.display = display
         this.ownerDisplayId =
             (owner as? android.app.Activity)?.windowManager?.defaultDisplay?.displayId
+    }
+
+    @Synchronized
+    fun releaseRecoveryOwner(expectedOwner: Any): Boolean {
+        if (owner !== expectedOwner || controller != null || sink != null || stopping) return false
+        stopAction = null
+        owner = null
+        return true
     }
 
     @Synchronized
