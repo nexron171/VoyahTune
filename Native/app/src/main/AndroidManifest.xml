@@ -5,6 +5,8 @@
     <!-- Native is installed in /system/priv-app with its permission whitelist; these
          protected permissions are intentional and checked by the installer. -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- Playback identity and TTS origin tags are hidden without privileged routing access. -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_ROUTING" tools:ignore="ProtectedPermissions" />
     <!-- Чтение метаданных ЛЮБОЙ активной медиа-сессии (сторонние плееры) через MediaSessionManager.
          signature|privileged → нужен privapp-whitelist (см. privapp-permissions-ru.big.town.anative.xml). -->
     <uses-permission android:name="android.permission.MEDIA_CONTENT_CONTROL" tools:ignore="ProtectedPermissions" />
@@ -135,6 +137,7 @@
 
     <application
         android:name=".Anative"
+        android:usesNonSdkApi="true"
         android:allowBackup="true"
         android:appCategory="audio"
         android:forceQueryable="true"

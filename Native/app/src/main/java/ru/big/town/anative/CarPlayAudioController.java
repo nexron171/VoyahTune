@@ -11,11 +11,11 @@ import android.os.Messenger;
 import android.os.RemoteException;
 import android.util.Log;
 
+import ru.big.town.common.CarPlayAudioProtocol;
+
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.util.Arrays;
-
-import ru.big.town.common.CarPlayAudioProtocol;
 
 /** One OEM worker; reading or setting volume does not acquire playback focus. */
 final class CarPlayAudioController {
@@ -25,6 +25,7 @@ final class CarPlayAudioController {
     private final Context context;
     private final HandlerThread thread = new HandlerThread(TAG);
     private final Handler worker;
+    private final NavigationMediaDucking mediaDucking;
     private volatile int wanted = CarPlayAudioProtocol.NONE;
     private volatile boolean closing;
     private OemAudio api;
@@ -32,14 +33,18 @@ final class CarPlayAudioController {
     private boolean ownsRequest;
     private final Runnable retry = this::applyFocus;
 
-    CarPlayAudioController(Context context) {
+    CarPlayAudioController(Context context, NavigationMediaDucking mediaDucking) {
         this.context = context.getApplicationContext();
+        this.mediaDucking = mediaDucking;
         thread.start();
         worker = new Handler(thread.getLooper());
     }
 
     void setFocus(int stream) {
-        if (closing || (stream != CarPlayAudioProtocol.NONE && !CarPlayAudioProtocol.validStream(stream))) return;
+        if (closing
+                || (stream != CarPlayAudioProtocol.NONE
+                        && !CarPlayAudioProtocol.validStream(stream))) return;
+        mediaDucking.setNavigationActive(CLIENT, stream == CarPlayAudioProtocol.NAVIGATION);
         wanted = stream;
         worker.post(this::applyFocus);
     }
@@ -49,36 +54,49 @@ final class CarPlayAudioController {
         Messenger reply = message.replyTo;
         Bundle data = new Bundle(message.getData());
         boolean write = message.what == CarPlayAudioProtocol.SET;
-        worker.post(() -> {
-            int[] streams = CarPlayAudioProtocol.streams();
-            int[] levels = new int[streams.length], maxima = new int[streams.length];
-            Arrays.fill(levels, -1);
-            Arrays.fill(maxima, -1);
-            try {
-                if (closing) return;
-                OemAudio target = api();
-                if (write) {
-                    int stream = data.getInt(CarPlayAudioProtocol.STREAM, -1);
-                    if (!CarPlayAudioProtocol.validStream(stream)) throw new IllegalArgumentException("Invalid stream");
-                    int level = CarPlayAudioPolicy.clampVolume(data.getInt(CarPlayAudioProtocol.LEVEL, -1), target.maximum(stream));
-                    target.setVolume(stream, level);
-                }
-                for (int i = 0; i < streams.length; i++) {
-                    int max = target.maximum(streams[i]), level = target.volume(streams[i]);
-                    if (max > 0 && level >= 0 && level <= max) { maxima[i] = max; levels[i] = level; }
-                }
-            } catch (Exception | LinkageError error) {
-                Log.w(TAG, "OEM volume unavailable", error);
-                if (api != null && !api.alive()) api = null;
-            }
-            Message result = Message.obtain(null, CarPlayAudioProtocol.VALUES);
-            Bundle values = new Bundle();
-            values.putLong(CarPlayAudioProtocol.REQUEST, data.getLong(CarPlayAudioProtocol.REQUEST));
-            values.putIntArray(CarPlayAudioProtocol.LEVELS, levels);
-            values.putIntArray(CarPlayAudioProtocol.MAXIMA, maxima);
-            result.setData(values);
-            try { reply.send(result); } catch (RemoteException ignored) {}
-        });
+        worker.post(
+                () -> {
+                    int[] streams = CarPlayAudioProtocol.streams();
+                    int[] levels = new int[streams.length], maxima = new int[streams.length];
+                    Arrays.fill(levels, -1);
+                    Arrays.fill(maxima, -1);
+                    try {
+                        if (closing) return;
+                        OemAudio target = api();
+                        if (write) {
+                            int stream = data.getInt(CarPlayAudioProtocol.STREAM, -1);
+                            if (!CarPlayAudioProtocol.validStream(stream))
+                                throw new IllegalArgumentException("Invalid stream");
+                            int level =
+                                    CarPlayAudioPolicy.clampVolume(
+                                            data.getInt(CarPlayAudioProtocol.LEVEL, -1),
+                                            target.maximum(stream));
+                            target.setVolume(stream, level);
+                        }
+                        for (int i = 0; i < streams.length; i++) {
+                            int max = target.maximum(streams[i]), level = target.volume(streams[i]);
+                            if (max > 0 && level >= 0 && level <= max) {
+                                maxima[i] = max;
+                                levels[i] = level;
+                            }
+                        }
+                    } catch (Exception | LinkageError error) {
+                        Log.w(TAG, "OEM volume unavailable", error);
+                        if (api != null && !api.alive()) api = null;
+                    }
+                    Message result = Message.obtain(null, CarPlayAudioProtocol.VALUES);
+                    Bundle values = new Bundle();
+                    values.putLong(
+                            CarPlayAudioProtocol.REQUEST,
+                            data.getLong(CarPlayAudioProtocol.REQUEST));
+                    values.putIntArray(CarPlayAudioProtocol.LEVELS, levels);
+                    values.putIntArray(CarPlayAudioProtocol.MAXIMA, maxima);
+                    result.setData(values);
+                    try {
+                        reply.send(result);
+                    } catch (RemoteException ignored) {
+                    }
+                });
     }
 
     private OemAudio api() throws Exception {
@@ -92,8 +110,9 @@ final class CarPlayAudioController {
     private void applyFocus() {
         worker.removeCallbacks(retry);
         int next = wanted;
-        if (next == applied && (api == null || api.alive()) &&
-                (next != CarPlayAudioProtocol.NONE || !ownsRequest)) return;
+        if (next == applied
+                && (api == null || api.alive())
+                && (next != CarPlayAudioProtocol.NONE || !ownsRequest)) return;
         try {
             if (ownsRequest) {
                 api().abandon();
@@ -103,26 +122,36 @@ final class CarPlayAudioController {
             if (next == CarPlayAudioProtocol.NONE || closing) return;
             // Android media focus already resolves to OEM stream 3. Keep its MediaSession
             // owner, including play/pause while the iPhone is paused.
-            if (next == CarPlayAudioProtocol.MEDIA) { applied = next; return; }
+            if (next == CarPlayAudioProtocol.MEDIA) {
+                applied = next;
+                return;
+            }
             OemAudio target = api();
             ownsRequest = true;
             int result = target.request(CarPlayAudioPolicy.forStream(next));
             if (result == 1) applied = next;
+            else worker.postDelayed(retry, 500);
             Log.i(TAG, "OEM focus stream=" + next + " granted=" + result);
         } catch (Exception | LinkageError error) {
             Log.w(TAG, "OEM audio focus unavailable", error);
             api = null;
             applied = CarPlayAudioProtocol.NONE;
-            if (!closing && (wanted != CarPlayAudioProtocol.NONE || ownsRequest)) worker.postDelayed(retry, 5000);
+            if (!closing && (wanted != CarPlayAudioProtocol.NONE || ownsRequest))
+                worker.postDelayed(retry, 5000);
         }
         if (wanted != next && !closing) worker.post(this::applyFocus);
     }
 
     void destroy() {
         closing = true;
+        mediaDucking.setNavigationActive(CLIENT, false);
         wanted = CarPlayAudioProtocol.NONE;
         worker.removeCallbacks(retry);
-        worker.post(() -> { applyFocus(); thread.quitSafely(); });
+        worker.post(
+                () -> {
+                    applyFocus();
+                    thread.quitSafely();
+                });
     }
 
     /** Load the installed OEM SDK and its Binder proxy; never copy transaction numbers. */
@@ -134,54 +163,123 @@ final class CarPlayAudioController {
         OemAudio(Context context) throws Exception {
             Class<?> managerClass = sdkClass(context);
             ClassLoader loader = managerClass.getClassLoader();
-            binder = (IBinder) loader.loadClass("com.qinggan.os.ServiceManager")
-                    .getMethod("getService", String.class).invoke(null, "qg.audio_policy");
-            if (binder == null || !binder.isBinderAlive() ||
-                    !"com.qinggan.audiopolicy.IAudioPolicyService".equals(binder.getInterfaceDescriptor()))
+            binder =
+                    (IBinder)
+                            loader.loadClass("com.qinggan.os.ServiceManager")
+                                    .getMethod("getService", String.class)
+                                    .invoke(null, "qg.audio_policy");
+            if (binder == null
+                    || !binder.isBinderAlive()
+                    || !"com.qinggan.audiopolicy.IAudioPolicyService"
+                            .equals(binder.getInterfaceDescriptor()))
                 throw new IllegalStateException("OEM audio service unavailable");
             Class<?> serviceClass = loader.loadClass("com.qinggan.audiopolicy.IAudioPolicyService");
-            service = loader.loadClass("com.qinggan.audiopolicy.IAudioPolicyService$Stub")
-                    .getMethod("asInterface", IBinder.class).invoke(null, binder);
+            service =
+                    loader.loadClass("com.qinggan.audiopolicy.IAudioPolicyService$Stub")
+                            .getMethod("asInterface", IBinder.class)
+                            .invoke(null, binder);
             getVolume = serviceClass.getMethod("getStreamVolume", int.class, String.class);
             getMaximum = serviceClass.getMethod("getStreamMaxVolume", int.class);
-            setVolume = serviceClass.getMethod("setStreamVolume", int.class, int.class, int.class, String.class);
-            Class<?> init = loader.loadClass("com.qinggan.audiopolicy.AudioPolicyManager$OnInitListener");
-            manager = managerClass.getMethod("getInstance", Context.class, init).invoke(null, context, null);
+            setVolume =
+                    serviceClass.getMethod(
+                            "setStreamVolume", int.class, int.class, int.class, String.class);
+            Class<?> init =
+                    loader.loadClass("com.qinggan.audiopolicy.AudioPolicyManager$OnInitListener");
+            manager =
+                    managerClass
+                            .getMethod("getInstance", Context.class, init)
+                            .invoke(null, context, null);
             if (manager == null) throw new IllegalStateException("OEM audio manager unavailable");
-            Class<?> policy = loader.loadClass("com.qinggan.audiopolicy.AudioPolicyManager$OnAudioPolicyListener");
-            listener = Proxy.newProxyInstance(loader, new Class<?>[] {policy}, (proxy, method, args) -> {
-                if (method.getDeclaringClass() == Object.class) {
-                    if ("hashCode".equals(method.getName())) return System.identityHashCode(proxy);
-                    if ("equals".equals(method.getName())) return proxy == args[0];
-                    return CLIENT;
-                }
-                Log.d(TAG, "OEM focus callback=" + method.getName());
-                return false; // Playback is controlled by the sink's Android focus listener.
-            });
-            request = managerClass.getMethod("requestAudioFocus", String.class, policy,
-                    int.class, int.class, String.class, int.class, int.class);
-            abandon = managerClass.getMethod("abandonAudioFocus", policy, String.class, String.class, boolean.class);
+            Class<?> policy =
+                    loader.loadClass(
+                            "com.qinggan.audiopolicy.AudioPolicyManager$OnAudioPolicyListener");
+            listener =
+                    Proxy.newProxyInstance(
+                            loader,
+                            new Class<?>[] {policy},
+                            (proxy, method, args) -> {
+                                if (method.getDeclaringClass() == Object.class) {
+                                    if ("hashCode".equals(method.getName()))
+                                        return System.identityHashCode(proxy);
+                                    if ("equals".equals(method.getName())) return proxy == args[0];
+                                    return CLIENT;
+                                }
+                                Log.d(TAG, "OEM focus callback=" + method.getName());
+                                return false; // Playback is controlled by the sink's Android focus
+                                              // listener.
+                            });
+            request =
+                    managerClass.getMethod(
+                            "requestAudioFocus",
+                            String.class,
+                            policy,
+                            int.class,
+                            int.class,
+                            String.class,
+                            int.class,
+                            int.class);
+            abandon =
+                    managerClass.getMethod(
+                            "abandonAudioFocus", policy, String.class, String.class, boolean.class);
         }
-        boolean alive() { return binder.isBinderAlive(); }
-        int maximum(int stream) throws Exception { return (Integer) getMaximum.invoke(service, stream); }
-        int volume(int stream) throws Exception { return (Integer) getVolume.invoke(service, stream, OWNER_PACKAGE); }
-        void setVolume(int stream, int level) throws Exception { setVolume.invoke(service, stream, level, 0, OWNER_PACKAGE); }
+
+        boolean alive() {
+            return binder.isBinderAlive();
+        }
+
+        int maximum(int stream) throws Exception {
+            return (Integer) getMaximum.invoke(service, stream);
+        }
+
+        int volume(int stream) throws Exception {
+            return (Integer) getVolume.invoke(service, stream, OWNER_PACKAGE);
+        }
+
+        void setVolume(int stream, int level) throws Exception {
+            setVolume.invoke(service, stream, level, 0, OWNER_PACKAGE);
+        }
+
         int request(CarPlayAudioPolicy attributes) throws Exception {
-            return (Integer) request.invoke(manager, CLIENT, listener, attributes.usage, attributes.content,
-                    OWNER_PACKAGE, attributes.gain, 0);
+            return (Integer)
+                    request.invoke(
+                            manager,
+                            CLIENT,
+                            listener,
+                            attributes.usage,
+                            attributes.content,
+                            OWNER_PACKAGE,
+                            attributes.gain,
+                            0);
         }
-        void abandon() throws Exception { abandon.invoke(manager, listener, CLIENT, OWNER_PACKAGE, true); }
+
+        void abandon() throws Exception {
+            abandon.invoke(manager, listener, CLIENT, OWNER_PACKAGE, true);
+        }
+
         private static Class<?> sdkClass(Context context) throws Exception {
             String name = "com.qinggan.audiopolicy.AudioPolicyManager";
-            try { return Class.forName(name); } catch (ClassNotFoundException absent) {
-                for (String pkg : new String[] {"com.qinggan.audiopolicy.service", "com.qinggan.app.setting"}) {
+            try {
+                return Class.forName(name);
+            } catch (ClassNotFoundException absent) {
+                for (String pkg :
+                        new String[] {
+                            "com.qinggan.audiopolicy.service", "com.qinggan.app.setting"
+                        }) {
                     ApplicationInfo app = context.getPackageManager().getApplicationInfo(pkg, 0);
-                    if ((app.flags & (ApplicationInfo.FLAG_SYSTEM | ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)) == 0)
+                    if ((app.flags
+                                    & (ApplicationInfo.FLAG_SYSTEM
+                                            | ApplicationInfo.FLAG_UPDATED_SYSTEM_APP))
+                            == 0)
                         throw new IllegalStateException("OEM SDK must be a system package");
                     try {
-                        return context.createPackageContext(pkg, Context.CONTEXT_INCLUDE_CODE | Context.CONTEXT_IGNORE_SECURITY)
-                                .getClassLoader().loadClass(name);
-                    } catch (ClassNotFoundException ignored) {}
+                        return context.createPackageContext(
+                                        pkg,
+                                        Context.CONTEXT_INCLUDE_CODE
+                                                | Context.CONTEXT_IGNORE_SECURITY)
+                                .getClassLoader()
+                                .loadClass(name);
+                    } catch (ClassNotFoundException ignored) {
+                    }
                 }
                 throw absent;
             }

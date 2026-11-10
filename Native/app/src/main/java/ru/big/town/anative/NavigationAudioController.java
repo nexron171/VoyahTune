@@ -26,6 +26,8 @@ final class NavigationAudioController implements AutoCloseable {
     private final HandlerThread thread = new HandlerThread(TAG);
     private final Handler worker;
     private final NavigationAudioDucking ducking;
+    private final NavigationMediaDucking mediaDucking;
+    private boolean mediaNavigationActive;
     private final Set<Integer> selectedUids = new HashSet<>();
     private String selectedPackages = "";
     private List<AudioPlaybackConfiguration> playback = Collections.emptyList();
@@ -51,7 +53,8 @@ final class NavigationAudioController implements AutoCloseable {
 
     private final ContentObserver observer;
 
-    NavigationAudioController(Context context) {
+    NavigationAudioController(Context context, NavigationMediaDucking mediaDucking) {
+        this.mediaDucking = mediaDucking;
         this.context = context.getApplicationContext();
         audio = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
         ducking = new NavigationAudioDucking(new NavigationOemAudioFocus(this.context));
@@ -158,9 +161,16 @@ final class NavigationAudioController implements AutoCloseable {
         } catch (Exception failure) {
             report(failure);
         }
+        setMediaNavigationActive(ducking.hasFocusRequest());
         if (!selectedPackages.isEmpty() || ducking.hasFocusRequest()) {
             worker.postDelayed(poll, 100);
         }
+    }
+
+    private void setMediaNavigationActive(boolean active) {
+        if (mediaNavigationActive == active) return;
+        mediaNavigationActive = active;
+        mediaDucking.setNavigationActive(NavigationMediaDuckingState.APPLICATION_NAVIGATION, active);
     }
 
     private void report(Exception failure) {
@@ -182,6 +192,7 @@ final class NavigationAudioController implements AutoCloseable {
                     } catch (Exception failure) {
                         Log.w(TAG, "Cannot release application navigation focus", failure);
                     }
+                    setMediaNavigationActive(false);
                     thread.quitSafely();
                 });
     }

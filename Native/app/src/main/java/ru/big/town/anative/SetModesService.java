@@ -214,7 +214,9 @@ public class SetModesService extends Service {
                 case ru.big.town.common.CarPlayUltraProtocol.SET:
                 case ru.big.town.common.CarPlayClimateProtocol.SET:
                     if (carPlayAudio == null)
-                        carPlayAudio = new CarPlayAudioController(SetModesService.this);
+                        carPlayAudio = new CarPlayAudioController(
+                                SetModesService.this,
+                                ((Anative) getApplication()).navigationMediaDucking());
                     if (carPlayVehicle == null)
                         carPlayVehicle =
                                 new CarPlayVehicleController(SetModesService.this, carPlayAudio);
@@ -223,7 +225,9 @@ public class SetModesService extends Service {
                 case ru.big.town.common.CarPlayAudioProtocol.QUERY:
                 case ru.big.town.common.CarPlayAudioProtocol.SET:
                     if (carPlayAudio == null)
-                        carPlayAudio = new CarPlayAudioController(SetModesService.this);
+                        carPlayAudio = new CarPlayAudioController(
+                                SetModesService.this,
+                                ((Anative) getApplication()).navigationMediaDucking());
                     carPlayAudio.volumes(msg);
                     break;
                 case ru.big.town.common.EnergyWidgetProtocol.WATCH:

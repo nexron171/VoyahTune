@@ -16,6 +16,7 @@ final class NavigationOemAudioFocus implements NavigationAudioDucking.Focus {
     private Method request;
     private Method abandon;
     private IBinder binder;
+    private volatile boolean requestActive;
 
     NavigationOemAudioFocus(Context context) {
         this.context = context;
@@ -57,6 +58,7 @@ final class NavigationOemAudioFocus implements NavigationAudioDucking.Focus {
                                 if ("equals".equals(method.getName())) return proxy == args[0];
                                 return CLIENT;
                             }
+                            if ("onStop".equals(method.getName())) requestActive = false;
                             return false;
                         });
         request =
@@ -76,17 +78,26 @@ final class NavigationOemAudioFocus implements NavigationAudioDucking.Focus {
     }
 
     @Override
-    public void request() throws Exception {
+    public boolean request() throws Exception {
         connect();
+        requestActive = true;
         int result =
                 (Integer)
                         request.invoke(
                                 manager, CLIENT, listener, 12, 1, context.getPackageName(), 3, 0);
         Log.i("NavigationAudio", "OEM navigation focus granted=" + result);
+        if (result != 1) requestActive = false;
+        return result == 1 && requestActive;
+    }
+
+    @Override
+    public boolean alive() {
+        return requestActive && binder != null && binder.isBinderAlive();
     }
 
     @Override
     public void release() throws Exception {
+        requestActive = false;
         if (binder == null || !binder.isBinderAlive()) return;
         abandon.invoke(manager, listener, CLIENT, context.getPackageName(), true);
         Log.i("NavigationAudio", "OEM navigation focus released");
