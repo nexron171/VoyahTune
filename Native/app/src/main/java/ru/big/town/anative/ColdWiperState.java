@@ -48,6 +48,8 @@ final class ColdWiperState {
         if (gear < PARK || gear > 4) return;
         this.gear = gear;
         if (gear == DRIVE && confirmed) {
+            // An in-flight send owns its uncertainty receipt until completion.
+            if (pendingTarget == null) positionUncertain = false;
             releaseForDrive = true;
             desiredActive = false;
             waitForDoorClose = door != DOOR_CLOSED;

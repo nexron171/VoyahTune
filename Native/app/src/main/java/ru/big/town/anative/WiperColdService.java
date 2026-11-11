@@ -181,7 +181,13 @@ public class WiperColdService extends Service {
 
     private void onGearState(GearStateController.State state) {
         if (destroyed) return;
+        boolean wasUncertain = wiperState.positionUncertain();
         wiperState.onGear(state.value, state.isFresh());
+        if (wasUncertain && !wiperState.positionUncertain() && !hasPendingWiperToggle()) {
+            if (clearWiperPositionUncertainty()) {
+                Log.i(TAG, "Fresh D cleared saved wiper position uncertainty");
+            }
+        }
         persistDoorCloseGuard();
         evaluate("gear " + state.value + " " + state.source);
     }
@@ -218,7 +224,7 @@ public class WiperColdService extends Service {
                         if (sent) {
                             setServiceActive(targetActive);
                         } else if (receiptWritten.get() && !frameAttempted.get()) {
-                            clearUnattemptedWiperReceipt();
+                            clearWiperPositionUncertainty();
                         }
                     } finally {
                         PENDING_WIPER_TOGGLES.decrementAndGet();
@@ -628,11 +634,13 @@ public class WiperColdService extends Service {
         }
     }
 
-    private void clearUnattemptedWiperReceipt() {
+    private boolean clearWiperPositionUncertainty() {
         if (!preferences.edit().putBoolean(PREF_POSITION_UNCERTAIN, false).commit()) {
             wiperState.onFrameAttempted();
-            Log.w(TAG, "Cannot clear a cancelled wiper attempt receipt");
+            Log.w(TAG, "Cannot clear saved wiper position uncertainty");
+            return false;
         }
+        return true;
     }
 
     private void setServiceActive(boolean active) {

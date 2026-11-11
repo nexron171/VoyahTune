@@ -113,7 +113,7 @@ public final class ColdWiperStateTest {
     }
 
     @Test
-    public void attemptedFailureBlocksEveryLaterAutomaticEventAndSurvivesRestart() {
+    public void attemptedFailureStaysBlockedWithoutFreshDriveAndSurvivesRestart() {
         ColdWiperState state = new ColdWiperState(false, false);
         state.setEnabled(true);
         state.onDoor(1);
@@ -121,9 +121,9 @@ public final class ColdWiperStateTest {
         state.onFrameAttempted();
         state.onFailed();
         assertTrue(state.positionUncertain());
-        for (int gear : new int[] {0, 3, 1, 0, 3}) {
+        for (int gear : new int[] {0, 1, 2, 4, 3}) {
             state.reconcile(false, state.positionUncertain());
-            state.onGear(gear, true);
+            state.onGear(gear, gear != 3);
             state.onDoor(0);
             state.onDoor(1);
             state.setEnabled(false);
@@ -140,11 +140,68 @@ public final class ColdWiperStateTest {
                 false, state.waitForDoorClose(), state.positionUncertain());
         restarted.setEnabled(true);
         restarted.onDoor(1);
-        restarted.onGear(3, true);
+        restarted.onGear(3, false);
         restarted.reconcile(false, restarted.positionUncertain());
         assertNull(restarted.nextTarget());
         assertFalse(restarted.canSend(true));
         assertFalse(restarted.canSend(false));
+    }
+
+    @Test
+    public void freshDriveClearsUncertaintyAndAllowsTheNextParkedDoorOpening() {
+        ColdWiperState state = new ColdWiperState(false, false, true);
+        state.setEnabled(true);
+        state.onDoor(0);
+        state.onGear(0, true);
+        assertNull(state.nextTarget());
+
+        state.onGear(3, false);
+        assertTrue(state.positionUncertain());
+        state.onGear(3, true);
+        assertFalse(state.positionUncertain());
+        assertNull(state.nextTarget());
+
+        ColdWiperState restarted = new ColdWiperState(
+                false, state.waitForDoorClose(), state.positionUncertain());
+        restarted.setEnabled(true);
+        restarted.onDoor(0);
+        restarted.onGear(0, true);
+        restarted.onDoor(1);
+        assertEquals(Boolean.TRUE, restarted.nextTarget());
+        assertTrue(restarted.canSend(true));
+    }
+
+    @Test
+    public void freshDriveClearsUncertaintyForAnActivePositionAndWaitsForDoorClose() {
+        ColdWiperState state = new ColdWiperState(true, false, true);
+        state.setEnabled(true);
+        state.onDoor(1);
+        state.onGear(3, true);
+        assertFalse(state.positionUncertain());
+        assertEquals(Boolean.FALSE, state.nextTarget());
+        assertTrue(state.canSend(false));
+        state.onSent(false);
+        state.onGear(0, true);
+        assertNull(state.nextTarget());
+        state.onDoor(0);
+        state.onDoor(1);
+        assertEquals(Boolean.TRUE, state.nextTarget());
+    }
+
+    @Test
+    public void freshDriveDoesNotClearAnUnfinishedSendReceipt() {
+        ColdWiperState state = new ColdWiperState(false, false);
+        state.setEnabled(true);
+        state.onDoor(1);
+        state.onRequested(true);
+        state.onFrameAttempted();
+        state.onGear(3, true);
+        assertTrue(state.positionUncertain());
+        assertNull(state.nextTarget());
+        state.onFailed();
+        assertTrue(state.positionUncertain());
+        state.onGear(3, true);
+        assertFalse(state.positionUncertain());
     }
 
     @Test
