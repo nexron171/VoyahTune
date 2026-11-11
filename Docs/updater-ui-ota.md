@@ -13,6 +13,11 @@
 Установщик размещает APK в
 `/system/priv-app/VoyahTuneUpdater/VoyahTuneUpdater.apk` и регистрирует через
 PackageManager. APK подписывается тем же ключом, что Native и RestoreMode.
+При смене ключа системного Updater Installer удаляет только его регистрацию и APK,
+выполняет промежуточный reboot и устанавливает новый APK. Данные Native и RestoreMode
+этот шаг не затрагивает.
+После промежуточной перезагрузки Installer обновляет maintenance boot-marker,
+чтобы инъекции оставались запрещены до завершающего reboot.
 
 OTA сохраняет установленные APK Updater, root executable, init rc и bootstrap.
 Самообновления интерфейса нет: изменение этих компонентов доставляется через USB.
@@ -24,6 +29,10 @@ USB и OTA сохраняют блокировку запуска, затем п
 loader, helpers, Native, RestoreMode и работающий RunYN. Подтверждение quiesce/drain
 от Java-агентов не требуется. Общий helper проверяет принадлежность процесса,
 PID/startTicks и UID и ограниченно ждёт фактического завершения.
+До SIGKILL helper замораживает собственные root-процессы и проверяет все их TID.
+Активный native tracer получает SIGTERM/SIGCONT для безопасной отмены; остановка
+cgroup разрешена только после освобождения tracee. Общий бюджет остановки — 5 секунд.
+Если tracer не освободил цель, установка прерывается с попыткой reboot.
 Root-служба и интерфейс Updater остаются работать. `system_server` и OEM-процессы
 со встроенными агентами остаются до reboot: для установки APK нужен PackageManager.
 
@@ -38,7 +47,9 @@ Root-служба и интерфейс Updater остаются работат�
 `UpdateService` отделяет экран от исполнителя. `RootClient` отправляет JSON schema 1
 по `/dev/socket/voyahtune_updater` и проверяет UID 0. Служба разрешает отдельные
 уникальные UID Updater и RestoreMode для общих настроек и диагностики, проверяя
-активный APK и подпись относительно системного Native. Внешний Intent не задаёт
+активный APK. Подпись Updater сверяется с его системным APK, RestoreMode — с системным
+Native. Поэтому OTA-смена ключа Native не лишает установленный через USB Updater
+доступа к службе. Внешний Intent не задаёт
 endpoint, архив или shell-команду.
 
 Installer проверяет ответ root-службы, активный APK Updater и доступность Activity.

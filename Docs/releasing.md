@@ -17,6 +17,7 @@
 `VOYAH_MINIMUM_INSTALLER_VERSION` через окружение. Gradle использует общий
 [release-versions.gradle](../SharedAndroid/release-versions.gradle); при прямом
 локальном запуске без окружения значения берутся из того же JSON.
+Контейнерные snapshots Windows/Linux также получают свежий корневой `versions.json`.
 Явные параметры сборки сохраняют приоритет, в том числе beta и минимум совместимости.
 
 После изменения только `versions.json` обёртки `make_release.sh` и
