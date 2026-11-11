@@ -2288,9 +2288,9 @@ public class DashboardActivity extends AppCompatActivity {
         int spacingDp = AppearanceSettings.spacingDp(settingsPreferences);
         int m = Math.round(spacingDp * metrics.density);
         int tileH = (availableH / rows) - 2 * m;
-        // Шаг колонки: вся ширина контента делится на 12 колонок, остаток распределяет
-        // columnLeft(), и правая граница сетки совпадает с краем экрана.
-        tilePitchPx = Math.max(1, Math.round((float) availableW / GRID_COLUMNS));
+        // Шаг колонки: плитка плюс промежуток до следующей. Видимая ширина — ровно 12 плиток
+        // и 11 таких промежутков.
+        tilePitchPx = Math.max(1, cellWidth(availableW, m) + 2 * m);
         splitTilesGrid.beginLayout(tilePitchPx, tileH + 2 * m);
         // Высота сетки не делится на число рядов нацело. Остаток (до 4px) раздаём по
         // одному пикселю верхним рядам, иначе под нижним рядом остаётся пустая полоса.
@@ -2990,28 +2990,29 @@ public class DashboardActivity extends AppCompatActivity {
     }
 
     /**
-     * Левая граница колонки: остаток ширины распределяется по сетке округлением, поэтому крайняя
-     * правая колонка заканчивается ровно на правом краю экрана.
+     * Базовая ширина колонки: 12 плиток и 11 промежутков между ними точно заполняют ширину
+     * видимой области.
      */
-    private static int columnLeft(int availableWidth, int column) {
-        return Math.round((float) availableWidth * column / GRID_COLUMNS);
+    private static int cellWidth(int availableWidth, int spacing) {
+        int gaps = (GRID_COLUMNS - 1) * 2 * spacing;
+        return Math.max(1, (availableWidth - gaps) / GRID_COLUMNS);
     }
 
     /**
-     * Ширина плитки между границами колонок. Крайние колонки забирают свой внешний отступ в
-     * ширину, поэтому сетка доходит до краёв экрана, а внутренние промежутки остаются равными.
+     * Ширина плитки на {@code span} колонок. Остаток ширины, не делящийся на 12, добавляется по
+     * одному пикселю первым колонкам; промежутки между плитками от этого не меняются и остаются
+     * равными на границах страниц.
      */
     private static int tileWidth(int availableWidth, int column, int span, int spacing) {
-        int leftMargin = column == 0 ? 0 : spacing;
-        int rightMargin = column + span == GRID_COLUMNS ? 0 : spacing;
-        return columnLeft(availableWidth, column + span)
-                - columnLeft(availableWidth, column)
-                - leftMargin
-                - rightMargin;
+        int gaps = (GRID_COLUMNS - 1) * 2 * spacing;
+        int base = Math.max(1, (availableWidth - gaps) / GRID_COLUMNS);
+        int remainder = Math.max(0, availableWidth - gaps - base * GRID_COLUMNS);
+        int extra = Math.min(column + span, remainder) - Math.min(column, remainder);
+        return span * base + 2 * spacing * (span - 1) + extra;
     }
 
     /**
-     * Метрики плитки: ширина по границам колонок и высота по номеру ряда плюс, при включённой
+     * Метрики плитки: ширина на занятые колонки и высота по номеру ряда плюс, при включённой
      * «Полноэкранной сетке», верхний отступ. Верхний отступ контента и сетки в этом режиме снят,
      * поэтому плитки верхнего ряда компенсируют его собственным отступом и остаются на месте, а
      * заданные настройкой первые {@code stretchedColumns} колонок растягиваются до границы
@@ -3042,9 +3043,10 @@ public class DashboardActivity extends AppCompatActivity {
                 topMargin = spacing + topInset;
             }
         }
-        int leftMargin = column == 0 ? 0 : spacing;
-        int rightMargin = column + columnSpan == GRID_COLUMNS ? 0 : spacing;
-        lp.setMargins(leftMargin, topMargin, rightMargin, spacing);
+        // Промежуток целиком относится к следующей колонке: первая колонка прижата к левому
+        // краю, а справа его нет, поэтому между страницами остаётся тот же отступ.
+        int leftMargin = column == 0 ? 0 : 2 * spacing;
+        lp.setMargins(leftMargin, topMargin, 0, spacing);
     }
 
     /** Включена ли «Полноэкранная сетка» в настройках. */
