@@ -282,8 +282,10 @@ public class DashboardActivity extends AppCompatActivity {
     private DashboardEditGrid splitTilesGrid;
     private Button finishEditing;
     private OnBackPressedCallback editBack;
-    // Верхний инсет контента — тот же, что уходит в padding mainContent (нижний всегда 0).
+    // Инсеты контента — те же, что уходят в padding mainContent (нижний всегда 0).
     private int contentInsetTop;
+    private int contentInsetLeft;
+    private int contentInsetRight;
     // «Полноэкранная сетка»: верхний ряд плиток растягивается до границы экрана.
     private boolean fullscreenGrid;
     // Настройка «сколько левых колонок верхнего ряда растягивается» и её границы.
@@ -1259,12 +1261,17 @@ public class DashboardActivity extends AppCompatActivity {
                     }
                     boolean fullscreen = isFullscreenGridEnabled();
                     // «Полноэкранная сетка» снимает верхний отступ целиком: верхний ряд плиток
-                    // растягивается на его высоту (см. applyTileVerticalMetrics).
+                    // растягивается на его высоту (см. applyTileMetrics).
                     mainContent.setPadding(nativeDock + sb.left, fullscreen ? 0 : top, sb.right, 0);
-                    // Плитки считают высоту от реально доступного места, поэтому после уточнения
-                    // инсетов сетку нужно перерисовать.
-                    if (top != contentInsetTop || fullscreen != fullscreenGrid) {
+                    // Плитки считают ширину и высоту от реально доступного места, поэтому после
+                    // уточнения инсетов сетку нужно перерисовать.
+                    if (top != contentInsetTop
+                            || sb.left != contentInsetLeft
+                            || sb.right != contentInsetRight
+                            || fullscreen != fullscreenGrid) {
                         contentInsetTop = top;
+                        contentInsetLeft = sb.left;
+                        contentInsetRight = sb.right;
                         fullscreenGrid = fullscreen;
                         updateDebugScreenSizeButton();
                         if (splitTilesGrid != null) {
@@ -2251,7 +2258,15 @@ public class DashboardActivity extends AppCompatActivity {
 
         DisplayMetrics metrics = getResources().getDisplayMetrics();
         int nativeDock = Math.round(metrics.density * 145f);
-        int availableW = metrics.widthPixels - nativeDock - Math.round(metrics.density * 4f);
+        // Контент тянется от родного дока до правого края экрана, а горизонтальные системные
+        // отступы уже вычтены из ширины через padding mainContent.
+        int availableW =
+                Math.max(
+                        0,
+                        metrics.widthPixels
+                                - nativeDock
+                                - contentInsetLeft
+                                - contentInsetRight);
         int verticalInsets = contentInsetTop + splitTilesGrid.getPaddingTop() + gridPaddingBottom;
         int availableH = Math.max(1, screenLift.viewportHeight() - verticalInsets);
         int raisedHeight = Math.max(1, DashboardScreenLift.RAISED_HEIGHT_PX - verticalInsets);
@@ -2272,10 +2287,10 @@ public class DashboardActivity extends AppCompatActivity {
         }
         int spacingDp = AppearanceSettings.spacingDp(settingsPreferences);
         int m = Math.round(spacingDp * metrics.density);
-        int tileW = (availableW / 12) - 2 * m;
         int tileH = (availableH / rows) - 2 * m;
-        // Шаг колонки: ширина плитки плюс её отступы слева и справа.
-        tilePitchPx = tileW + 2 * m;
+        // Шаг колонки: вся ширина контента делится на 12 колонок, остаток распределяет
+        // columnLeft(), и правая граница сетки совпадает с краем экрана.
+        tilePitchPx = Math.max(1, Math.round((float) availableW / GRID_COLUMNS));
         splitTilesGrid.beginLayout(tilePitchPx, tileH + 2 * m);
         // Высота сетки не делится на число рядов нацело. Остаток (до 4px) раздаём по
         // одному пикселю верхним рядам, иначе под нижним рядом остаётся пустая полоса.
@@ -2290,14 +2305,15 @@ public class DashboardActivity extends AppCompatActivity {
                         splitTilesGrid,
                         (column, row, width, height) -> {
                             GridLayout.LayoutParams params = new GridLayout.LayoutParams();
-                            params.width = tileWidth(tileW, width, m, column);
                             params.columnSpec = GridLayout.spec(column, width);
                             params.rowSpec = GridLayout.spec(row, height);
-                            applyTileVerticalMetrics(
+                            applyTileMetrics(
                                     params,
                                     m,
+                                    availableW,
                                     tileH,
                                     new int[] {column, row},
+                                    width,
                                     height,
                                     rowRemainder,
                                     topInset,
@@ -2335,14 +2351,15 @@ public class DashboardActivity extends AppCompatActivity {
                 linkView.setOnClickListener(view -> LinkShortcutLauncher.open(this, entry));
                 int[] gridPosition = TileGridPacking.place(occupied, rows, 1, 1);
                 GridLayout.LayoutParams linkLayout = new GridLayout.LayoutParams();
-                linkLayout.width = tileWidth(tileW, 1, m, gridPosition[0]);
                 linkLayout.columnSpec = GridLayout.spec(gridPosition[0], 1);
                 linkLayout.rowSpec = GridLayout.spec(gridPosition[1]);
-                applyTileVerticalMetrics(
+                applyTileMetrics(
                         linkLayout,
                         m,
+                        availableW,
                         tileH,
                         gridPosition,
+                        1,
                         1,
                         rowRemainder,
                         topInset,
@@ -2379,14 +2396,15 @@ public class DashboardActivity extends AppCompatActivity {
                 dialView.setOnClickListener(v -> onDialNumber(finalDialEntry));
                 int[] gridPosition = TileGridPacking.place(occupied, rows, 2, 1);
                 GridLayout.LayoutParams dialLp = new GridLayout.LayoutParams();
-                dialLp.width = tileWidth(tileW, 2, m, gridPosition[0]);
                 dialLp.columnSpec = GridLayout.spec(gridPosition[0], 2);
                 dialLp.rowSpec = GridLayout.spec(gridPosition[1]);
-                applyTileVerticalMetrics(
+                applyTileMetrics(
                         dialLp,
                         m,
+                        availableW,
                         tileH,
                         gridPosition,
+                        2,
                         1,
                         rowRemainder,
                         topInset,
@@ -2409,14 +2427,15 @@ public class DashboardActivity extends AppCompatActivity {
                 scenarioView.setOnClickListener(v -> runScenario(finalScenario));
                 int[] gridPosition = TileGridPacking.place(occupied, rows, 2, 1);
                 GridLayout.LayoutParams scenarioLp = new GridLayout.LayoutParams();
-                scenarioLp.width = tileWidth(tileW, 2, m, gridPosition[0]);
                 scenarioLp.columnSpec = GridLayout.spec(gridPosition[0], 2);
                 scenarioLp.rowSpec = GridLayout.spec(gridPosition[1]);
-                applyTileVerticalMetrics(
+                applyTileMetrics(
                         scenarioLp,
                         m,
+                        availableW,
                         tileH,
                         gridPosition,
+                        2,
                         1,
                         rowRemainder,
                         topInset,
@@ -2666,14 +2685,15 @@ public class DashboardActivity extends AppCompatActivity {
                 int[] dims = getWidgetDimensions(tile.id);
                 int[] gridPosition = TileGridPacking.place(occupied, rows, dims[0], dims[1]);
                 GridLayout.LayoutParams lp = new GridLayout.LayoutParams();
-                lp.width = tileWidth(tileW, dims[0], m, gridPosition[0]);
                 lp.columnSpec = GridLayout.spec(gridPosition[0], dims[0]);
                 lp.rowSpec = GridLayout.spec(gridPosition[1], dims[1]);
-                applyTileVerticalMetrics(
+                applyTileMetrics(
                         lp,
                         m,
+                        availableW,
                         tileH,
                         gridPosition,
+                        dims[0],
                         dims[1],
                         rowRemainder,
                         topInset,
@@ -2715,14 +2735,15 @@ public class DashboardActivity extends AppCompatActivity {
                 int[] gridPosition =
                         TileGridPacking.place(occupied, rows, widgetWidth, widgetHeight);
                 GridLayout.LayoutParams lp = new GridLayout.LayoutParams();
-                lp.width = tileWidth(tileW, widgetWidth, m, gridPosition[0]);
                 lp.columnSpec = GridLayout.spec(gridPosition[0], widgetWidth);
                 lp.rowSpec = GridLayout.spec(gridPosition[1], widgetHeight);
-                applyTileVerticalMetrics(
+                applyTileMetrics(
                         lp,
                         m,
+                        availableW,
                         tileH,
                         gridPosition,
+                        widgetWidth,
                         widgetHeight,
                         rowRemainder,
                         topInset,
@@ -2780,11 +2801,19 @@ public class DashboardActivity extends AppCompatActivity {
 
                 int[] gridPosition = TileGridPacking.place(occupied, rows, 2, 1);
                 GridLayout.LayoutParams lp = new GridLayout.LayoutParams();
-                lp.width = tileWidth(tileW, 2, m, gridPosition[0]);
                 lp.columnSpec = GridLayout.spec(gridPosition[0], 2);
                 lp.rowSpec = GridLayout.spec(gridPosition[1], 1);
-                applyTileVerticalMetrics(
-                        lp, m, tileH, gridPosition, 1, rowRemainder, topInset, stretchedColumns);
+                applyTileMetrics(
+                        lp,
+                        m,
+                        availableW,
+                        tileH,
+                        gridPosition,
+                        2,
+                        1,
+                        rowRemainder,
+                        topInset,
+                        stretchedColumns);
                 tileView.setLayoutParams(lp);
                 splitTilesGrid.addView(tileView);
                 bindEditableTile(tileView, tile, tilePos, 2, 1);
@@ -2821,11 +2850,19 @@ public class DashboardActivity extends AppCompatActivity {
 
                 int[] gridPosition = TileGridPacking.place(occupied, rows, 1, 1);
                 GridLayout.LayoutParams lp = new GridLayout.LayoutParams();
-                lp.width = tileWidth(tileW, 1, m, gridPosition[0]);
                 lp.columnSpec = GridLayout.spec(gridPosition[0], 1);
                 lp.rowSpec = GridLayout.spec(gridPosition[1]);
-                applyTileVerticalMetrics(
-                        lp, m, tileH, gridPosition, 1, rowRemainder, topInset, stretchedColumns);
+                applyTileMetrics(
+                        lp,
+                        m,
+                        availableW,
+                        tileH,
+                        gridPosition,
+                        1,
+                        1,
+                        rowRemainder,
+                        topInset,
+                        stretchedColumns);
                 tileView.setLayoutParams(lp);
                 splitTilesGrid.addView(tileView);
                 bindEditableTile(tileView, tile, tilePos, 1, 1);
@@ -2953,43 +2990,61 @@ public class DashboardActivity extends AppCompatActivity {
     }
 
     /**
-     * Ширина плитки: колонки задают шаг сетки, а крайняя левая колонка забирает свой левый
-     * отступ в ширину, чтобы сетка начиналась от края экрана без сдвига остальных колонок.
+     * Левая граница колонки: остаток ширины распределяется по сетке округлением, поэтому крайняя
+     * правая колонка заканчивается ровно на правом краю экрана.
      */
-    private static int tileWidth(int cellWidth, int span, int spacing, int column) {
-        return cellWidth * span + (span - 1) * 2 * spacing + (column == 0 ? spacing : 0);
+    private static int columnLeft(int availableWidth, int column) {
+        return Math.round((float) availableWidth * column / GRID_COLUMNS);
     }
 
     /**
-     * Вертикальные метрики плитки: высота по номеру ряда плюс, при включённой «Полноэкранной
-     * сетке», верхний отступ. Верхний отступ контента и сетки в этом режиме снят, поэтому плитки
-     * верхнего ряда компенсируют его собственным отступом и остаются на месте, а заданные
-     * настройкой первые {@code columns} колонок растягиваются до границы экрана, сохраняя нижнюю
-     * кромку.
+     * Ширина плитки между границами колонок. Крайние колонки забирают свой внешний отступ в
+     * ширину, поэтому сетка доходит до краёв экрана, а внутренние промежутки остаются равными.
      */
-    private static void applyTileVerticalMetrics(
+    private static int tileWidth(int availableWidth, int column, int span, int spacing) {
+        int leftMargin = column == 0 ? 0 : spacing;
+        int rightMargin = column + span == GRID_COLUMNS ? 0 : spacing;
+        return columnLeft(availableWidth, column + span)
+                - columnLeft(availableWidth, column)
+                - leftMargin
+                - rightMargin;
+    }
+
+    /**
+     * Метрики плитки: ширина по границам колонок и высота по номеру ряда плюс, при включённой
+     * «Полноэкранной сетке», верхний отступ. Верхний отступ контента и сетки в этом режиме снят,
+     * поэтому плитки верхнего ряда компенсируют его собственным отступом и остаются на месте, а
+     * заданные настройкой первые {@code stretchedColumns} колонок растягиваются до границы
+     * экрана, сохраняя нижнюю кромку.
+     */
+    private static void applyTileMetrics(
             GridLayout.LayoutParams lp,
-            int m,
+            int spacing,
+            int availableWidth,
             int tileH,
             int[] gridPosition,
-            int span,
+            int columnSpan,
+            int rowSpan,
             int rowRemainder,
             int topInset,
-            int columns) {
+            int stretchedColumns) {
+        int column = gridPosition[0];
         int row = gridPosition[1];
-        lp.height = tileHeight(tileH, m, row, span, rowRemainder);
-        int topMargin = m;
+        lp.width = tileWidth(availableWidth, column, columnSpan, spacing);
+        lp.height = tileHeight(tileH, spacing, row, rowSpan, rowRemainder);
+        int topMargin = spacing;
         if (topInset > 0 && row == 0) {
-            if (gridPosition[0] < columns) {
+            if (column < stretchedColumns) {
                 // Снятый отступ возвращаем высотой, а не отступом: плитка доходит до границы.
-                lp.height += m + topInset;
+                lp.height += spacing + topInset;
                 topMargin = 0;
             } else {
-                topMargin = m + topInset;
+                topMargin = spacing + topInset;
             }
         }
-        int leftMargin = gridPosition[0] == 0 ? 0 : m;
-        lp.setMargins(leftMargin, topMargin, m, m);
+        int leftMargin = column == 0 ? 0 : spacing;
+        int rightMargin = column + columnSpan == GRID_COLUMNS ? 0 : spacing;
+        lp.setMargins(leftMargin, topMargin, rightMargin, spacing);
     }
 
     /** Включена ли «Полноэкранная сетка» в настройках. */
