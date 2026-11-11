@@ -72,4 +72,54 @@ public class BatteryHeatSnapshotStateTest {
         assertFalse(state.accepts(oldRead, 1080, 0));
         assertFalse(state.accepts(state.beginRead(), 1080, 0));
     }
+
+    @Test
+    public void physicalWakeDiscardsReadsFromBeforeSleepWithoutReconnectingCanBus() {
+        BatteryHeatSnapshotState state = new BatteryHeatSnapshotState();
+        state.reset(1L);
+        BatteryHeatSnapshotState.Read beforeSleep = state.beginRead();
+
+        state.reset(1L);
+
+        assertFalse(state.accepts(beforeSleep, 1080, 0));
+        assertTrue(state.accepts(state.beginRead(), 1080, 0));
+    }
+
+    @Test
+    public void ambientSnapshotIsAcceptedOnlyWithoutNewerTemperatureFeedback() {
+        BatteryHeatSnapshotState state = new BatteryHeatSnapshotState();
+        state.reset(1L);
+        BatteryHeatSnapshotState.Read read = state.beginRead();
+        assertTrue(state.acceptsAmbientTemperature(read));
+
+        state.recordAmbientTemperature();
+
+        assertFalse(state.acceptsAmbientTemperature(read));
+        assertTrue(state.acceptsAmbientTemperature(state.beginRead()));
+        assertTrue(state.accepts(read, 1080, 0));
+    }
+
+    @Test
+    public void ambientReadFromBeforePhysicalWakeCannotRestoreOldTemperature() {
+        BatteryHeatSnapshotState state = new BatteryHeatSnapshotState();
+        state.reset(1L);
+        BatteryHeatSnapshotState.Read beforeSleep = state.beginRead();
+
+        state.reset(1L);
+
+        assertFalse(state.acceptsAmbientTemperature(beforeSleep));
+        assertTrue(state.acceptsAmbientTemperature(state.beginRead()));
+    }
+
+    @Test
+    public void disconnectedAmbientSnapshotCannotAllowAutomaticHeating() {
+        BatteryHeatSnapshotState state = new BatteryHeatSnapshotState();
+        state.reset(1L);
+        BatteryHeatSnapshotState.Read read = state.beginRead();
+
+        state.reset(0L);
+
+        assertFalse(state.acceptsAmbientTemperature(read));
+        assertFalse(state.acceptsAmbientTemperature(state.beginRead()));
+    }
 }

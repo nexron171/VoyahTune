@@ -1942,10 +1942,12 @@ public class SetModesService extends Service {
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private boolean startupInitialized = false;
     private ApplicationStartupController applicationStartup;
-    private boolean wakeSessionActive = false;
+    private final PhysicalWakeActions physicalWakeActions =
+            new PhysicalWakeActions(
+                    () -> BatteryHeatService.requestPhysicalWake(this),
+                    () -> runWakeSideEffects("physical wake"));
     private volatile boolean serviceDestroyed = false;
     private boolean screenOffObserved = false;
-    private boolean pendingPhysicalWake = false;
 
     private final Runnable startNowPlayingRunnable =
             () -> {
@@ -2021,19 +2023,6 @@ public class SetModesService extends Service {
         }
     }
 
-    /**
-     * Один набор недебаунсированных side-effects на физический wake, а не на каждый power state.
-     */
-    private boolean beginWakeSession() {
-        if (wakeSessionActive) return false;
-        wakeSessionActive = true;
-        return true;
-    }
-
-    private void endWakeSession() {
-        wakeSessionActive = false;
-    }
-
     private void scheduleAncillaryWakeTasks() {
         // Повторный startService для уже живого сервиса безвреден, зато поднимет его снова, если
         // система убила NowPlaying между физическими wake. Named runnable гасит дубли внутри wake.
@@ -2077,17 +2066,12 @@ public class SetModesService extends Service {
 
     private void runWakeSideEffects(String source) {
         if (serviceDestroyed) return;
-        if (beginWakeSession()) {
-            requestSavedConfigSync("physical wake");
-            restoreAutoLightState();
-            reconcileWiperColdOnPowerOn();
-            forwardPowerOnToTripStats();
-            BatteryHeatService.requestPhysicalWake(this);
-            scheduleAncillaryWakeTasks();
-            Log.i(TAG, "wake side-effects started by " + source);
-        } else {
-            Log.i(TAG, "wake side-effects coalesced for " + source);
-        }
+        requestSavedConfigSync("physical wake");
+        restoreAutoLightState();
+        reconcileWiperColdOnPowerOn();
+        forwardPowerOnToTripStats();
+        scheduleAncillaryWakeTasks();
+        Log.i(TAG, "wake side-effects started by " + source);
     }
 
     private void requestWashModeCleanup(String source) {
@@ -2108,8 +2092,7 @@ public class SetModesService extends Service {
 
     private void handleScreenOffFallback() {
         screenOffObserved = true;
-        pendingPhysicalWake = false;
-        endWakeSession();
+        physicalWakeActions.onSleep();
         cancelAncillaryWakeTasks();
         requestWashModeCleanup("SCREEN_OFF");
     }
@@ -2117,12 +2100,7 @@ public class SetModesService extends Service {
     private void handleScreenOnFallback() {
         screenOffObserved = false;
         requestWashModeCleanup("SCREEN_ON");
-        // SCREEN_ON сам по себе бывает обычным включением дисплея и не является границей поездки.
-        // Выполняем физические side-effects только если до него реально пришёл CarPower wake.
-        if (pendingPhysicalWake) {
-            pendingPhysicalWake = false;
-            runWakeSideEffects("deferred CarPower wake");
-        }
+        physicalWakeActions.onScreenOn();
     }
 
     private boolean isScreenInteractive() {
@@ -2227,23 +2205,21 @@ public class SetModesService extends Service {
             ScenarioTriggerPersistence.wake(this);
             requestWashModeCleanup("power state " + powerStateName(state));
             ApplyEngine.activateWake("power state " + powerStateName(state));
-            if (isScreenInteractive()
+            boolean screenReady = isScreenInteractive()
                     || state == CarPowerManager.CarPowerStateListener.ON
-                    || state == CarPowerManager.CarPowerStateListener.SHUTDOWN_CANCELLED) {
+                    || state == CarPowerManager.CarPowerStateListener.SHUTDOWN_CANCELLED;
+            if (screenReady) {
                 screenOffObserved = false;
-                pendingPhysicalWake = false;
-                runWakeSideEffects(powerStateName(state));
             } else {
-                pendingPhysicalWake = true;
-                Log.i(TAG, "physical wake side-effects deferred until SCREEN_ON");
+                Log.i(TAG, "screen-dependent wake actions deferred until SCREEN_ON");
             }
+            physicalWakeActions.onWake(screenReady);
             return;
         }
         if (isSleepOrShutdownState(state)) {
             ScenarioTriggerPersistence.sleep(this);
             screenOffObserved = true;
-            pendingPhysicalWake = false;
-            endWakeSession();
+            physicalWakeActions.onSleep();
             cancelAncillaryWakeTasks();
             releaseAllEmbeddedDisplays();
             requestWashModeCleanup("power state " + powerStateName(state));
@@ -2674,8 +2650,7 @@ public class SetModesService extends Service {
         vehicleStateControllers = null;
         powerHoldController = null;
         releaseCarPowerManagerAsync();
-        pendingPhysicalWake = false;
-        endWakeSession();
+        physicalWakeActions.onSleep();
         cancelAncillaryWakeTasks();
         mainHandler.removeCallbacksAndMessages(null);
         ScreenLiftTaskRestorer liftRestorer = screenLiftTaskRestorer;

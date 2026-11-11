@@ -34,9 +34,9 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * Battery preheating through the OEM VehicleState API and the shared CAN event hub.
  *
- * <p>TX57 reads seed unchanged statuses that do not produce callbacks. The displayed temperature
- * is ambient air, not a measured battery temperature. H97X uses DRIVER_PREHEAT_SET; H97C uses
- * BATTERY_TEP_CONTROL_SWITCH. Command acceptance still requires vehicle feedback.</p>
+ * <p>TX57 and climate reads seed unchanged data that does not produce callbacks. The displayed
+ * temperature is ambient air, not a measured battery temperature. H97X uses DRIVER_PREHEAT_SET;
+ * H97C uses BATTERY_TEP_CONTROL_SWITCH. Command acceptance still requires vehicle feedback.</p>
  */
 public class BatteryHeatService extends Service {
 
@@ -276,9 +276,16 @@ public class BatteryHeatService extends Service {
         try {
             VEHICLE_SNAPSHOT_EXECUTOR.execute(() -> {
                 Map<OemVehicleStateTransport.StateKey, Integer> values = null;
+                Integer ambientTemperature = null;
                 try {
                     values = OemVehicleStateTransport.readVehicleStates(
                             app, Arrays.asList(SNAPSHOT_KEYS));
+                    OemVehicleStateTransport.ClimateSession climateSession =
+                            OemVehicleStateTransport.openClimateSession(app);
+                    if (climateSession != null) {
+                        OemClimateState climate = climateSession.read();
+                        if (climate != null) ambientTemperature = climate.outsideTemperature;
+                    }
                 } catch (RuntimeException error) {
                     Log.w(TAG, "Battery snapshot unavailable", error);
                 }
@@ -286,19 +293,22 @@ public class BatteryHeatService extends Service {
                 if (service == null || service.destroyed) return;
                 Handler worker = service.handler;
                 Map<OemVehicleStateTransport.StateKey, Integer> snapshot = values;
+                Integer temperature = ambientTemperature;
                 if (worker != null) {
-                    worker.post(() -> service.finishVehicleStateSnapshot(request, read, snapshot));
+                    worker.post(() -> service.finishVehicleStateSnapshot(
+                            request, read, snapshot, temperature));
                 }
             });
         } catch (RejectedExecutionException error) {
             Log.w(TAG, "Battery snapshot queue full; waiting for next request");
-            finishVehicleStateSnapshot(request, read, null);
+            finishVehicleStateSnapshot(request, read, null, null);
         }
     }
 
     private void finishVehicleStateSnapshot(BatteryHeatRefreshGate.Request request,
                                            BatteryHeatSnapshotState.Read read,
-                                           Map<OemVehicleStateTransport.StateKey, Integer> values) {
+                                           Map<OemVehicleStateTransport.StateKey, Integer> values,
+                                           Integer ambientTemperature) {
         if (!isActiveInstance()) return;
         BatteryHeatRefreshGate.Completion completion = vehicleSnapshotRefreshGate.finish(request);
         if (completion.next != null) {
@@ -322,6 +332,10 @@ public class BatteryHeatService extends Service {
 
         // Apply every status and failure before any automatic or manual decision can send.
         try {
+            if (ambientTemperature != null
+                    && vehicleSnapshotState.acceptsAmbientTemperature(read)) {
+                onAmbientTemp(ambientTemperature, request.epoch);
+            }
             for (OemVehicleStateTransport.StateKey key : SNAPSHOT_KEYS) {
                 Integer value = values.get(key);
                 if (vehicleSnapshotState.accepts(read, key.stableId, value)) {
@@ -423,6 +437,7 @@ public class BatteryHeatService extends Service {
     }
 
     private void onAmbientTemp(int temperature, long epoch) {
+        vehicleSnapshotState.recordAmbientTemperature();
         if (temperature == ambientTemp && epoch == ambientTempEpoch) return;
         ambientTemp = temperature;
         ambientTempEpoch = epoch;
@@ -661,6 +676,7 @@ public class BatteryHeatService extends Service {
                         && activationPlatform == currentPlatform(),
                 activationEpoch, activeCanBusEpoch, ambientTempEpoch,
                 activationDecision, autoDecisionGeneration,
+                autoSettingKnown,
                 cachedAutoEnabled,
                 ambientTemp != TEMP_INVALID,
                 ambientTemp < AUTO_TEMP_THRESHOLD_C,
@@ -861,11 +877,11 @@ public class BatteryHeatService extends Service {
             // If this is the start which creates the service during boot/wake, a later startup
             // start must not enqueue a second provider query for the same physical boundary.
             startupRefreshRequested = true;
-            postSettingsRefresh("physical-wake");
+            postSettingsRefresh("physical-wake", true);
         } else if (ACTION_STARTUP_SETTINGS_REFRESH.equals(action) || action == null) {
             if (!startupRefreshRequested) {
                 startupRefreshRequested = true;
-                postSettingsRefresh("startup");
+                postSettingsRefresh("startup", false);
             }
         } else {
             Log.w(TAG, "Ignoring unknown start action: " + action);
@@ -873,10 +889,18 @@ public class BatteryHeatService extends Service {
         return START_STICKY;
     }
 
-    private void postSettingsRefresh(String reason) {
+    private void postSettingsRefresh(String reason, boolean refreshVehicleState) {
         Handler worker = handler;
         if (destroyed || worker == null) return;
-        worker.post(() -> requestSettingsRefresh(reason, true));
+        worker.post(() -> {
+            if (refreshVehicleState) {
+                autoSettingKnown = false;
+                advanceAutoDecision();
+                resetVehicleSnapshotTracking();
+                requestVehicleStateSnapshot(true, reason);
+            }
+            requestSettingsRefresh(reason, true);
+        });
     }
 
     static void requestStartup(Context context) {
@@ -982,6 +1006,7 @@ public class BatteryHeatService extends Service {
 
     private void resetVehicleSnapshotTracking() {
         vehicleSnapshotState.reset(activeCanBusEpoch);
+        ambientTempEpoch = 0L;
         manualActivationAfterSnapshot = false;
         vehicleFieldsSeenMask = 0;
         controlStatus = UNKNOWN;

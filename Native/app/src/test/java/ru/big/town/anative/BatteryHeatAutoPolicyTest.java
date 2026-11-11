@@ -47,6 +47,13 @@ public class BatteryHeatAutoPolicyTest {
     }
 
     @Test
+    public void cachedEnabledSettingCannotStartHeatingBeforeWakeSettingsRefresh() {
+        assertFalse(BatteryHeatAutoPolicy.canSend(
+                true, 7L, 7L, 7L, 11L, 11L,
+                false, true, true, true, false, false));
+    }
+
+    @Test
     public void platformSignalsStaySeparated() {
         assertTrue(BatteryHeatAutoPolicy.platform(true, false)
                 == BatteryHeatAutoPolicy.PLATFORM_H97X);
@@ -99,6 +106,6 @@ public class BatteryHeatAutoPolicyTest {
         return BatteryHeatAutoPolicy.canSend(
                 activeInstance, expectedEpoch, activeEpoch, ambientEpoch,
                 expectedDecision, currentDecision,
-                enabled, known, cold, controlBusy, controlBlocked);
+                true, enabled, known, cold, controlBusy, controlBlocked);
     }
 }

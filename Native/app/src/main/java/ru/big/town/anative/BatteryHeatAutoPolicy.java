@@ -62,12 +62,14 @@ final class BatteryHeatAutoPolicy {
                            long expectedCanBusEpoch, long activeCanBusEpoch,
                            long ambientTemperatureEpoch,
                            long expectedDecisionGeneration, long currentDecisionGeneration,
-                           boolean autoEnabled, boolean temperatureKnown, boolean temperatureCold,
+                           boolean autoSettingKnown, boolean autoEnabled,
+                           boolean temperatureKnown, boolean temperatureCold,
                            boolean controlBusy, boolean controlBlocked) {
         return activeInstance
                 && expectedCanBusEpoch == activeCanBusEpoch
                 && ambientTemperatureEpoch == activeCanBusEpoch
                 && expectedDecisionGeneration == currentDecisionGeneration
+                && autoSettingKnown
                 && autoEnabled
                 && temperatureKnown
                 && temperatureCold
