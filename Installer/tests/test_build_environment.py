@@ -23,6 +23,7 @@ TOOL_STUB = r"""
 import json
 import os
 import sys
+import subprocess
 from pathlib import Path
 
 root = Path(os.environ["VTI_TEST_ROOT"])
@@ -38,7 +39,7 @@ def finish(code=0):
     sys.exit(code)
 
 if tool == "uname":
-    print("Darwin" if arguments == ["-s"] else "arm64")
+    print("Darwin" if arguments == ["-s"] else state.get("architecture", "arm64"))
     finish()
 
 if tool == "colima":
@@ -78,12 +79,17 @@ if tool == "docker":
                     "Destination": "/work",
                     "Type": "bind",
                     "RW": True,
-                    "Source": state["mount_directory"],
+                    "Source": (str(root / "Releases/build/hosts/linux-amd64")
+                               if arguments[-1] == "vti-linux-amd64" else state["mount_directory"]),
                 }],
             }]))
         finish()
     if arguments[0] in ("start", "stop"):
         state["container_running"] = arguments[0] == "start"
+        finish()
+    if arguments[:3] == ["exec", "vti-linux-amd64", "sh"]:
+        finish()
+    if arguments[:5] == ["exec", "vti-windows", "rustup", "target", "add"]:
         finish()
     if arguments[:3] == ["exec", "vti-windows", "sh"]:
         print("/opt/cargo/bin/cargo-xwin\n/usr/bin/7z")
@@ -99,6 +105,12 @@ if tool == "xcrun" and arguments == ["--find", "clang"]:
 if tool == "rustup" and arguments[:2] == ["target", "list"]:
     print("aarch64-apple-darwin\nx86_64-apple-darwin")
     finish()
+
+if state.get("snapshot_test") and tool == "rsync":
+    finish(subprocess.run(["/usr/bin/rsync", *arguments]).returncode)
+
+if state.get("snapshot_test") and tool == "npm":
+    finish(73)
 
 raise AssertionError(f"Unexpected tool execution: {tool} {arguments}")
 """
@@ -167,6 +179,31 @@ class BuildEnvironmentTests(unittest.TestCase):
 
     def colima_commands(self):
         return [command[1:] for command in self.commands if command[0] == "colima"]
+
+    def test_build_snapshots_receive_fresh_versions_for_both_containers(self):
+        self.state.update(snapshot_test=True, architecture="x86_64")
+        (self.root / "Installer/desktop").mkdir()
+        (self.root / "Packaging").mkdir()
+        (self.root / "Installer/Cargo.toml").write_text(
+            '[workspace.package]\nversion="1.11.0"\n'
+        )
+        for host in ("windows", "linux-amd64"):
+            directory = self.root / "Releases/build/hosts" / host
+            directory.mkdir(parents=True)
+            (directory / "versions.json").write_text('{"installer":"0.0.1"}')
+        for version in ("1.11.0", "1.11.1"):
+            expected = {"installer": version, "voyahtune": "4.7.1"}
+            (self.root / "versions.json").write_text(json.dumps(expected))
+            (self.root / "state.json").write_text(json.dumps(self.state))
+            result = subprocess.run(
+                ["/bin/bash", str(self.script), "--windows", "--linux"],
+                cwd=self.root, env=self.environment, capture_output=True, text=True, timeout=15,
+            )
+            # Stop at the first build command after copying real source snapshots.
+            self.assertEqual(result.returncode, 73, result.stderr)
+            for host in ("windows", "linux-amd64"):
+                actual = self.root / "Releases/build/hosts" / host / "versions.json"
+                self.assertEqual(json.loads(actual.read_text()), expected)
 
     def test_missing_profile_does_not_start_a_default_vm(self):
         self.state["docker_running"] = False

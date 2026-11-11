@@ -193,6 +193,7 @@ for pair in "${PAIRS[@]}"; do
     Installer/ "Releases/build/hosts/$host/Installer/"
   mkdir -p "Releases/build/hosts/$host/Packaging"
   rsync -a --delete Packaging/ "Releases/build/hosts/$host/Packaging/"
+  cp versions.json "Releases/build/hosts/$host/versions.json"
   if [[ -n "$PAYLOAD" ]]; then
     mkdir -p "Releases/build/hosts/$host/Releases/build/embedded-payload"
     rsync -a --delete "$PAYLOAD/" "Releases/build/hosts/$host/Releases/build/embedded-payload/"
