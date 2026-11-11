@@ -28,8 +28,10 @@ pub fn validate_schema(schema: u32) -> Result<()> {
 
 pub const NATIVE: &str = "ru.big.town.anative";
 pub const RESTORE: &str = "ru.big.town.restoremode";
+pub const UPDATER: &str = "ru.big.town.updater";
 pub const RUNYN: &str = "big.town.runyn";
 pub const NATIVE_PATH: &str = "/system/priv-app/Native/Native.apk";
+pub const UPDATER_PATH: &str = "/system/priv-app/VoyahTuneUpdater/VoyahTuneUpdater.apk";
 pub const WHITELIST: &str = "/system/etc/permissions/privapp-permissions-ru.big.town.anative.xml";
 pub const NATIVE_RUNTIME_ROLES: &[(&str, &str, u32)] = &[
     ("voyahtune-new-voyahtune-loader", "voyahtune-loader", 0o755),
@@ -408,6 +410,15 @@ impl Payload {
                 );
             }
         }
+        let updater = self.file("voyahtune-updater.apk")?;
+        if crate::apk_identity::read(&updater)?.0 != UPDATER
+            || verified_signers(&updater)? != verified_signers(&self.file("native.apk")?)?
+        {
+            return Err(Error::new(
+                "APK_IDENTITY",
+                "Неверный пакет или подпись Updater",
+            ));
+        }
         for file in &self.manifest.recipe.files {
             self.artifact(&file.artifact)?;
         }
@@ -444,10 +455,7 @@ pub fn destination(name: &str) -> Option<(String, u32)> {
     match name {
         "native.apk" => Some((NATIVE_PATH.into(), 0o644)),
         "voyahtune-updater" => Some(("/data/local/bin/voyahtune-updater".into(), 0o755)),
-        "voyahtune-updater.apk" => Some((
-            "/system/priv-app/VoyahTuneUpdater/VoyahTuneUpdater.apk".into(),
-            0o644,
-        )),
+        "voyahtune-updater.apk" => Some((UPDATER_PATH.into(), 0o644)),
         "voyahtune.updater.rc" => Some(("/system/etc/init/voyahtune.updater.rc".into(), 0o644)),
         "voyahtune-ota-bootstrap.json" => {
             Some(("/system/etc/voyahtune-ota-bootstrap.json".into(), 0o644))

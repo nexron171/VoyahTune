@@ -36,6 +36,7 @@ def main():
         path = source / name
         if not path.exists():
             path.symlink_to(ROOT / name, target_is_directory=True)
+    shutil.copy2(ROOT / "versions.json", source / "versions.json")
     config = source / "Packaging/new/config/voyahtune_keyboard_en_config.json"
     base = json.loads(config.read_text())
     for label, version in [("A", "4.5.0"), ("B", "4.5.1")]:
@@ -49,7 +50,7 @@ def main():
                 "--version",
                 version,
                 "--minimum-installer-version",
-                "1.9.0",
+                json.loads((ROOT / "versions.json").read_text())["installer"],
                 "--revision",
                 f"acceptance-unified-{label}",
                 "--output",

@@ -9,10 +9,10 @@ mod install_tail;
 mod network;
 mod protocol;
 mod release;
-mod restore_ui;
 mod state;
 mod telemetry;
 mod turn_sound;
+mod ui_clients;
 mod workflow;
 
 use fs2::FileExt;
@@ -96,7 +96,7 @@ fn peer_uid(_: &UnixStream) -> io::Result<u32> {
 fn authorize(stream: &UnixStream) -> io::Result<()> {
     let uid = peer_uid(stream)?;
     {
-        return restore_ui::authorize(uid);
+        return ui_clients::authorize(uid);
     }
 }
 
@@ -177,7 +177,7 @@ fn run() -> io::Result<()> {
                 protocol::Request::Status {} => {
                     let rt = shared.lock().unwrap();
                     let mut response = json!({"schema":1,"ok":true,"serviceVersion":env!("CARGO_PKG_VERSION"),
-                        "capabilities":restore_ui::capabilities(),"pid":std::process::id(),"uid":0,"state":rt.state,"settings":rt.config.as_ref().ok().map(config::Config::response),
+                        "capabilities":ui_clients::capabilities(),"pid":std::process::id(),"uid":0,"state":rt.state,"settings":rt.config.as_ref().ok().map(config::Config::response),
                         "settingsError":rt.config.as_ref().err()});
                     {
                         response["infrastructure"] = json!(release_core::infrastructure::Infrastructure::compiled());
@@ -315,7 +315,7 @@ fn main() {
     if std::env::args().nth(1).as_deref() == Some("--version") {
         println!(
             "{}",
-            json!({"version":env!("CARGO_PKG_VERSION"),"ipcSchema":1,"capabilities":restore_ui::capabilities(),"infrastructure":release_core::infrastructure::Infrastructure::compiled()})
+            json!({"version":env!("CARGO_PKG_VERSION"),"ipcSchema":1,"capabilities":ui_clients::capabilities(),"infrastructure":release_core::infrastructure::Infrastructure::compiled()})
         );
         return;
     }

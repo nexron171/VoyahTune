@@ -164,6 +164,8 @@ def main():
             package = (
                 "big.town.runyn"
                 if Path(args[-1]).name == "runyn.apk"
+                else "ru.big.town.updater"
+                if Path(args[-1]).name == "voyahtune-updater.apk"
                 else "ru.big.town.restoremode"
             )
             if package == "big.town.runyn" and s.get("runynInstallError"):
@@ -233,7 +235,9 @@ def main():
                         "uid": 0,
                         "pid": 104,
                         "infrastructure": infrastructure(),
-                        "capabilities": ["restoremode-ota-ui-v1", "unified-runtime-v1"],
+                        "capabilities": [
+                            "unified-runtime-v1",
+                        ],
                     }
                 )
                 script = script.replace(
@@ -247,6 +251,11 @@ def main():
                     "test -x /data/local/bin/voyahtune-new/voyahtune-loader && "
                     + ("true" if ready else "false"),
                 )
+            if "VOYAHTUNE_PACKAGES_LIST" in script:
+                put("/data/system/packages.list", "".join(
+                    f"{package} {10000 + index} 0\n"
+                    for index, package in enumerate(s["packages"])
+                ))
             if "--quiesce --control-timeout 60s" in script:
                 script = script.replace(
                     '"$RUNTIME/voyahtune-loader" --runtime-dir',

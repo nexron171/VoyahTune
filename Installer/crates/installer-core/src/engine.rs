@@ -37,7 +37,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-// pkill uses status 1 for an already absent process; other failures remain warnings.
+#[cfg(test)]
 const STOP_LOADER: &str =
     include_str!("../../../../Packaging/installer/common/stop-loader-device.sh");
 const LEGACY_INIT: &str = "/system/etc/init.logcat.sh";
@@ -125,7 +125,20 @@ impl Engine {
             ));
         }
         let result = self.execute(request);
-        if result.is_err() {
+        if result.is_err()
+            && self
+                .runtime_maintenance
+                .as_ref()
+                .is_some_and(RuntimeMaintenance::reboot_required)
+        {
+            self.restart_loader = false;
+            self.ignore("sync\n");
+            if let Err(error) = self.raw(&["reboot"]).and_then(|output| {
+                output.checked("Не удалось перезагрузить Android после ошибки установки")
+            }) {
+                self.warning(&error);
+            }
+        } else if result.is_err() {
             self.ignore("if [ -x /data/local/bin/voyahtune-updater ]; then setprop ctl.start voyahtune_updater; fi\n");
         }
         // Restart the loader only before the accepted final reboot.
@@ -406,9 +419,9 @@ impl Engine {
             self.step("dns", "Настройка DNS", |e| e.dns_choice(r.dns))?;
             self.step("updater-bootstrap", "Подготовка первого запуска OTA", |e| {
                 {
-                    e.shell("am force-stop --user 0 ru.big.town.updater 2>/dev/null || true\npm uninstall --user 0 ru.big.town.updater 2>/dev/null || true\nrm -rf /system/priv-app/VoyahTuneUpdater\nrm -f /data/local/bin/voyahtune-ui-maintenance /data/local/bin/voyahtune-ui-next.apk /data/local/voyahtune-updater/ui-update.json\n")?;
+                    e.shell("rm -f /data/local/bin/voyahtune-ui-maintenance /data/local/bin/voyahtune-ui-next.apk /data/local/voyahtune-updater/ui-update.json\n")?;
                 }
-                e.shell("rm -f /data/local/voyahtune-updater/state.json /data/local/voyahtune-updater/.state.json.new\nif [ ! -d /data/local/voyahtune-application-backups/ru.big.town.anative ]; then\n    rm -f /data/local/bin/voyahtune-update.block\nfi\nsync\n")?;
+                e.shell("rm -f /data/local/voyahtune-updater/state.json /data/local/voyahtune-updater/.state.json.new\nsync\n")?;
                 Ok(())
             })?;
             {
@@ -435,7 +448,10 @@ impl Engine {
                 "Перезагрузка автомобиля",
                 |e| {
                     e.shell("am force-stop ru.big.town.anative && am force-stop ru.big.town.restoremode\n")?;
-                    e.maintenance_step(RuntimeStep::Reboot, |engine| engine.raw(&["reboot"])?.checked("ADB не принял перезагрузку").map(|_| ()))?;
+                    e.maintenance_step(RuntimeStep::Reboot, |engine| {
+                        engine.shell("if [ ! -d /data/local/voyahtune-application-backups/ru.big.town.anative ]; then rm -f /data/local/bin/voyahtune-update.block; fi\nsync\n")?;
+                        engine.raw(&["reboot"])?.checked("ADB не принял перезагрузку").map(|_| ())
+                    })?;
                     e.restart_loader = false;
                     Ok(())
                 },
@@ -846,7 +862,6 @@ impl Engine {
                 .map(|_| ())
         })?;
         self.restart_loader = true;
-        self.maintenance_step(RuntimeStep::Quiesce, |engine| engine.quiesce_runtime())?;
         self.maintenance_step(RuntimeStep::Stop, |engine| engine.stop_runtime_for_update())?;
         self.apollo_safe(true)?;
         self.ignore("am force-stop com.qinggan.app.vehiclesetting\n");
@@ -1004,6 +1019,25 @@ impl Engine {
             self.ignore(&format!("settings put global {key} 1\n"));
         }
 
+        let path = self.payload.file("voyahtune-updater.apk")?;
+        let arguments = [
+            "install",
+            "-r",
+            "-d",
+            "--user",
+            "0",
+            path.to_str()
+                .ok_or_else(|| self.fail("Некорректный путь Updater", path.display()))?,
+        ];
+        let mut output = self.raw(&arguments)?;
+        if signature_update_rejected(&format!("{}\n{}", output.stdout, output.stderr)) {
+            require_package_success(
+                self.raw(&["uninstall", payload::UPDATER])?,
+                "Не удалось удалить прежний Updater",
+            )?;
+            output = self.raw(&arguments)?;
+        }
+        require_package_success(output, "Updater не установлен")?;
         self.install_restore(&self.payload.file("restore_mode.apk")?)?;
         for package in self
             .payload
@@ -1300,32 +1334,11 @@ impl Engine {
         result
     }
     fn stop_runtime_for_update(&self) -> Result<()> {
-        self.stop_service()?;
-        self.shell(STOP_LOADER)?;
+        self.shell(include_str!(
+            "../../../../Packaging/installer/common/force-stop-runtime-device.sh"
+        ))?;
         self.shell("rm -f /data/local/tmp/voyahtune_load.v2.lock /data/local/tmp/voyah_load.v2.lock && rm -rf /data/local/tmp/voyah_load.lock\n")?;
         Ok(())
-    }
-    fn quiesce_runtime(&self) -> Result<()> {
-        self.shell(include_str!(
-            "../../../../Packaging/installer/common/quiesce-runtime-device.sh"
-        ))
-        .map(|_| ())
-    }
-
-    fn stop_service(&self) -> Result<()> {
-        let state = self.shell("getprop init.svc.voyahtune_load\n")?;
-        if state.is_empty() || state == "stopped" {
-            return Ok(());
-        }
-        self.shell("setprop ctl.stop voyahtune_load\n")?;
-        for _ in 0..10 {
-            let state = self.shell("getprop init.svc.voyahtune_load\n")?;
-            if state.is_empty() || state == "stopped" {
-                return Ok(());
-            }
-            thread::sleep(Duration::from_secs(1));
-        }
-        Err(self.fail("voyahtune_load не остановлен", "init.svc.voyahtune_load"))
     }
     fn remove_boot(&mut self) -> Result<()> {
         self.runtime_maintenance = Some(RuntimeMaintenance::new(RuntimeOperation::Remove));
@@ -1336,7 +1349,6 @@ impl Engine {
                 ))
                 .map(|_| ())
         })?;
-        self.maintenance_step(RuntimeStep::Quiesce, |engine| engine.quiesce_runtime())?;
         if let Err(error) =
             self.maintenance_step(RuntimeStep::Stop, |engine| engine.stop_runtime_for_update())
         {
@@ -1355,7 +1367,6 @@ impl Engine {
     }
 
     fn remove_runtime_files(&mut self) -> Result<()> {
-        self.ignore(STOP_LOADER);
         self.ignore(
             "rm -f /data/local/tmp/voyahtune_load.v2.lock /data/local/tmp/voyah_load.v2.lock\n",
         );

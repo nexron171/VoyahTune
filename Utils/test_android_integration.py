@@ -68,6 +68,7 @@ def main():
                 ROOT / "Updater/gradlew",
                 "-p",
                 ROOT / "Updater",
+                ":app:assembleDebug",
                 ":updater-ui:assembleDebugAndroidTest",
                 ":updater-ui:testDebugUnitTest",
             ],
@@ -80,6 +81,7 @@ def main():
         "Native/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk",
         "RestoreMode/app/build/outputs/apk/debug/app-debug.apk",
         "RestoreMode/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk",
+        "Updater/app/build/outputs/apk/debug/app-debug.apk",
         "Updater/ui/build/outputs/apk/androidTest/debug/updater-ui-debug-androidTest.apk",
     ]:
         run(device + ["install", "-r", ROOT / apk])

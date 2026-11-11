@@ -9,7 +9,6 @@ pub const CAPABILITIES: &[&str] = &[
     "files-v1",
     "ota-bootstrap-v1",
     "infrastructure-v1",
-    "restoremode-ota-ui-v1",
     "unified-runtime-v1",
     "fixed-payload-v1",
 ];

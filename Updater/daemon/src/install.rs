@@ -318,11 +318,33 @@ pub fn resume_signature_change(shared: &Shared) -> io::Result<()> {
         }
         thread::sleep(Duration::from_secs(3));
     }
-    apply_with_signature_reset(shared, false)
+    apply_and_finalize(shared, false)
 }
 
 pub fn apply(shared: &Shared) -> io::Result<()> {
-    apply_with_signature_reset(shared, true)
+    apply_and_finalize(shared, true)
+}
+
+fn apply_and_finalize(shared: &Shared, allow_native_reset: bool) -> io::Result<()> {
+    let result = apply_with_signature_reset(shared, allow_native_reset);
+    let installation_started = shared.lock().unwrap().state.installation_started();
+    if let Err(error) = &result {
+        if installation_started {
+            workflow::fail(shared, error, true);
+            let finalization = crate::install_tail::finalize_failure(
+                || {
+                    let synchronized = command("/system/bin/sync", &[], 30).map(|_| ());
+                    let flushed = crate::telemetry::before_reboot();
+                    synchronized.and(flushed)
+                },
+                || command("/system/bin/reboot", &[], 15).map(|_| ()),
+            );
+            if let Err(reboot_error) = finalization {
+                let _ = crate::log(root(), &format!("failed_install_reboot {reboot_error}"));
+            }
+        }
+    }
+    result
 }
 
 fn apply_with_signature_reset(shared: &Shared, allow_native_reset: bool) -> io::Result<()> {
@@ -381,51 +403,15 @@ fn apply_with_signature_reset(shared: &Shared, allow_native_reset: bool) -> io::
         )?;
         Ok::<_, io::Error>(())
     })?;
-    maintenance.execute(RuntimeStep::Quiesce, || {
+    maintenance.execute(RuntimeStep::Stop, || {
         command(
             "/system/bin/sh",
             &[
                 "-c",
-                include_str!("../../../Packaging/installer/common/quiesce-runtime-device.sh"),
+                include_str!("../../../Packaging/installer/common/force-stop-runtime-device.sh"),
             ],
-            90,
+            30,
         )?;
-        Ok::<_, io::Error>(())
-    })?;
-    maintenance.execute(RuntimeStep::Stop, || {
-        command("/system/bin/setprop", &["ctl.stop", "voyahtune_load"], 10)?;
-        for _ in 0..20 {
-            let state = device::prop("init.svc.voyahtune_load")?;
-            if state == "stopped" || (state.is_empty()) {
-                break;
-            }
-            thread::sleep(Duration::from_millis(250));
-        }
-        let loader_state = device::prop("init.svc.voyahtune_load")?;
-        if loader_state != "stopped" && !(loader_state.is_empty()) {
-            return Err(invalid("Загрузчик hooks не остановился"));
-        }
-        {
-            command(
-                "/system/bin/sh",
-                &[
-                    "-c",
-                    include_str!("../../../Packaging/installer/common/stop-loader-device.sh"),
-                ],
-                30,
-            )?;
-        }
-        for package in [payload::NATIVE, payload::RESTORE] {
-            if package == payload::RESTORE {
-                crate::restore_ui::stop_runtime()?;
-                continue;
-            }
-            command(
-                "/system/bin/am",
-                &["force-stop", "--user", "0", package],
-                20,
-            )?;
-        }
         Ok::<_, io::Error>(())
     })?;
     {
@@ -549,11 +535,7 @@ fn apply_with_signature_reset(shared: &Shared, allow_native_reset: bool) -> io::
                 Step::Restore => {
                     {
                         workflow::update(shared, |s| s.completed_steps = 7)?;
-                        workflow::phase(
-                            shared,
-                            "applying",
-                            "Завершение установки. Экран закроется перед перезагрузкой",
-                        )?;
+                        workflow::phase(shared, "applying", "Установка RestoreMode")?;
                     }
                     install_apk(payload::RESTORE, restore)?;
                     fs::remove_file(restore)?;

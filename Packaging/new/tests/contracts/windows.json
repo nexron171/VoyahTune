@@ -513,7 +513,7 @@
       ],
       "reference": "carplay-memory-protection.test.js",
       "input": {
-        "process": "ru.big.town.restoremode:ota",
+        "process": "ru.big.town.updater",
         "foreground": true,
         "activity": "CarPlayHostActivity",
         "adjustment": 200

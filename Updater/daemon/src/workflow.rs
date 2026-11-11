@@ -52,7 +52,7 @@ pub fn phase(shared: &Shared, name: &str, step: &str) -> io::Result<()> {
     })
 }
 
-fn fail(shared: &Shared, error: &io::Error, repair: bool) {
+pub(crate) fn fail(shared: &Shared, error: &io::Error, repair: bool) {
     let message = error.to_string();
     let _ = crate::log(root(), &format!("FAILED {message}"));
     let _ = update(shared, |state| state.fail(message.clone(), repair));

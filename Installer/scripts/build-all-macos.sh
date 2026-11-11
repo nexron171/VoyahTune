@@ -57,7 +57,7 @@ TOOLCHAIN=$(python3 -c 'import tomllib; print(tomllib.load(open("Installer/rust-
 REMOTE=0
 if [[ $WINDOWS == 1 || $LINUX_BUILD == 1 ]]; then REMOTE=1; fi
 if [[ $CHECK != 1 ]]; then
-  PACKAGE_VERSION=$(python3 -c 'import tomllib; print(tomllib.load(open("Installer/Cargo.toml","rb"))["workspace"]["package"]["version"])')
+  PACKAGE_VERSION=$(python3 -c 'import json; print(json.load(open("versions.json"))["installer"])')
   if [[ -n "$PAYLOAD" ]]; then
     PAYLOAD=$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$PAYLOAD")
   fi

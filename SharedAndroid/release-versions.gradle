@@ -1,0 +1,10 @@
+import groovy.json.JsonSlurper
+
+def versions = new JsonSlurper().parse(rootProject.file('../versions.json'))
+
+ext.voyahReleaseVersion = providers.gradleProperty('voyahReleaseVersion')
+        .orElse(providers.environmentVariable('VOYAH_RELEASE_VERSION'))
+        .orElse(versions.voyahtune as String)
+ext.voyahMinimumInstallerVersion = providers.gradleProperty('voyahMinimumInstallerVersion')
+        .orElse(providers.environmentVariable('VOYAH_MINIMUM_INSTALLER_VERSION'))
+        .orElse(versions.installer as String)

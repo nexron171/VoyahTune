@@ -11,7 +11,6 @@ pub enum Step {
     Reboot,
 }
 
-/// The UI package replacement ends the visible session; only reboot finalization may follow it.
 pub fn execute(
     runyn: bool,
     mut perform: impl FnMut(Step) -> io::Result<()>,
@@ -40,9 +39,46 @@ pub fn execute(
     Ok(())
 }
 
+pub fn finalize_failure(
+    synchronize: impl FnOnce() -> io::Result<()>,
+    reboot: impl FnOnce() -> io::Result<()>,
+) -> io::Result<()> {
+    let synchronized = synchronize();
+    let rebooted = reboot();
+    rebooted.and(synchronized)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn failed_installation_always_attempts_reboot_even_if_synchronization_fails() {
+        for sync_fails in [false, true] {
+            for reboot_fails in [false, true] {
+                let actions = std::cell::RefCell::new(Vec::new());
+                let result = finalize_failure(
+                    || {
+                        actions.borrow_mut().push("sync");
+                        if sync_fails {
+                            Err(io::Error::other("sync failed"))
+                        } else {
+                            Ok(())
+                        }
+                    },
+                    || {
+                        actions.borrow_mut().push("reboot");
+                        if reboot_fails {
+                            Err(io::Error::other("reboot failed"))
+                        } else {
+                            Ok(())
+                        }
+                    },
+                );
+                assert_eq!(*actions.borrow(), ["sync", "reboot"]);
+                assert_eq!(result.is_ok(), !sync_fails && !reboot_fails);
+            }
+        }
+    }
     #[test]
     fn restore_is_the_last_operation_before_reboot() {
         let mut actual = Vec::new();
@@ -68,7 +104,7 @@ mod tests {
         );
     }
     #[test]
-    fn runyn_is_installed_before_the_ui_is_replaced() {
+    fn runyn_is_installed_before_restoremode() {
         let mut actual = Vec::new();
         execute(
             true,

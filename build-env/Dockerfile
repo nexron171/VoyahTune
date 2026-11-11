@@ -1,4 +1,4 @@
-# Build-only Linux environment for the unified VoyahTune payload: Native/RestoreMode/RunYN
+# Build-only Linux environment for the unified VoyahTune payload: Native/RestoreMode/RunYN/Updater
 # APKs, the OTA root service, the Go loader and the checks from Packaging/new/check.sh.
 #
 # Versions mirror Packaging/new/native/dependencies.lock.json and the Gradle projects.

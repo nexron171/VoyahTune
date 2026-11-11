@@ -21,8 +21,8 @@ usage() {
 Собирает образ из build-env/Dockerfile и выполняет сборку в контейнере под текущим UID.
 Аргументы make_release.sh передаются без изменений, например:
 
-  ./build_in_container.sh 4.6.2 --payload --minimum-installer-version 1.9.0 --minimum-ota-version 4.6.2
-  ./build_in_container.sh 4.6.2 --payload --minimum-installer-version 1.9.0 --minimum-ota-version 4.6.2 --no-zip
+  ./build_in_container.sh 4.6.2 --payload --minimum-installer-version 1.10.1 --minimum-ota-version 4.6.2
+  ./build_in_container.sh 4.6.2 --payload --minimum-installer-version 1.10.1 --minimum-ota-version 4.6.2 --no-zip
   ./build_in_container.sh --shell
 
 Опции:
@@ -72,7 +72,7 @@ fi
 
 mkdir -p "$CACHE/gradle" "$CACHE/cargo-registry"
 printf 'sdk.dir=%s\n' "$ANDROID_SDK" > "$CACHE/local.properties"
-for project in Native RestoreMode RunYN; do
+for project in Native RestoreMode RunYN Updater; do
     [ -e "$ROOT/$project/local.properties" ] || : > "$ROOT/$project/local.properties"
 done
 
@@ -146,5 +146,6 @@ exec "$DOCKER" run --rm --init ${terminal} \
     --volume "$CACHE/local.properties:$ROOT/Native/local.properties:ro" \
     --volume "$CACHE/local.properties:$ROOT/RestoreMode/local.properties:ro" \
     --volume "$CACHE/local.properties:$ROOT/RunYN/local.properties:ro" \
+    --volume "$CACHE/local.properties:$ROOT/Updater/local.properties:ro" \
     --env GRADLE_USER_HOME=/cache/gradle \
     "$tag" "$@"

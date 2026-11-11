@@ -91,7 +91,7 @@ esac
         )
         .unwrap();
         let mut maintenance = RuntimeMaintenance::new(RuntimeOperation::Install);
-        for step in [RuntimeStep::Block, RuntimeStep::Quiesce, RuntimeStep::Stop] {
+        for step in [RuntimeStep::Block, RuntimeStep::Stop] {
             maintenance.execute(step, || Ok::<_, Error>(())).unwrap();
         }
         engine.runtime_maintenance = Some(maintenance);

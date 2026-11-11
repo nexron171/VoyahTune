@@ -11,8 +11,6 @@ pub enum Operation {
 #[serde(rename_all = "kebab-case")]
 pub enum Step {
     Block,
-    Quiesce,
-    Drained,
     Stop,
     Copy,
     Cleanup,
@@ -46,6 +44,7 @@ pub struct RuntimeMaintenance {
     operation: Operation,
     next: Option<Step>,
     trace: Vec<Step>,
+    reboot_required: bool,
 }
 
 impl RuntimeMaintenance {
@@ -54,6 +53,7 @@ impl RuntimeMaintenance {
             operation,
             next: Some(Step::Block),
             trace: Vec::new(),
+            reboot_required: false,
         }
     }
 
@@ -65,6 +65,7 @@ impl RuntimeMaintenance {
             operation: Operation::Install,
             next: Some(Step::Check),
             trace: Vec::new(),
+            reboot_required: false,
         })
     }
 
@@ -73,11 +74,14 @@ impl RuntimeMaintenance {
         step: Step,
         action: impl FnOnce() -> Result<T, E>,
     ) -> Result<T, E> {
-        if self.next != Some(step) || matches!(step, Step::Drained | Step::RepairRequired) {
+        if self.next != Some(step) || step == Step::RepairRequired {
             self.fail();
             return Err(SequenceError.into());
         }
         self.trace.push(step);
+        if step == Step::Stop {
+            self.reboot_required = true;
+        }
         let value = match action() {
             Ok(value) => value,
             Err(error) => {
@@ -86,11 +90,7 @@ impl RuntimeMaintenance {
             }
         };
         self.next = match step {
-            Step::Block => Some(Step::Quiesce),
-            Step::Quiesce => {
-                self.trace.push(Step::Drained);
-                Some(Step::Stop)
-            }
+            Step::Block => Some(Step::Stop),
             Step::Stop => Some(if self.operation == Operation::Install {
                 Step::Copy
             } else {
@@ -99,6 +99,7 @@ impl RuntimeMaintenance {
             Step::Copy => Some(Step::Cleanup),
             Step::Cleanup | Step::Remove => Some(Step::Reboot),
             Step::Reboot => {
+                self.reboot_required = false;
                 if self.operation == Operation::Install {
                     Some(Step::Check)
                 } else {
@@ -115,6 +116,10 @@ impl RuntimeMaintenance {
         &self.trace
     }
 
+    pub fn reboot_required(&self) -> bool {
+        self.reboot_required
+    }
+
     fn fail(&mut self) {
         self.next = Some(Step::RepairRequired);
         if self.trace.last() != Some(&Step::RepairRequired) {
@@ -128,7 +133,39 @@ mod tests {
     use super::*;
 
     #[test]
-    fn no_write_action_runs_before_confirmed_quiesce_and_stop() {
+    fn installation_stops_without_waiting_for_agent_acknowledgements() {
+        let mut transaction = RuntimeMaintenance::new(Operation::Install);
+        let mut actions = Vec::new();
+        for step in [
+            Step::Block,
+            Step::Stop,
+            Step::Copy,
+            Step::Cleanup,
+            Step::Reboot,
+            Step::Check,
+        ] {
+            transaction
+                .execute(step, || {
+                    actions.push(step);
+                    Ok::<_, io::Error>(())
+                })
+                .unwrap();
+        }
+        assert_eq!(
+            actions,
+            [
+                Step::Block,
+                Step::Stop,
+                Step::Copy,
+                Step::Cleanup,
+                Step::Reboot,
+                Step::Check
+            ]
+        );
+    }
+
+    #[test]
+    fn no_write_action_runs_before_forced_stop() {
         let mut transaction = RuntimeMaintenance::new(Operation::Install);
         let mut writes = 0;
         let result: io::Result<()> = transaction.execute(Step::Copy, || {
@@ -142,7 +179,7 @@ mod tests {
     #[test]
     fn cleanup_failure_blocks_reboot_and_cannot_be_resumed_in_place() {
         let mut transaction = RuntimeMaintenance::new(Operation::Install);
-        for step in [Step::Block, Step::Quiesce, Step::Stop, Step::Copy] {
+        for step in [Step::Block, Step::Stop, Step::Copy] {
             transaction
                 .execute(step, || Ok::<_, io::Error>(()))
                 .unwrap();
@@ -158,6 +195,28 @@ mod tests {
             })
             .is_err());
         assert!(!rebooted);
+        assert!(transaction.reboot_required());
+    }
+
+    #[test]
+    fn failed_stop_requires_reboot_without_allowing_file_writes() {
+        let mut transaction = RuntimeMaintenance::new(Operation::Install);
+        transaction
+            .execute(Step::Block, || Ok::<_, io::Error>(()))
+            .unwrap();
+        assert!(!transaction.reboot_required());
+        assert!(transaction
+            .execute(Step::Stop, || Err::<(), _>(io::Error::other("kill failed")))
+            .is_err());
+        let mut copied = false;
+        assert!(transaction
+            .execute(Step::Copy, || {
+                copied = true;
+                Ok::<_, io::Error>(())
+            })
+            .is_err());
+        assert!(!copied);
+        assert!(transaction.reboot_required());
     }
 
     #[test]

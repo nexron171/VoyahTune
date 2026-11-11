@@ -74,7 +74,7 @@ pub fn wall() -> u64 {
 pub fn open_ui() -> io::Result<()> {
     command(
         "/system/bin/am",
-        &["start", "--user", "0", "-n", crate::restore_ui::component()],
+        &["start", "--user", "0", "-n", crate::ui_clients::component()],
         20,
     )
     .and_then(|s| {

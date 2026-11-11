@@ -50,6 +50,14 @@ fn fixed_payload_loads_without_external_manifests() {
 }
 
 #[test]
+fn usb_payload_requires_updater_apk() {
+    let root = tempfile::tempdir().unwrap();
+    fixture(root.path(), 5);
+    fs::remove_file(root.path().join("common/voyahtune-updater.apk")).unwrap();
+    assert!(Payload::load(root.path()).is_err());
+}
+
+#[test]
 fn future_format_requires_updated_installer() {
     let root = tempfile::tempdir().unwrap();
     fixture(root.path(), 99);

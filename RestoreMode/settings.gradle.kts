@@ -25,8 +25,8 @@ dependencyResolutionManagement {
 rootProject.name = "RestoreMode"
 include(":app")
 
-include(":updater-ui")
-project(":updater-ui").projectDir = file("../Updater/ui")
+include(":updater-client")
+project(":updater-client").projectDir = file("../Updater/client")
 
 include(":diplay-common", ":diplay-shared")
 project(":diplay-common").projectDir = file("diplay/common")

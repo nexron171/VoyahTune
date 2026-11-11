@@ -25,7 +25,6 @@ import android.widget.TextView;
 
 import ru.big.town.restoremode.BuildConfig;
 import ru.big.town.restoremode.LoggingActivity;
-import ru.big.town.restoremode.OtaActivity;
 import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.diagnostics.metrics.SystemMetricsReader;
 import ru.big.town.restoremode.diagnostics.runtime.SystemDiagnosticsReader;
@@ -191,8 +190,9 @@ public final class OtherSettingsFragment extends SettingsSectionFragment {
                             Intent updates =
                                     new Intent(Intent.ACTION_MAIN)
                                             .setComponent(
-                                                    new android.content.ComponentName(
-                                                            requireContext(), OtaActivity.class))
+                                                    new ComponentName(
+                                                            "ru.big.town.updater",
+                                                            "ru.big.town.updater.UpdaterActivity"))
                                             .addFlags(
                                                     Intent.FLAG_ACTIVITY_NEW_TASK
                                                             | Intent.FLAG_ACTIVITY_CLEAR_TASK)

@@ -15,6 +15,8 @@ import tempfile
 import zipfile
 from pathlib import Path
 
+from build_versions import build_environment, sync_installer_version
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -256,9 +258,8 @@ def main():
         )
     build = ROOT / "Releases/build"
     build.mkdir(parents=True, exist_ok=True)
-    installer_version = tomllib.loads((ROOT / "Installer/Cargo.toml").read_text())[
-        "workspace"
-    ]["package"]["version"]
+    versions = build_environment(ROOT, version, args.minimum_installer_version)
+    installer_version = versions["VOYAH_INSTALLER_VERSION"]
     destination = ROOT / "Releases/dist" / f"VoyahTune-Installer-{installer_version}"
     if "windows" in selected and args.windows_arch:
         destination = destination.with_name(
@@ -273,6 +274,7 @@ def main():
         else ""
     )
     env = os.environ.copy()
+    env.update(versions)
     env["VOYAH_CATALOG_URL"] = args.catalog_url or ""
     cached = ROOT / "Releases/cache/cargo"
     if not env.get("CARGO_HOME") and cached.exists():
@@ -293,6 +295,7 @@ def main():
     lock = build / ".release.lock"
     lock.mkdir()
     try:
+        sync_installer_version(ROOT)
         with tempfile.TemporaryDirectory(prefix=".release-", dir=build) as temporary:
             work = Path(temporary)
             run(["sh", ROOT / "Packaging/new/check.sh"])

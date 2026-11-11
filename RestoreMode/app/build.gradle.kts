@@ -7,6 +7,10 @@ plugins {
     alias(libs.plugins.android.application)
 }
 
+apply(from = rootProject.file("../SharedAndroid/release-versions.gradle"))
+val voyahReleaseVersion: Provider<String> by extra
+val voyahMinimumInstallerVersion: Provider<String> by extra
+
 android {
     namespace = "ru.big.town.restoremode"
     compileSdk = 37
@@ -15,7 +19,7 @@ android {
         applicationId = "ru.big.town.restoremode"
         minSdk = 30
         targetSdk = 35
-        val release = providers.gradleProperty("voyahReleaseVersion").orElse("3.14.0").get()
+        val release = voyahReleaseVersion.get()
         val parts = release.substringBefore('-').substringBefore('+').split('.').map { it.toInt() }
         require(parts.size == 3 && parts.all { it in 0..999 })
         versionCode = parts[0] * 1_000_000 + parts[1] * 1_000 + parts[2]
@@ -81,7 +85,7 @@ android {
 
 dependencies {
     implementation("androidx.media:media:1.6.0")
-    implementation(project(":updater-ui"))
+    implementation(project(":updater-client"))
     implementation(project(":diplay-common"))
 
     implementation("net.java.dev.jna:jna:5.18.1@aar")
@@ -200,14 +204,14 @@ androidComponents {
         }
         variant.sources.assets?.addGeneratedSourceDirectory(authentication, CarPlayAuthenticationAssets::outputDirectory)
         val identity = tasks.register<VoyahBuildIdentity>("generate${variant.name.replaceFirstChar { it.uppercase() }}VoyahIdentity") {
-            releaseVersion.set(providers.gradleProperty("voyahReleaseVersion").orElse("0.0.0-dev"))
+            releaseVersion.set(voyahReleaseVersion)
             revision.set(providers.gradleProperty("voyahBuildRevision").orElse("local"))
             val packaging = rootProject.projectDir.parentFile.resolve("Packaging")
             // Signed APK identity retains the existing shared Android contract.
             infrastructure.set("unified")
             val runtime = packaging.resolve("new")
             payloadFormat.set(providers.gradleProperty("voyahPayloadFormat").map { it.toInt() }.orElse(5))
-            minimumInstallerVersion.set(providers.gradleProperty("voyahMinimumInstallerVersion").orElse("1.9.1"))
+            minimumInstallerVersion.set(voyahMinimumInstallerVersion)
             runtimeAliases.convention(emptyMap())
             val recipePath = providers.gradleProperty("voyahInstallRecipe").orNull
             if (recipePath != null) {

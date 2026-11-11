@@ -89,6 +89,7 @@ impl Default for Recipe {
             "native.apk",
             "whitelist.xml",
             "voyahtune-updater",
+            "voyahtune-updater.apk",
             "voyahtune.updater.rc",
             "voyahtune-ota-bootstrap.json",
             "voyahtune.load.sh",

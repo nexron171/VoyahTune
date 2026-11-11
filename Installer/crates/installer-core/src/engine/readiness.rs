@@ -168,13 +168,6 @@ impl Engine {
             || status["uid"] != 0
             || status["infrastructure"] != self.payload.manifest.infrastructure.as_str()
             || !status["pid"].as_u64().is_some_and(|pid| pid > 0)
-            || !status["capabilities"]
-                .as_array()
-                .is_some_and(|capabilities| {
-                    capabilities
-                        .iter()
-                        .any(|value| value == "restoremode-ota-ui-v1")
-                })
         {
             return Err(
                 Error::new("HEALTH_PENDING", "Несовместимый ответ OTA-службы").detail(response),
@@ -288,6 +281,11 @@ done
         self.verify_active_apk(NATIVE, "native.apk", Some(NATIVE_PATH))?;
         self.application_data("restore", NATIVE)?;
         self.verify_readiness()?;
+        self.verify_active_apk(
+            payload::UPDATER,
+            "voyahtune-updater.apk",
+            Some(payload::UPDATER_PATH),
+        )?;
         for package in [NATIVE, RESTORE] {
             self.application_data("cleanup", package)?;
         }
@@ -381,9 +379,9 @@ done
                         }
                         self.readiness_command(
                             "cmd package resolve-activity --brief --user 0 \
-                             -n ru.big.town.restoremode/.OtaActivity | grep -Fx \
-                             -e 'ru.big.town.restoremode/.OtaActivity' \
-                             -e 'ru.big.town.restoremode/ru.big.town.restoremode.OtaActivity'",
+                             -n ru.big.town.updater/.UpdaterActivity | grep -Fx \
+                             -e 'ru.big.town.updater/.UpdaterActivity' \
+                             -e 'ru.big.town.updater/ru.big.town.updater.UpdaterActivity'",
                             deadline,
                         )?;
                         verified_identity = identity.clone();
@@ -567,7 +565,7 @@ case "$script" in
     *'--method otaHealth'*) echo "Result: Bundle[{ready=true, version=$version}]" ;;
     *'cat /proc/sys/kernel/random/boot_id'*) printf 'boot-1\n101\n102\n103\n' ;;
     *'voyahtune-updater --health'*)
-            echo '{"schema":1,"ok":true,"uid":0,"pid":104,"infrastructure":"unified","capabilities":["restoremode-ota-ui-v1","unified-runtime-v1"]}' ;;
+            echo '{"schema":1,"ok":true,"uid":0,"pid":104,"infrastructure":"unified","capabilities":["unified-runtime-v1"]}' ;;
     *'voyahtune-loader --check-hooks'*)
         if [ -e "$root/hooks-failed" ]; then echo 'hook acc: failed' >&2; exit 1; fi ;;
     *'getprop ro.build.fingerprint'*) echo H97C ;;
@@ -582,7 +580,8 @@ esac
             "artifacts":[
                 {"name":"native.apk","path":"native.apk","sha256":"0".repeat(64),"size":1},
                 {"name":"restore_mode.apk","path":"restore_mode.apk","sha256":"0".repeat(64),"size":1},
-                {"name":"runyn.apk","path":"runyn.apk","sha256":"0".repeat(64),"size":1}
+                {"name":"runyn.apk","path":"runyn.apk","sha256":"0".repeat(64),"size":1},
+                {"name":"voyahtune-updater.apk","path":"voyahtune-updater.apk","sha256":"0".repeat(64),"size":1}
             ]
         });
         for artifact in manifest["artifacts"].as_array().unwrap() {
@@ -614,7 +613,8 @@ esac
         }
         assert!(engine.readiness_sample(deadline, &mut sent).is_err());
         assert!(sent);
-        assert!(engine.readiness_sample(deadline, &mut sent).is_ok());
+        let sample = engine.readiness_sample(deadline, &mut sent);
+        assert!(sample.is_ok(), "{sample:?}");
         let progress: Vec<_> = captured
             .lock()
             .unwrap()

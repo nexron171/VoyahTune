@@ -23,17 +23,23 @@ if (catalogUrl) {
   if (u.protocol !== 'https:' || u.username || u.password || u.hash)
     throw Error('Catalog must be an HTTPS URL without credentials or fragment');
 }
-if (option('--version')) throw Error('Installer version is defined in Installer/Cargo.toml.');
+if (option('--version')) throw Error('Installer version is defined in versions.json.');
 const payloadPath = option('--payload') ? resolve(option('--payload')) : undefined;
 const payloadManifest = payloadPath
   ? JSON.parse(await readFile(join(payloadPath, 'manifest.json'), 'utf8'))
   : undefined;
-const toolingVersion = (await readFile(join(root, 'Installer/Cargo.toml'), 'utf8')).match(
-  /version = "([^"]+)"/,
-)[1];
-const packageVersion = toolingVersion;
+const versionResult = spawnSync(
+  process.platform === 'win32' ? 'python' : 'python3',
+  [join(root, 'Installer/scripts/build_versions.py'), '--sync-installer'],
+  { encoding: 'utf8' },
+);
+if (versionResult.error || versionResult.status !== 0)
+  throw Error(`Cannot read versions.json: ${versionResult.error || versionResult.stderr}`);
+const versions = JSON.parse(versionResult.stdout);
+const toolingVersion = versions.VOYAH_INSTALLER_VERSION;
 const env = {
   ...process.env,
+  ...versions,
   VOYAH_CATALOG_URL: catalogUrl,
   VOYAH_DESKTOP_CATALOG_URL: catalogUrl || 'https://voyahtune.ru/api/v1/releases',
 };
@@ -212,7 +218,7 @@ if (flag('--prepare-only')) {
   console.log(`Prepared GUI resources: ${finalBundle}`);
   process.exit(0);
 }
-const releaseConfig = { version: packageVersion };
+const releaseConfig = {};
 // Platform-independent web assets may be built on the native host to avoid running
 // esbuild's Go runtime under x64 emulation. The orchestrator supplies a fresh build.
 if (option('--frontend-dist')) {

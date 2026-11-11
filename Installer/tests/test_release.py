@@ -16,6 +16,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / "Installer/scripts"))
 spec = importlib.util.spec_from_file_location(
     "release", REPO / "Installer/scripts/release.py"
 )
@@ -35,6 +36,9 @@ class ReleaseTests(unittest.TestCase):
         (self.root / "Installer/Cargo.toml").write_text(
             '[workspace.package]\nversion="1.0.0"\n'
         )
+        (self.root / "versions.json").write_text(
+            json.dumps({"installer": "1.0.0", "voyahtune": "4.5.6"})
+        )
         self.generation = 0
         self.selected = []
         self.fail_build = False
@@ -42,6 +46,9 @@ class ReleaseTests(unittest.TestCase):
     def fake_run(self, command, **kwargs):
         args = list(map(str, command))
         if Path(args[0]).name == "installer-build":
+            self.assertEqual(kwargs["env"]["VOYAH_INSTALLER_VERSION"], "1.0.0")
+            self.assertEqual(kwargs["env"]["VOYAH_RELEASE_VERSION"], args[args.index("--version") + 1])
+            self.assertEqual(kwargs["env"]["VOYAH_MINIMUM_INSTALLER_VERSION"], args[args.index("--minimum-installer-version") + 1])
             if self.fail_build:
                 raise subprocess.CalledProcessError(1, args)
             self.assertNotIn("--infrastructure", args)

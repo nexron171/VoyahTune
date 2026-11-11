@@ -14,8 +14,6 @@
       "expected": {
         "trace": [
           "block",
-          "quiesce",
-          "drained",
           "stop",
           "copy",
           "cleanup",
@@ -25,39 +23,20 @@
       }
     },
     {
-      "id": "installation.quiesce-timeout",
+      "id": "installation.stop-failure",
       "contract": "installation.lifecycle",
       "agents": [],
       "reference": "migration lifecycle requirement",
       "input": {
         "events": [
           "install",
-          "quiesce-timeout"
+          "stop-failure"
         ]
       },
       "expected": {
         "trace": [
           "block",
-          "quiesce",
-          "repair-required"
-        ]
-      }
-    },
-    {
-      "id": "installation.stale-ack",
-      "contract": "installation.lifecycle",
-      "agents": [],
-      "reference": "migration lifecycle requirement",
-      "input": {
-        "events": [
-          "install",
-          "ack-other-identity"
-        ]
-      },
-      "expected": {
-        "trace": [
-          "block",
-          "quiesce",
+          "stop",
           "repair-required"
         ]
       }
@@ -76,8 +55,6 @@
       "expected": {
         "trace": [
           "block",
-          "quiesce",
-          "drained",
           "stop",
           "copy",
           "repair-required"
@@ -97,8 +74,6 @@
       "expected": {
         "trace": [
           "block",
-          "quiesce",
-          "drained",
           "stop",
           "remove",
           "reboot"

@@ -1,5 +1,4 @@
-# Independent from the loader and both APKs; init maintains one process and restarts it.
-# The OD UI is RestoreMode's isolated :ota process.
+# Independent from the loader and Android APKs; init owns the update executor.
 on post-fs-data
     mkdir /data/local/voyahtune-updater 0700 root root
     chmod 0700 /data/local/voyahtune-updater

@@ -22,17 +22,10 @@ fn lifecycle(input: &Value) -> io::Result<Value> {
         Operation::Install
     });
     let steps: &[Step] = if removal {
-        &[
-            Step::Block,
-            Step::Quiesce,
-            Step::Stop,
-            Step::Remove,
-            Step::Reboot,
-        ]
+        &[Step::Block, Step::Stop, Step::Remove, Step::Reboot]
     } else {
         &[
             Step::Block,
-            Step::Quiesce,
             Step::Stop,
             Step::Copy,
             Step::Cleanup,
@@ -43,7 +36,7 @@ fn lifecycle(input: &Value) -> io::Result<Value> {
     for &step in steps {
         let result = maintenance.execute(step, || {
             // Device command/IPC failures are boundary inputs; ordering and stop-on-error are production code.
-            if (step == Step::Quiesce && (has("quiesce-timeout") || has("ack-other-identity")))
+            if (step == Step::Stop && has("stop-failure"))
                 || (step == Step::Copy && has("copy-failure"))
             {
                 return Err(io::Error::other("device operation failed"));

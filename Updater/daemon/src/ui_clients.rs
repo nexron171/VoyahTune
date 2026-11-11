@@ -8,14 +8,13 @@ use std::{
 };
 
 pub fn component() -> &'static str {
-    "ru.big.town.restoremode/.OtaActivity"
+    "ru.big.town.updater/.UpdaterActivity"
 }
 pub fn capabilities() -> Vec<&'static str> {
     vec![
         "install-step-progress",
         "dns-settings",
         "unified-runtime-v1",
-        "restoremode-ota-ui-v1",
         "catalog-releases",
         "select-release",
         "application-log-v1",
@@ -52,8 +51,8 @@ fn identity(path: &Path, system: bool) -> io::Result<Identity> {
 }
 static VERIFIED: Mutex<Option<(Identity, Identity)>> = Mutex::new(None);
 
-// PackageManager owns this registry; only the unique installed RestoreMode UID is accepted.
-fn registered_apk(xml: &str, uid: u32) -> io::Result<PathBuf> {
+// Both signed UI packages have independent PackageManager identities.
+fn registered_apk(xml: &str, uid: u32, package: &str) -> io::Result<PathBuf> {
     use quick_xml::{events::Event, Reader};
     let mut reader = Reader::from_str(xml);
     reader.config_mut().expand_empty_elements = true;
@@ -91,13 +90,16 @@ fn registered_apk(xml: &str, uid: u32) -> io::Result<PathBuf> {
                             _ => {}
                         }
                     }
-                    if name.as_deref() == Some(payload::RESTORE) {
+                    if name.as_deref() == Some(package) {
                         if found.is_some() || shared || id != Some(uid) || uid < 10000 {
-                            return Err(invalid("Недопустимый UID RestoreMode"));
+                            return Err(invalid("Недопустимый UID UI"));
                         }
-                        let code =
-                            PathBuf::from(path.ok_or_else(|| invalid("Нет пути RestoreMode"))?);
-                        if !code.starts_with("/data/app")
+                        let code = PathBuf::from(path.ok_or_else(|| invalid("Нет пути UI"))?);
+                        if !(code.starts_with("/data/app")
+                            || (package == payload::UPDATER
+                                && (code == Path::new(payload::UPDATER_PATH)
+                                    || Some(code.as_path())
+                                        == Path::new(payload::UPDATER_PATH).parent())))
                             || code.components().any(|p| {
                                 !matches!(
                                     p,
@@ -105,13 +107,19 @@ fn registered_apk(xml: &str, uid: u32) -> io::Result<PathBuf> {
                                 )
                             })
                         {
-                            return Err(invalid("Недопустимый путь RestoreMode"));
+                            return Err(invalid("Недопустимый путь UI"));
                         }
-                        found = Some(if code.extension().is_some_and(|s| s == "apk") {
-                            code
-                        } else {
-                            code.join("base.apk")
-                        });
+                        found = Some(
+                            if package == payload::UPDATER
+                                && Some(code.as_path()) == Path::new(payload::UPDATER_PATH).parent()
+                            {
+                                PathBuf::from(payload::UPDATER_PATH)
+                            } else if code.extension().is_some_and(|s| s == "apk") {
+                                code
+                            } else {
+                                code.join("base.apk")
+                            },
+                        );
                     }
                 }
                 depth += 1;
@@ -128,21 +136,23 @@ fn registered_apk(xml: &str, uid: u32) -> io::Result<PathBuf> {
     if !root || depth != 0 {
         return Err(invalid("Неполный реестр APK"));
     }
-    found.ok_or_else(|| invalid("RestoreMode не зарегистрирован"))
+    found.ok_or_else(|| invalid("UI не зарегистрирован"))
 }
 
 pub fn authorize(uid: u32) -> io::Result<()> {
-    if protocol::package_uid(
-        &fs::read_to_string("/data/system/packages.list")?,
-        payload::RESTORE,
-    ) != Some(uid)
-    {
-        return Err(invalid("Клиент не имеет доступа"));
-    }
-    let path = registered_apk(&fs::read_to_string("/data/system/packages.xml")?, uid)?;
-    let restore = identity(&path, false)?;
+    let packages = fs::read_to_string("/data/system/packages.list")?;
+    let package = [payload::RESTORE, payload::UPDATER]
+        .into_iter()
+        .find(|package| protocol::package_uid(&packages, package) == Some(uid))
+        .ok_or_else(|| invalid("Клиент не имеет доступа"))?;
+    let path = registered_apk(
+        &fs::read_to_string("/data/system/packages.xml")?,
+        uid,
+        package,
+    )?;
+    let client = identity(&path, false)?;
     let anchor = identity(Path::new(payload::NATIVE_PATH), true)?;
-    let before = (restore, anchor);
+    let before = (client, anchor);
     let mut cache = VERIFIED
         .lock()
         .map_err(|_| invalid("Проверка интерфейса недоступна"))?;
@@ -151,13 +161,13 @@ pub fn authorize(uid: u32) -> io::Result<()> {
     }
     let native_signers = payload::verified_signers(Path::new(payload::NATIVE_PATH))
         .map_err(|e| invalid(&e.to_string()))?;
-    let restore_signers = payload::verified_signers(&path).map_err(|e| invalid(&e.to_string()))?;
+    let client_signers = payload::verified_signers(&path).map_err(|e| invalid(&e.to_string()))?;
     if native_signers.is_empty()
-        || native_signers != restore_signers
+        || native_signers != client_signers
         || release_core::apk_identity::read(&path)
             .map_err(|e| invalid(&e.to_string()))?
             .0
-            != payload::RESTORE
+            != package
     {
         return Err(invalid(
             "Подпись интерфейса не соответствует установленному Native",
@@ -175,42 +185,6 @@ pub fn authorize(uid: u32) -> io::Result<()> {
     Ok(())
 }
 
-fn runtime_process(name: &str) -> bool {
-    (name == payload::RESTORE || name.starts_with("ru.big.town.restoremode:"))
-        && name != "ru.big.town.restoremode:ota"
-}
-pub fn stop_runtime() -> io::Result<()> {
-    let uid = protocol::package_uid(
-        &fs::read_to_string("/data/system/packages.list")?,
-        payload::RESTORE,
-    )
-    .ok_or_else(|| invalid("Нет уникального UID RestoreMode"))?;
-    for entry in fs::read_dir("/proc")? {
-        let path = entry?.path();
-        let Some(pid) = path
-            .file_name()
-            .and_then(|s| s.to_str())
-            .and_then(|s| s.parse::<i32>().ok())
-        else {
-            continue;
-        };
-        let Ok(cmd) = fs::read(path.join("cmdline")) else {
-            continue;
-        };
-        let name = String::from_utf8_lossy(cmd.split(|b| *b == 0).next().unwrap_or_default());
-        if !runtime_process(&name) || fs::metadata(&path).map(|m| m.uid()).ok() != Some(uid) {
-            continue;
-        }
-        if unsafe { libc::kill(pid, libc::SIGKILL) } != 0 {
-            let error = io::Error::last_os_error();
-            if error.raw_os_error() != Some(libc::ESRCH) {
-                return Err(error);
-            }
-        }
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -218,7 +192,7 @@ mod tests {
     fn only_registered_unique_restore_identity_is_accepted() {
         let valid = r#"<packages><package name="ru.big.town.restoremode" userId="10123" codePath="/data/app/restore-123"/></packages>"#;
         assert_eq!(
-            registered_apk(valid, 10123).unwrap(),
+            registered_apk(valid, 10123, payload::RESTORE).unwrap(),
             Path::new("/data/app/restore-123/base.apk")
         );
         for bad in [
@@ -232,7 +206,10 @@ mod tests {
             valid.replace("</packages>", ""),
             valid.replace("<packages>", "<other>"),
         ] {
-            assert!(registered_apk(&bad, 10123).is_err(), "{bad}");
+            assert!(
+                registered_apk(&bad, 10123, payload::RESTORE).is_err(),
+                "{bad}"
+            );
         }
         assert_eq!(
             protocol::package_uid(
@@ -243,11 +220,24 @@ mod tests {
         );
     }
     #[test]
-    fn ota_process_survives_runtime_stop() {
-        assert!(runtime_process("ru.big.town.restoremode"));
-        assert!(runtime_process("ru.big.town.restoremode:worker"));
-        assert!(!runtime_process("ru.big.town.restoremode:ota"));
-        assert!(!runtime_process("ru.big.town.restoremode.other"));
-        assert!(!runtime_process("ru.big.town.anative"));
+    fn independent_updater_accepts_system_or_data_registration() {
+        for path in [
+            "/data/app/updater/base.apk",
+            payload::UPDATER_PATH,
+            "/system/priv-app/VoyahTuneUpdater",
+        ] {
+            let xml = format!(
+                r#"<packages><package name="ru.big.town.updater" userId="10124" codePath="{path}"/></packages>"#
+            );
+            assert_eq!(
+                registered_apk(&xml, 10124, payload::UPDATER).unwrap(),
+                if path == "/system/priv-app/VoyahTuneUpdater" {
+                    Path::new(payload::UPDATER_PATH)
+                } else {
+                    Path::new(path)
+                }
+            );
+            assert!(registered_apk(&xml, 10124, payload::RESTORE).is_err());
+        }
     }
 }

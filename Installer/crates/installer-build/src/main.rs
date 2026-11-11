@@ -170,7 +170,7 @@ fn run(args: Args) -> Result<()> {
                 "Не удалось собрать root-службу",
             ));
         }
-        for project in ["RunYN", "Native", "RestoreMode"] {
+        for project in ["RunYN", "Updater", "Native", "RestoreMode"] {
             #[cfg(not(windows))]
             let mut cmd = Command::new(root.join(project).join("gradlew"));
             #[cfg(windows)]
@@ -339,6 +339,7 @@ fn base_payload(root: &Path) -> Result<(installer_core::recipe::Recipe, serde_js
             match name {
             "native.apk" => "Native/app/build/outputs/apk/release/app-release.apk",
             "restore_mode.apk" => "RestoreMode/app/build/outputs/apk/release/app-release.apk",
+            "voyahtune-updater.apk" => "Updater/app/build/outputs/apk/release/app-release.apk",
             "runyn.apk" => "RunYN/app/build/outputs/apk/release/app-release.apk",
             "whitelist.xml" => "Packaging/system/privapp-permissions-ru.big.town.anative.xml",
             "voyahtune-updater" => "Updater/build/daemon/arm64-v8a/voyahtune-updater",
