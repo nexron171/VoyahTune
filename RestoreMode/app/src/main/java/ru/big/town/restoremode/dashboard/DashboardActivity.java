@@ -2290,7 +2290,7 @@ public class DashboardActivity extends AppCompatActivity {
                         splitTilesGrid,
                         (column, row, width, height) -> {
                             GridLayout.LayoutParams params = new GridLayout.LayoutParams();
-                            params.width = tileW * width + (width - 1) * 2 * m;
+                            params.width = tileWidth(tileW, width, m, column);
                             params.columnSpec = GridLayout.spec(column, width);
                             params.rowSpec = GridLayout.spec(row, height);
                             applyTileVerticalMetrics(
@@ -2335,7 +2335,7 @@ public class DashboardActivity extends AppCompatActivity {
                 linkView.setOnClickListener(view -> LinkShortcutLauncher.open(this, entry));
                 int[] gridPosition = TileGridPacking.place(occupied, rows, 1, 1);
                 GridLayout.LayoutParams linkLayout = new GridLayout.LayoutParams();
-                linkLayout.width = tileW;
+                linkLayout.width = tileWidth(tileW, 1, m, gridPosition[0]);
                 linkLayout.columnSpec = GridLayout.spec(gridPosition[0], 1);
                 linkLayout.rowSpec = GridLayout.spec(gridPosition[1]);
                 applyTileVerticalMetrics(
@@ -2379,7 +2379,7 @@ public class DashboardActivity extends AppCompatActivity {
                 dialView.setOnClickListener(v -> onDialNumber(finalDialEntry));
                 int[] gridPosition = TileGridPacking.place(occupied, rows, 2, 1);
                 GridLayout.LayoutParams dialLp = new GridLayout.LayoutParams();
-                dialLp.width = tileW * 2 + m * 2;
+                dialLp.width = tileWidth(tileW, 2, m, gridPosition[0]);
                 dialLp.columnSpec = GridLayout.spec(gridPosition[0], 2);
                 dialLp.rowSpec = GridLayout.spec(gridPosition[1]);
                 applyTileVerticalMetrics(
@@ -2409,7 +2409,7 @@ public class DashboardActivity extends AppCompatActivity {
                 scenarioView.setOnClickListener(v -> runScenario(finalScenario));
                 int[] gridPosition = TileGridPacking.place(occupied, rows, 2, 1);
                 GridLayout.LayoutParams scenarioLp = new GridLayout.LayoutParams();
-                scenarioLp.width = tileW * 2 + m * 2;
+                scenarioLp.width = tileWidth(tileW, 2, m, gridPosition[0]);
                 scenarioLp.columnSpec = GridLayout.spec(gridPosition[0], 2);
                 scenarioLp.rowSpec = GridLayout.spec(gridPosition[1]);
                 applyTileVerticalMetrics(
@@ -2666,7 +2666,7 @@ public class DashboardActivity extends AppCompatActivity {
                 int[] dims = getWidgetDimensions(tile.id);
                 int[] gridPosition = TileGridPacking.place(occupied, rows, dims[0], dims[1]);
                 GridLayout.LayoutParams lp = new GridLayout.LayoutParams();
-                lp.width = tileW * dims[0] + (dims[0] - 1) * 2 * m;
+                lp.width = tileWidth(tileW, dims[0], m, gridPosition[0]);
                 lp.columnSpec = GridLayout.spec(gridPosition[0], dims[0]);
                 lp.rowSpec = GridLayout.spec(gridPosition[1], dims[1]);
                 applyTileVerticalMetrics(
@@ -2715,7 +2715,7 @@ public class DashboardActivity extends AppCompatActivity {
                 int[] gridPosition =
                         TileGridPacking.place(occupied, rows, widgetWidth, widgetHeight);
                 GridLayout.LayoutParams lp = new GridLayout.LayoutParams();
-                lp.width = tileW * widgetWidth + (widgetWidth - 1) * 2 * m;
+                lp.width = tileWidth(tileW, widgetWidth, m, gridPosition[0]);
                 lp.columnSpec = GridLayout.spec(gridPosition[0], widgetWidth);
                 lp.rowSpec = GridLayout.spec(gridPosition[1], widgetHeight);
                 applyTileVerticalMetrics(
@@ -2780,7 +2780,7 @@ public class DashboardActivity extends AppCompatActivity {
 
                 int[] gridPosition = TileGridPacking.place(occupied, rows, 2, 1);
                 GridLayout.LayoutParams lp = new GridLayout.LayoutParams();
-                lp.width = tileW * 2 + m * 2;
+                lp.width = tileWidth(tileW, 2, m, gridPosition[0]);
                 lp.columnSpec = GridLayout.spec(gridPosition[0], 2);
                 lp.rowSpec = GridLayout.spec(gridPosition[1], 1);
                 applyTileVerticalMetrics(
@@ -2821,7 +2821,7 @@ public class DashboardActivity extends AppCompatActivity {
 
                 int[] gridPosition = TileGridPacking.place(occupied, rows, 1, 1);
                 GridLayout.LayoutParams lp = new GridLayout.LayoutParams();
-                lp.width = tileW;
+                lp.width = tileWidth(tileW, 1, m, gridPosition[0]);
                 lp.columnSpec = GridLayout.spec(gridPosition[0], 1);
                 lp.rowSpec = GridLayout.spec(gridPosition[1]);
                 applyTileVerticalMetrics(
@@ -2953,6 +2953,14 @@ public class DashboardActivity extends AppCompatActivity {
     }
 
     /**
+     * Ширина плитки: колонки задают шаг сетки, а крайняя левая колонка забирает свой левый
+     * отступ в ширину, чтобы сетка начиналась от края экрана без сдвига остальных колонок.
+     */
+    private static int tileWidth(int cellWidth, int span, int spacing, int column) {
+        return cellWidth * span + (span - 1) * 2 * spacing + (column == 0 ? spacing : 0);
+    }
+
+    /**
      * Вертикальные метрики плитки: высота по номеру ряда плюс, при включённой «Полноэкранной
      * сетке», верхний отступ. Верхний отступ контента и сетки в этом режиме снят, поэтому плитки
      * верхнего ряда компенсируют его собственным отступом и остаются на месте, а заданные
@@ -2980,7 +2988,8 @@ public class DashboardActivity extends AppCompatActivity {
                 topMargin = m + topInset;
             }
         }
-        lp.setMargins(m, topMargin, m, m);
+        int leftMargin = gridPosition[0] == 0 ? 0 : m;
+        lp.setMargins(leftMargin, topMargin, m, m);
     }
 
     /** Включена ли «Полноэкранная сетка» в настройках. */
