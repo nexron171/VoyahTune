@@ -3,9 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
-	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -27,21 +27,49 @@ type agentStatus struct {
 }
 
 type loaderStatus struct {
-	Schema            int                    `json:"schema"`
-	Boot              string                 `json:"boot"`
-	Loader            processIdentity        `json:"loader"`
-	UpdatedUptime     int64                  `json:"updatedUptime"`
-	StableSinceUptime int64                  `json:"stableSinceUptime,omitempty"`
-	State             string                 `json:"state"`
-	Agents            map[string]agentStatus `json:"agents"`
+	Schema          int                    `json:"schema"`
+	Boot            string                 `json:"boot"`
+	Loader          processIdentity        `json:"loader"`
+	UpdatedUptime   int64                  `json:"updatedUptime"`
+	RequiredChanges uint64                 `json:"requiredChanges"`
+	State           string                 `json:"state"`
+	Agents          map[string]agentStatus `json:"agents"`
 }
 
 type statusStore struct {
-	mutex  sync.Mutex
-	agents map[string]agentStatus
+	mutex           sync.Mutex
+	agents          map[string]agentStatus
+	dynamic         map[string]bool
+	requiredChanges uint64
 }
 
-func (store *statusStore) snapshot(procRoot string) map[string]agentStatus {
+func (status agentStatus) sameReadiness(other agentStatus) bool {
+	if status.Identity != other.Identity || status.Target != other.Target || status.State != other.State {
+		return false
+	}
+	if status.State != "active" {
+		return true
+	}
+	return (status.Reason == "") == (other.Reason == "") && status.UID == other.UID &&
+		status.NativeID == other.NativeID && status.RuntimeID == other.RuntimeID &&
+		status.Revision == other.Revision && slices.Equal(status.Modules, other.Modules)
+}
+
+func (store *statusStore) report(agent nativeAgentConfig, status agentStatus) {
+	store.mutex.Lock()
+	defer store.mutex.Unlock()
+	previous, present := store.agents[agent.ID]
+	if !agent.Dynamic && (!present || store.dynamic[agent.ID] || !previous.sameReadiness(status)) {
+		store.requiredChanges++
+	}
+	if store.dynamic == nil {
+		store.dynamic = map[string]bool{}
+	}
+	store.dynamic[agent.ID] = agent.Dynamic
+	store.agents[agent.ID] = status
+}
+
+func (store *statusStore) snapshot(procRoot string) (map[string]agentStatus, uint64) {
 	store.mutex.Lock()
 	defer store.mutex.Unlock()
 	result := make(map[string]agentStatus, len(store.agents))
@@ -52,11 +80,15 @@ func (store *statusStore) snapshot(procRoot string) map[string]agentStatus {
 				status.Identity = processIdentity{}
 				status.State = "waiting"
 				status.Reason = "process ended"
+				if !store.dynamic[id] {
+					store.requiredChanges++
+				}
+				store.agents[id] = status
 			}
 		}
 		result[id] = status
 	}
-	return result
+	return result, store.requiredChanges
 }
 
 func publicStatus(snapshot loaderStatus) string {
@@ -93,34 +125,15 @@ func publicStatus(snapshot loaderStatus) string {
 type statusPublisher struct {
 	path        string
 	publicPath  string
-	previous    loaderStatus
 	lastPayload string
 	delivered   string
 	attempts    int
 }
 
-func (snapshot loaderStatus) stableSince(previous loaderStatus) int64 {
-	if snapshot.State != "running" {
-		return 0
-	}
-	gap := snapshot.UpdatedUptime - previous.UpdatedUptime
-	if previous.StableSinceUptime == 0 || previous.Boot != snapshot.Boot || previous.Loader != snapshot.Loader || gap < 0 || gap > maxHeartbeatAgeSeconds {
-		return snapshot.UpdatedUptime
-	}
-	if !maps.EqualFunc(previous.Agents, snapshot.Agents, func(a, b agentStatus) bool {
-		return a.Target == b.Target && a.Identity == b.Identity
-	}) {
-		return snapshot.UpdatedUptime
-	}
-	return previous.StableSinceUptime
-}
-
 func (publisher *statusPublisher) publish(ctx context.Context, snapshot loaderStatus) error {
-	snapshot.StableSinceUptime = snapshot.stableSince(publisher.previous)
 	if err := writeAtomic(publisher.path, snapshot); err != nil {
 		return err
 	}
-	publisher.previous = snapshot
 	payload := publicStatus(snapshot)
 	if payload != publisher.lastPayload {
 		if err := writeAtomicBytes(publisher.publicPath, []byte(payload+"\n"), 0644); err != nil {
@@ -181,6 +194,13 @@ func checkAgentStatus(procRoot string, agent nativeAgentConfig, status agentStat
 	if err != nil {
 		return fmt.Errorf("hook %s: %w", agent.ID, err)
 	}
+	if err := checkAgentIdentity(agent, status, identity); err != nil {
+		return fmt.Errorf("hook %s: %w", agent.ID, err)
+	}
+	return nil
+}
+
+func checkAgentIdentity(agent nativeAgentConfig, status agentStatus, identity processIdentity) error {
 	switch status.State {
 	case "active":
 		if identity.PID > 0 && status.Identity == identity {
@@ -195,5 +215,5 @@ func checkAgentStatus(procRoot string, agent nativeAgentConfig, status agentStat
 			return nil
 		}
 	}
-	return fmt.Errorf("hook %s: %s (PID %d, start %s; %s)", agent.ID, status.State, status.Identity.PID, status.Identity.StartTicks, status.Reason)
+	return fmt.Errorf("%s (PID %d, start %s; %s)", status.State, status.Identity.PID, status.Identity.StartTicks, status.Reason)
 }

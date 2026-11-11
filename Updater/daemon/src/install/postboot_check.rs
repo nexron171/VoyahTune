@@ -1,4 +1,8 @@
-use std::{io, thread, time::Duration};
+use release_core::runtime_readiness::{RuntimeReadiness, Stability};
+use std::{
+    io, thread,
+    time::{Duration, Instant},
+};
 
 const MAX_RETRIES: usize = 3;
 const HOOK_RETRIES: usize = 18;
@@ -8,8 +12,47 @@ pub(super) fn run<T>(check: impl FnMut() -> io::Result<T>) -> io::Result<T> {
     run_with_retries(check, MAX_RETRIES)
 }
 
-pub(super) fn hooks<T>(check: impl FnMut() -> io::Result<T>) -> io::Result<T> {
-    run_with_retries(check, HOOK_RETRIES)
+pub(super) fn hooks(
+    boot: &str,
+    mut check: impl FnMut() -> io::Result<String>,
+) -> io::Result<RuntimeReadiness> {
+    let mut stability = Stability::default();
+    run_with_retries(
+        || observe_hooks(&mut stability, check(), boot, Instant::now()),
+        HOOK_RETRIES,
+    )
+}
+
+fn observe_hooks(
+    stability: &mut Stability,
+    response: io::Result<String>,
+    boot: &str,
+    now: Instant,
+) -> io::Result<RuntimeReadiness> {
+    let result = response
+        .and_then(|text| RuntimeReadiness::parse(&text).map_err(super::error))
+        .and_then(|runtime| {
+            if runtime.boot != boot {
+                return Err(io::Error::other(
+                    "Загрузчик относится к другой загрузке Android",
+                ));
+            }
+            Ok(runtime)
+        });
+    let runtime = match result {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            stability.reset();
+            return Err(error);
+        }
+    };
+    let identity = serde_json::to_string(&runtime).map_err(super::error)?;
+    if !stability.observe(&identity, now) {
+        return Err(io::Error::other(
+            "Наблюдаем стабильность загрузчика и обязательных хуков",
+        ));
+    }
+    Ok(runtime)
 }
 
 fn run_with_retries<T>(check: impl FnMut() -> io::Result<T>, retries: usize) -> io::Result<T> {
@@ -44,6 +87,59 @@ fn retry_check<T>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hook_readiness_uses_one_window_and_resets_after_failure_or_pid_change() {
+        use release_core::runtime_readiness::STABILITY_WINDOW;
+        let now = Instant::now();
+        let mut stability = Stability::default();
+        let mut response = serde_json::json!({"schema":1,"boot":"boot","loader":{"pid":10,"startTicks":"100"},
+            "nativeId":"native","runtimeId":"java","requiredChanges":0,"targets":{"acc":{"pid":20,"startTicks":"200"}}});
+        assert!(observe_hooks(&mut stability, Ok(response.to_string()), "boot", now).is_err());
+        assert!(observe_hooks(
+            &mut stability,
+            Ok(response.to_string()),
+            "boot",
+            now + STABILITY_WINDOW
+        )
+        .is_ok());
+        assert!(observe_hooks(
+            &mut stability,
+            Err(io::Error::other("hook acc: failed")),
+            "boot",
+            now + STABILITY_WINDOW
+        )
+        .is_err());
+        assert!(observe_hooks(
+            &mut stability,
+            Ok(response.to_string()),
+            "boot",
+            now + STABILITY_WINDOW * 2
+        )
+        .is_err());
+        assert!(observe_hooks(
+            &mut stability,
+            Ok(response.to_string()),
+            "boot",
+            now + STABILITY_WINDOW * 3
+        )
+        .is_ok());
+        response["targets"]["acc"]["startTicks"] = "300".into();
+        assert!(observe_hooks(
+            &mut stability,
+            Ok(response.to_string()),
+            "boot",
+            now + STABILITY_WINDOW * 4
+        )
+        .is_err());
+        assert!(observe_hooks(
+            &mut stability,
+            Ok(response.to_string()),
+            "another-boot",
+            now + STABILITY_WINDOW * 5
+        )
+        .is_err());
+    }
 
     #[test]
     fn hook_check_waits_for_serial_startup_and_propagates_persistent_failure() {

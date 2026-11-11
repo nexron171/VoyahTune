@@ -146,6 +146,7 @@ abstract class VoyahBuildIdentity : DefaultTask() {
         dir.mkdirs()
         dir.resolve("voyahtune-build.json").writeText(groovy.json.JsonOutput.toJson(mapOf(
             "schema" to 3, "payloadFormat" to payloadFormat.get(), "minimumInstallerVersion" to minimumInstallerVersion.get(), "product" to "VoyahTune", "component" to component.get(),
+            "runtimeReadinessSchema" to 1,
             "infrastructure" to infrastructure.get(),
             "releaseVersion" to releaseVersion.get(),
             "buildRevision" to revision.get(),

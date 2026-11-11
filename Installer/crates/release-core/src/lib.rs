@@ -14,3 +14,4 @@ pub mod installation_logcat;
 pub mod vehicle_model;
 
 pub mod runtime_maintenance;
+pub mod runtime_readiness;

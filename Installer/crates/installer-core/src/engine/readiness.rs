@@ -1,7 +1,7 @@
 use super::*;
+use release_core::runtime_readiness::{RuntimeReadiness, Stability};
 
 const DEADLINE: Duration = Duration::from_secs(180);
-const STABLE: Duration = Duration::from_secs(10);
 const NATIVE_HEALTH: &str = "content call --uri content://ru.big.town.anative.ota --method health";
 const RESTORE_HEALTH: &str = "content call --uri content://ru.big.town.restoremode.restoremodecontentprovider --method otaHealth";
 
@@ -30,24 +30,11 @@ fn require_health(output: &str, key: &str, version: &str, component: &str) -> Re
     Ok(())
 }
 
-#[derive(Default)]
-struct Stability {
+#[derive(Debug)]
+struct ReadinessSample {
     identity: String,
-    since: Option<Instant>,
-}
-
-impl Stability {
-    fn observe(&mut self, identity: &str, now: Instant) -> bool {
-        if self.identity != identity || self.since.is_none() {
-            self.identity = identity.into();
-            self.since = Some(now);
-        }
-        now.duration_since(self.since.unwrap()) >= STABLE
-    }
-
-    fn reset(&mut self) {
-        self.since = None;
-    }
+    application_identity: String,
+    runtime_generation: (String, String, String),
 }
 
 impl Engine {
@@ -62,6 +49,15 @@ impl Engine {
     }
 
     pub(super) fn readiness_command(&self, script: &str, deadline: Instant) -> Result<String> {
+        self.readiness_command_with_limit(script, deadline, 10)
+    }
+
+    fn readiness_command_with_limit(
+        &self,
+        script: &str,
+        deadline: Instant,
+        maximum_seconds: u64,
+    ) -> Result<String> {
         if self.cancel.load(Ordering::Relaxed) {
             return Err(Error::new("CANCELLED", "Проверка остановлена"));
         }
@@ -69,7 +65,7 @@ impl Engine {
         if remaining < Duration::from_secs(2) {
             return Err(Error::new("HEALTH_TIMEOUT", "Истекло время проверки"));
         }
-        let seconds = remaining.as_secs().saturating_sub(1).min(10);
+        let seconds = remaining.as_secs().saturating_sub(1).min(maximum_seconds);
         self.adb.shell(
             &format!(
                 "/system/bin/timeout {seconds} /system/bin/sh -c {}\n",
@@ -93,7 +89,11 @@ impl Engine {
         Ok(identity)
     }
 
-    fn readiness_sample(&self, deadline: Instant, start_sent: &mut bool) -> Result<String> {
+    fn readiness_sample(
+        &self,
+        deadline: Instant,
+        start_sent: &mut bool,
+    ) -> Result<ReadinessSample> {
         self.readiness_progress("Проверяем USB-соединение с автомобилем", deadline)?;
         if self.readiness_command("id -u", deadline)? != "0" {
             let remaining = deadline.saturating_duration_since(Instant::now());
@@ -173,7 +173,7 @@ impl Engine {
                 Error::new("HEALTH_PENDING", "Несовместимый ответ OTA-службы").detail(response),
             );
         }
-        {
+        let runtime = {
             if !status["capabilities"]
                 .as_array()
                 .is_some_and(|capabilities| {
@@ -188,13 +188,22 @@ impl Engine {
                 ));
             }
             self.readiness_progress("Проверяем загрузчик и хуки", deadline)?;
-            self.readiness_command(
-                "/data/local/bin/voyahtune-new/voyahtune-loader --check-hooks",
-                deadline,
-            )
-            .map_err(|error| {
-                Error::new("HEALTH_PENDING", "Загрузчик или хуки ещё не готовы").detail(error)
-            })?;
+            let response = self
+                .readiness_command(
+                    "/data/local/bin/voyahtune-new/voyahtune-loader --check-hooks",
+                    deadline,
+                )
+                .map_err(|error| {
+                    Error::new(
+                        "HEALTH_PENDING",
+                        "Загрузчик или обязательные хуки ещё не готовы",
+                    )
+                    .detail(error)
+                })?;
+            let runtime = RuntimeReadiness::parse(&response)?;
+            if Some(runtime.boot.as_str()) != before.lines().next() {
+                return Err(Error::new("HEALTH_PENDING", "Изменилась загрузка Android"));
+            }
             let model = self.package_model()?;
             for package in self
                 .payload
@@ -210,7 +219,8 @@ impl Engine {
                     deadline,
                 )?;
             }
-        }
+            runtime
+        };
         let after = self.readiness_identity(deadline)?;
         if before != after {
             return Err(Error::new(
@@ -218,7 +228,15 @@ impl Engine {
                 "Android или приложения перезапустились",
             ));
         }
-        Ok(format!("{after}\n{}", status["pid"]))
+        let application_identity = format!("{after}\n{}", status["pid"]);
+        Ok(ReadinessSample {
+            identity: format!(
+                "{application_identity}\n{}",
+                serde_json::to_string(&runtime)?
+            ),
+            application_identity,
+            runtime_generation: runtime.generation(),
+        })
     }
 
     pub(super) fn readiness_diagnostics(&self) {
@@ -346,7 +364,8 @@ done
     fn verify_readiness_until(&self, deadline: Instant) -> Result<()> {
         let mut stability = Stability::default();
         let mut start_sent = false;
-        let mut verified_identity = String::new();
+        let mut verified_application_identity = String::new();
+        let mut verified_runtime_generation = None;
         let mut next_runtime_diagnostics = Instant::now();
         let mut last = Error::new("HEALTH_PENDING", "Ожидание Android и приложений");
         while Instant::now() < deadline {
@@ -355,8 +374,17 @@ done
             }
             let sample = self
                 .readiness_sample(deadline, &mut start_sent)
-                .and_then(|identity| {
-                    if verified_identity != identity {
+                .and_then(|sample| {
+                    if verified_runtime_generation.as_ref() != Some(&sample.runtime_generation) {
+                        self.readiness_progress("Проверяем комплект файлов runtime", deadline)?;
+                        self.readiness_command_with_limit(
+                            "/data/local/bin/voyahtune-new/voyahtune-loader --check",
+                            deadline,
+                            60,
+                        )?;
+                        verified_runtime_generation = Some(sample.runtime_generation);
+                    }
+                    if verified_application_identity != sample.application_identity {
                         self.readiness_progress(
                             "Проверяем установленные файлы приложений",
                             deadline,
@@ -384,9 +412,9 @@ done
                              -e 'ru.big.town.updater/ru.big.town.updater.UpdaterActivity'",
                             deadline,
                         )?;
-                        verified_identity = identity.clone();
+                        verified_application_identity = sample.application_identity;
                     }
-                    Ok(identity)
+                    Ok(sample.identity)
                 });
             match sample {
                 Ok(identity)
@@ -470,6 +498,7 @@ done
 #[cfg(test)]
 mod tests {
     use super::*;
+    use release_core::runtime_readiness::STABILITY_WINDOW as STABLE;
 
     #[test]
     fn health_requires_exact_fields_and_version() {
@@ -525,6 +554,10 @@ case "$script" in
         echo 'launcher: failed (fixture)'
         if [ -e "$root/disconnect-after-diagnostics" ]; then touch "$root/disconnected"; fi ;;
     *'active_matches()'*)
+        case "$script" in
+            *'ru.big.town.anative'*) echo native >> "$root/application-apk-checks" ;;
+            *'ru.big.town.restoremode'*) echo restore >> "$root/application-apk-checks" ;;
+        esac
         if [ -e "$root/stale-native" ]; then
             case "$script" in
                 *'pm install -r --user 0'*)
@@ -567,7 +600,20 @@ case "$script" in
     *'voyahtune-updater --health'*)
             echo '{"schema":1,"ok":true,"uid":0,"pid":104,"infrastructure":"unified","capabilities":["unified-runtime-v1"]}' ;;
     *'voyahtune-loader --check-hooks'*)
-        if [ -e "$root/hooks-failed" ]; then echo 'hook acc: failed' >&2; exit 1; fi ;;
+        if [ -e "$root/hooks-failed" ]; then echo 'hook acc: failed' >&2; exit 1; fi
+        if [ -e "$root/rotate-target-once" ]; then
+            count=$(cat "$root/hook-polls" 2>/dev/null || echo 0)
+            count=$((count + 1))
+            echo "$count" > "$root/hook-polls"
+            if [ "$count" -ge 2 ]; then
+                echo '{"schema":1,"boot":"boot-1","loader":{"pid":105,"startTicks":"50"},"nativeId":"native","runtimeId":"java","requiredChanges":0,"targets":{"acc":{"pid":107,"startTicks":"70"}}}'
+                exit 0
+            fi
+        fi
+        echo '{"schema":1,"boot":"boot-1","loader":{"pid":105,"startTicks":"50"},"nativeId":"native","runtimeId":"java","requiredChanges":0,"targets":{"acc":{"pid":106,"startTicks":"60"}}}' ;;
+    *'voyahtune-loader --check'*)
+        echo checked >> "$root/runtime-file-checks"
+        if [ -e "$root/runtime-files-broken" ]; then echo 'runtime component digest mismatch' >&2; exit 1; fi ;;
     *'getprop ro.build.fingerprint'*) echo H97C ;;
     *'getprop'*|*'sha256sum'*|*'resolve-activity'*) exit 0 ;;
     *) echo 'Unexpected command' >&2; exit 1 ;;
@@ -614,7 +660,7 @@ esac
         assert!(engine.readiness_sample(deadline, &mut sent).is_err());
         assert!(sent);
         let sample = engine.readiness_sample(deadline, &mut sent);
-        assert!(sample.is_ok(), "{sample:?}");
+        assert!(sample.is_ok(), "{:?}", sample.err());
         let progress: Vec<_> = captured
             .lock()
             .unwrap()
@@ -684,6 +730,7 @@ esac
         );
         fs::write(directory.path().join("started"), "").unwrap();
         assert!(engine.confirmed_readiness_failure().is_none());
+        fs::write(directory.path().join("rotate-target-once"), "").unwrap();
         engine
             .verify_installed(Request {
                 action: Action::Install,
@@ -717,6 +764,27 @@ esac
             serde_json::from_slice(&fs::read(engine.operation.dir.join("report.json")).unwrap())
                 .unwrap();
         assert_eq!(report["success"], true);
+        assert_eq!(
+            fs::read_to_string(directory.path().join("runtime-file-checks")).unwrap(),
+            "checked\n"
+        );
+        assert_eq!(
+            fs::read_to_string(directory.path().join("application-apk-checks")).unwrap(),
+            "native\nrestore\n"
+        );
+
+        fs::write(directory.path().join("runtime-files-broken"), "").unwrap();
+        let error = engine
+            .verify_readiness_until(Instant::now() + Duration::from_secs(4))
+            .unwrap_err();
+        assert_eq!(error.code, "READINESS_UNCONFIRMED");
+        assert!(captured.lock().unwrap().iter().any(|event| {
+            event.kind == "readiness-pending"
+                && event.data["detail"]
+                    .as_str()
+                    .is_some_and(|detail| detail.contains("runtime component digest mismatch"))
+        }));
+        fs::remove_file(directory.path().join("runtime-files-broken")).unwrap();
 
         fs::write(directory.path().join("hooks-failed"), "").unwrap();
         let deadline = Instant::now() + Duration::from_secs(60);

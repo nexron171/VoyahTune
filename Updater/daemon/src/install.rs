@@ -637,10 +637,15 @@ fn validate_after_reboot(shared: &Shared) -> io::Result<()> {
         let (payload, claims) = postboot_check::run(|| {
             repair_native_data()?;
             let (payload, claims) = workflow::verified(shared)?;
+            command(
+                "/data/local/bin/voyahtune-new/voyahtune-loader",
+                &["--check"],
+                60,
+            )?;
             Ok((payload, claims))
         })?;
         {
-            postboot_check::hooks(|| {
+            postboot_check::hooks(&device::boot(), || {
                 command(
                     "/data/local/bin/voyahtune-new/voyahtune-loader",
                     &["--check-hooks"],

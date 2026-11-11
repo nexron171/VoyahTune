@@ -63,6 +63,7 @@ class ReleaseTests(unittest.TestCase):
                         {
                             "schema": 3,
                             "payloadFormat": 5,
+                            "runtimeReadinessSchema": 1,
                             "minimumInstallerVersion": args[
                                 args.index("--minimum-installer-version") + 1
                             ],

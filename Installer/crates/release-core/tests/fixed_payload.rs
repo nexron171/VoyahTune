@@ -2,6 +2,10 @@ use release_core::{payload::Payload, recipe::Recipe};
 use std::{fs, io::Write, path::Path};
 
 fn fixture(root: &Path, format: u32) {
+    fixture_with_readiness(root, format, Some(1));
+}
+
+fn fixture_with_readiness(root: &Path, format: u32, readiness: Option<u32>) {
     fs::create_dir_all(root.join("common")).unwrap();
     let recipe = Recipe::default();
     for name in recipe
@@ -22,11 +26,16 @@ fn fixture(root: &Path, format: u32) {
         zip::write::SimpleFileOptions::default(),
     )
     .unwrap();
-    apk.write_all(serde_json::to_vec(&serde_json::json!({
+    let mut metadata = serde_json::json!({
         "schema":3,"product":"VoyahTune","component":"ru.big.town.restoremode",
         "infrastructure":"unified","releaseVersion":"4.4.1-beta","buildRevision":"same-label-build",
         "payloadFormat":format,"runtimeHashes":{}
-    })).unwrap().as_slice()).unwrap();
+    });
+    if let Some(schema) = readiness {
+        metadata["runtimeReadinessSchema"] = schema.into();
+    }
+    apk.write_all(serde_json::to_vec(&metadata).unwrap().as_slice())
+        .unwrap();
     apk.finish().unwrap();
 }
 
@@ -55,6 +64,18 @@ fn usb_payload_requires_updater_apk() {
     fixture(root.path(), 5);
     fs::remove_file(root.path().join("common/voyahtune-updater.apk")).unwrap();
     assert!(Payload::load(root.path()).is_err());
+}
+
+#[test]
+fn usb_rejects_previous_or_unknown_runtime_readiness_before_installation() {
+    for schema in [None, Some(2)] {
+        let root = tempfile::tempdir().unwrap();
+        fixture_with_readiness(root.path(), 5, schema);
+        assert_eq!(
+            Payload::load(root.path()).err().unwrap().code,
+            "PAYLOAD_RUNTIME_PROTOCOL"
+        );
+    }
 }
 
 #[test]
@@ -101,7 +122,7 @@ fn rebuilt_beta_has_a_different_content_identity() {
 #[test]
 fn ota_uses_fixed_plan_without_metadata_compatibility_gates() {
     let root = tempfile::tempdir().unwrap();
-    fixture(root.path(), 99);
+    fixture_with_readiness(root.path(), 99, None);
     let payload = Payload::for_ota(root.path()).unwrap();
     let loader = payload
         .manifest

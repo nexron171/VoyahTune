@@ -70,13 +70,17 @@ func (catalog *processCatalog) find(name string) (processIdentity, error) {
 	if err != nil {
 		return processIdentity{}, err
 	}
+	return findCatalogProcess(catalog.procRoot, processes, name)
+}
+
+func findCatalogProcess(procRoot string, processes map[string][]int, name string) (processIdentity, error) {
 	var result processIdentity
 	for command, pids := range processes {
 		if command != name && !(strings.IndexByte(name, '.') < 0 && filepath.Base(command) == name) {
 			continue
 		}
 		for _, pid := range pids {
-			identity, err := readIdentity(catalog.procRoot, pid, name)
+			identity, err := readIdentity(procRoot, pid, name)
 			if err == nil && (result.PID == 0 || pid < result.PID) {
 				result = identity
 			}

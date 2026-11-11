@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"log"
 	"os"
@@ -17,7 +18,7 @@ func main() {
 	stateDirectory := flag.String("state-dir", "/data/local/tmp/voyahtune-new", "Private resident journals and control endpoint")
 	check := flag.Bool("check", false, "Validate native components without injection")
 	health := flag.Bool("health", false, "Check the supervisor heartbeat")
-	hooks := flag.Bool("check-hooks", false, "Check loader and hook target process stability after installation")
+	hooks := flag.Bool("check-hooks", false, "Check current acknowledgements of required hooks and print their identities")
 	hookAcks := flag.Bool("check-hook-acks", false, "Verify live acknowledgements from active Java modules")
 	quiesce := flag.Bool("quiesce", false, "Close admission and wait for helpers and target workers to drain")
 	controlStatus := flag.Bool("control-status", false, "Read authenticated runtime admission state")
@@ -47,13 +48,21 @@ func main() {
 		}
 		return
 	}
-	config, configurationError := loadNativeConfig(*runtimeDirectory)
+	config := nativeLoaderConfig{Schema: 2, Agents: compiledAgents(), Code: embeddedNativeCode}
+	var configurationError error
+	if !*hooks || *check || *hookAcks {
+		config, configurationError = loadNativeConfig(*runtimeDirectory)
+	}
 	if *check || *hooks || *hookAcks {
 		if configurationError != nil {
 			log.Fatal(configurationError)
 		}
 		if *hooks {
-			if err := checkNativeHooks(currentStatusPath(*stateDirectory), "/proc", config); err != nil {
+			ready, err := checkNativeHooks(currentStatusPath(*stateDirectory), "/proc", config)
+			if err != nil {
+				log.Fatal(err)
+			}
+			if err := json.NewEncoder(os.Stdout).Encode(ready); err != nil {
 				log.Fatal(err)
 			}
 		}

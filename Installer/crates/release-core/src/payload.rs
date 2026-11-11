@@ -79,6 +79,8 @@ pub struct BuildMetadata {
     pub payload_format: u32,
     #[serde(default)]
     pub minimum_installer_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_readiness_schema: Option<u32>,
     pub schema: u32,
     pub product: String,
     pub component: String,
@@ -86,6 +88,19 @@ pub struct BuildMetadata {
     pub build_revision: String,
     #[serde(default)]
     pub runtime_hashes: std::collections::BTreeMap<String, String>,
+}
+
+impl BuildMetadata {
+    fn require_runtime_protocol(&self) -> Result<()> {
+        if self.runtime_readiness_schema != Some(crate::runtime_readiness::RUNTIME_READINESS_SCHEMA)
+        {
+            return Err(Error::new(
+                "PAYLOAD_RUNTIME_PROTOCOL",
+                "Архив использует неподдерживаемый протокол загрузчика. Выберите актуальный релиз VoyahTune.",
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -149,6 +164,7 @@ impl Payload {
             let metadata = apk_metadata(&restore)?
                 .ok_or_else(|| Error::new("APK_METADATA", "Нет метаданных релиза в RestoreMode"))?;
             validate_schema(metadata.payload_format)?;
+            metadata.require_runtime_protocol()?;
             if let Some(minimum) = metadata.minimum_installer_version {
                 requirements.min_installer_version = minimum;
             }
@@ -361,6 +377,7 @@ impl Payload {
             verified_signers(&apk)?;
             let metadata = apk_metadata(&apk)?
                 .ok_or_else(|| Error::new("APK_METADATA", "APK не содержит метаданные сборки"))?;
+            metadata.require_runtime_protocol()?;
             if metadata.recipe_sha256.as_deref() != Some(&recipe_sha) {
                 return Err(Error::new(
                     "RECIPE_SIGNATURE",

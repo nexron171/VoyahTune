@@ -142,6 +142,29 @@ func TestNativeSupervisorKeepsConfirmedStateDuringResidentRefresh(t *testing.T) 
 	manager.cycle(context.Background(), agent.Target)
 }
 
+func TestNativeSupervisorInvalidatesAcknowledgementWhenSharedPlanChanges(t *testing.T) {
+	name := "com.qinggan.app.vehiclesetting"
+	agents := []nativeAgentConfig{
+		{ID: "drive-reset", Target: name, Modules: []string{"drive-reset"}},
+		{ID: "apollo", Target: name, Modules: []string{"apollo"}, Condition: "apollo"},
+	}
+	manager, spy := supervisorFixture(t, agents)
+	supervisorTarget(t, manager, name, "100", 2, 183, "1000")
+	manager.cycle(context.Background(), name)
+	testFile(t, manager.apolloPath, "v=1\nboot=boot\nenabled=1\n", 0600)
+	spy.beforeEnsure = func() {
+		if status := manager.status.agents["drive-reset"]; status.State != "injecting" || status.Revision != 0 {
+			t.Fatal("Previous acknowledgement remained visible while the shared plan changed", status)
+		}
+	}
+	manager.cycle(context.Background(), name)
+	for _, agent := range agents {
+		if status := manager.status.agents[agent.ID]; status.State != "active" || status.Revision != 2 {
+			t.Fatal("New acknowledgement was not published", status)
+		}
+	}
+}
+
 func TestNativeSupervisorAdmitsARM32OEMProcess(t *testing.T) {
 	name := "com.qinggan.canbus.service"
 	agent := nativeAgentConfig{ID: "acc", Target: name, Modules: []string{"acc"}, TimeoutSeconds: 35}

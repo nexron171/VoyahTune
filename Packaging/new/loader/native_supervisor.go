@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -57,9 +58,7 @@ func (manager *nativeSupervisor) report(agent nativeAgentConfig, identity proces
 		value.Revision = ack.Revision
 		value.Modules = append([]string{}, modules...)
 	}
-	manager.status.mutex.Lock()
-	manager.status.agents[agent.ID] = value
-	manager.status.mutex.Unlock()
+	manager.status.report(agent, value)
 }
 
 func (manager *nativeSupervisor) definitions(target string) []nativeAgentConfig {
@@ -178,7 +177,7 @@ func (manager *nativeSupervisor) cycleProcess(ctx context.Context, name string, 
 			manager.status.mutex.Lock()
 			previous := manager.status.agents[member.ID]
 			manager.status.mutex.Unlock()
-			if previous.Identity != identity || previous.State != "active" {
+			if previous.Identity != identity || previous.State != "active" || !slices.Equal(previous.Modules, group.Modules) {
 				manager.report(byID[member.ID], identity, "injecting", "", nil, nil, architecture)
 			}
 		}
@@ -452,7 +451,8 @@ func (manager *nativeSupervisor) run(ctx context.Context, configurationError err
 	diagnostics := diagnosticsPublisher{command: androidCommand}
 	publish := func(state string) {
 		now, _ := uptimeSeconds(manager.procRoot)
-		snapshot := loaderStatus{Schema: 1, Boot: manager.boot, Loader: self, UpdatedUptime: now, State: state, Agents: manager.status.snapshot(manager.procRoot)}
+		agents, changes := manager.status.snapshot(manager.procRoot)
+		snapshot := loaderStatus{Schema: 1, Boot: manager.boot, Loader: self, UpdatedUptime: now, State: state, Agents: agents, RequiredChanges: changes}
 		if err := publisher.publish(context.Background(), snapshot); err != nil {
 			log.Printf("publish native status: %v", err)
 		}

@@ -246,10 +246,28 @@ def main():
                 )
             if "/data/local/bin/voyahtune-new/voyahtune-loader --check-hooks" in script:
                 ready = s.get("loader") == "running" and not s.get("hooksNotReady")
+                boot = remote("/proc/sys/kernel/random/boot_id").read_text().strip()
+                runtime = json.dumps({
+                    "schema": 1,
+                    "boot": boot,
+                    "loader": {"pid": 105, "startTicks": "500"},
+                    "nativeId": "native-fixture",
+                    "runtimeId": "java-fixture",
+                    "requiredChanges": s.get("requiredHookChanges", 0),
+                    "targets": {"windows": {
+                        "pid": int(s.get("systemServerPid", 101)), "startTicks": "600"
+                    }},
+                })
                 script = script.replace(
                     "/data/local/bin/voyahtune-new/voyahtune-loader --check-hooks",
                     "test -x /data/local/bin/voyahtune-new/voyahtune-loader && "
-                    + ("true" if ready else "false"),
+                    + ("printf '%s\\n' " + shlex.quote(runtime) if ready else "false"),
+                )
+            if "/data/local/bin/voyahtune-new/voyahtune-loader --check" in script:
+                script = script.replace(
+                    "/data/local/bin/voyahtune-new/voyahtune-loader --check",
+                    "test -x /data/local/bin/voyahtune-new/voyahtune-loader && "
+                    + ("false" if s.get("runtimeFilesInvalid") else "true"),
                 )
             if "VOYAHTUNE_PACKAGES_LIST" in script:
                 put("/data/system/packages.list", "".join(

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"voyahtune/unified-loader/agentwire"
@@ -11,8 +12,6 @@ import (
 )
 
 type nativeStatusInspector func(context.Context, agentwire.Target) (agentwire.Status, error)
-
-const installationStabilitySeconds = 10
 
 func inspectNativeStatus(ctx context.Context, target agentwire.Target) (agentwire.Status, error) {
 	client, err := agentwire.NewClient(target)
@@ -22,29 +21,101 @@ func inspectNativeStatus(ctx context.Context, target agentwire.Target) (agentwir
 	return client.Status(ctx)
 }
 
-func checkNativeHooks(statusPath, procRoot string, config nativeLoaderConfig) error {
+type hookReadiness struct {
+	Schema          int                        `json:"schema"`
+	Boot            string                     `json:"boot"`
+	Loader          processIdentity            `json:"loader"`
+	NativeID        string                     `json:"nativeId"`
+	RuntimeID       string                     `json:"runtimeId"`
+	RequiredChanges uint64                     `json:"requiredChanges"`
+	Targets         map[string]processIdentity `json:"targets"`
+}
+
+func checkNativeHooks(statusPath, procRoot string, config nativeLoaderConfig) (hookReadiness, error) {
 	snapshot, err := healthyStatus(statusPath, procRoot)
 	if err != nil {
-		return err
+		return hookReadiness{}, err
 	}
-	if snapshot.StableSinceUptime <= 0 || snapshot.UpdatedUptime-snapshot.StableSinceUptime < installationStabilitySeconds {
-		return fmt.Errorf("waiting for %d seconds of stable loader and hook target PIDs", installationStabilitySeconds)
+	if _, err := registeredNativeAgents(config, snapshot); err != nil {
+		return hookReadiness{}, err
 	}
-	agents, err := registeredNativeAgents(config, snapshot)
+	now, err := uptimeSeconds(procRoot)
 	if err != nil {
-		return err
+		return hookReadiness{}, err
 	}
-	for id, agent := range agents {
-		status := snapshot.Agents[id]
-		if status.Identity.PID == 0 {
-			if err := checkAgentStatus(procRoot, agent, status); err != nil {
-				return err
-			}
+	processes, err := scanProcesses(procRoot)
+	if err != nil {
+		return hookReadiness{}, err
+	}
+	ready := hookReadiness{
+		Schema: 1, Boot: snapshot.Boot, Loader: snapshot.Loader,
+		NativeID: config.Code.NativeID, RuntimeID: config.Code.RuntimeID,
+		Targets: map[string]processIdentity{}, RequiredChanges: snapshot.RequiredChanges,
+	}
+	acknowledged := map[processIdentity]agentStatus{}
+	for _, agent := range config.Agents {
+		if agent.Dynamic {
 			continue
 		}
-		identity, err := readIdentity(procRoot, status.Identity.PID, agent.Target)
-		if err != nil || identity != status.Identity {
-			return fmt.Errorf("hook %s target PID %d changed or exited", id, status.Identity.PID)
+		identity, err := checkInstallationAgent(procRoot, processes, snapshot, config.Code, agent, now)
+		if err != nil {
+			return hookReadiness{}, fmt.Errorf("hook %s: %w", agent.ID, err)
+		}
+		status := snapshot.Agents[agent.ID]
+		if status.State == "active" {
+			if previous, present := acknowledged[identity]; present &&
+				(previous.Revision != status.Revision || !slices.Equal(previous.Modules, status.Modules)) {
+				return hookReadiness{}, fmt.Errorf("hook %s: target module plan changed", agent.ID)
+			}
+			acknowledged[identity] = status
+		}
+		ready.Targets[agent.ID] = identity
+	}
+	return ready, nil
+}
+
+func checkInstallationAgent(procRoot string, processes map[string][]int, snapshot loaderStatus, code nativeCode, agent nativeAgentConfig, now int64) (processIdentity, error) {
+	status := snapshot.Agents[agent.ID]
+	identity, err := findCatalogProcess(procRoot, processes, agent.Target)
+	if err != nil {
+		return processIdentity{}, err
+	}
+	if err := checkAgentIdentity(agent, status, identity); err != nil {
+		return processIdentity{}, err
+	}
+	if status.State != "active" {
+		return identity, nil
+	}
+	if err := requireRecordedAcknowledgement(now, code, agent, status); err != nil {
+		return processIdentity{}, err
+	}
+	actual, err := remoteattach.ReadTarget(procRoot, identity.PID)
+	if err != nil {
+		return processIdentity{}, err
+	}
+	if actual.BootID != snapshot.Boot || actual.StartTicks != identity.StartTicks || actual.UID != status.UID {
+		return processIdentity{}, fmt.Errorf("acknowledged kernel identity changed")
+	}
+	return identity, nil
+}
+
+func requireRecordedAcknowledgement(now int64, code nativeCode, agent nativeAgentConfig, status agentStatus) error {
+	age := now - status.UpdatedUptime
+	if status.UpdatedUptime <= 0 || age < -1 || age > maxHeartbeatAgeSeconds {
+		return fmt.Errorf("stale module acknowledgement")
+	}
+	if status.NativeID != code.NativeID || status.RuntimeID != code.RuntimeID {
+		return fmt.Errorf("component generation mismatch: native=%s runtime=%s", status.NativeID, status.RuntimeID)
+	}
+	if status.Revision <= 0 {
+		return fmt.Errorf("module plan was not acknowledged")
+	}
+	if status.Reason != "" {
+		return fmt.Errorf("module acknowledgement contains an error: %s", status.Reason)
+	}
+	for _, module := range agent.Modules {
+		if !slices.Contains(status.Modules, module) {
+			return fmt.Errorf("required module %s was not acknowledged", module)
 		}
 	}
 	return nil
