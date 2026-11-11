@@ -23,12 +23,15 @@ monotonic_ticks() {
     printf '%s\n' "$((whole * 100 + 1${fraction} - 100))"
 }
 
+abort_timeout_seconds=60
+freeze_attempt_limit=$((abort_timeout_seconds * 10))
+stop_attempt_limit=$((abort_timeout_seconds * 4))
 abort_started=$(monotonic_ticks)
-abort_deadline=$((abort_started + 500))
+abort_deadline=$((abort_started + abort_timeout_seconds * 100))
 require_abort_time() {
     abort_now=$(monotonic_ticks) || { echo 'Runtime detach clock unavailable' >&2; exit 1; }
     [ "$abort_now" -lt "$abort_deadline" ] || {
-        echo 'Runtime detach exceeded five seconds; reboot required' >&2
+        echo "Runtime stop exceeded $abort_timeout_seconds seconds; reboot required" >&2
         exit 1
     }
 }
@@ -163,7 +166,7 @@ while :; do
     if [ "$stopped" = 1 ] && [ "$frozen" = "$previous" ]; then break; fi
     previous=$frozen
     attempt=$((attempt + 1))
-    [ "$attempt" -lt 20 ] || { echo 'Runtime launchers did not freeze; reboot required' >&2; exit 1; }
+    [ "$attempt" -lt "$freeze_attempt_limit" ] || { echo 'Runtime launchers did not freeze; reboot required' >&2; exit 1; }
     sleep 0.1
 done
 
@@ -206,7 +209,7 @@ while :; do
     done
     [ -n "$pending" ] || break
     attempt=$((attempt + 1))
-    [ "$attempt" -lt 20 ] || { echo "Native tracers did not detach; reboot required:$pending" >&2; exit 1; }
+    [ "$attempt" -lt "$stop_attempt_limit" ] || { echo "Native tracers did not detach; reboot required:$pending" >&2; exit 1; }
     sleep 0.25
 done
 
@@ -238,7 +241,7 @@ while :; do
         exit 0
     fi
     attempt=$((attempt + 1))
-    if [ "$attempt" -ge 20 ]; then
+    if [ "$attempt" -ge "$stop_attempt_limit" ]; then
         printf 'Owned runtime processes did not exit; init=%s processes=%s\n' "$state" "$remaining" >&2
         exit 1
     fi

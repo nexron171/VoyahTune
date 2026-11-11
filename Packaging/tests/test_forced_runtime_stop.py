@@ -40,7 +40,16 @@ class ForcedRuntimeStopTest(unittest.TestCase):
         task.mkdir(parents=True)
         (task / "status").write_text(f"State:\t{state}\nTracerPid:\t{tracer}\n")
 
-    def stop(self, stuck=False, denied=False, service="stopped", detach=False, clock_jump=False, final_clock_jump=False):
+    def stop(
+        self,
+        stuck=False,
+        denied=False,
+        service="stopped",
+        detach=False,
+        clock_jump=False,
+        final_clock_jump=False,
+        elapsed_seconds=0,
+    ):
         fixture = r'''
 setprop() {
     if awk '$1 == "TracerPid:" && $2 != 0 { found = 1 } END { exit !found }' "$VOYAHTUNE_PROC_ROOT"/*/task/*/status 2>/dev/null; then
@@ -48,12 +57,14 @@ setprop() {
         return 1
     fi
     printf '%s\n' "$*" >> "$TEST_ROOT/init"
-    if [ "$TEST_FINAL_CLOCK_JUMP" = 1 ]; then printf "104.90 0.00\n" > "$VOYAHTUNE_UPTIME_SOURCE"; fi
+    if [ "$TEST_FINAL_CLOCK_JUMP" = 1 ]; then printf "159.90 0.00\n" > "$VOYAHTUNE_UPTIME_SOURCE"; fi
 }
 getprop() { printf '%s\n' "$TEST_SERVICE"; }
 sleep() {
     if [ "$TEST_CLOCK_JUMP" = 1 ] || { [ "$TEST_FINAL_CLOCK_JUMP" = 1 ] && [ -e "$TEST_ROOT/init" ]; }; then
-        printf "105.00 0.00\n" > "$VOYAHTUNE_UPTIME_SOURCE"
+        printf "160.00 0.00\n" > "$VOYAHTUNE_UPTIME_SOURCE"
+    elif [ "$TEST_ELAPSED_SECONDS" -gt 0 ]; then
+        printf '%s.00 0.00\n' "$((100 + TEST_ELAPSED_SECONDS))" > "$VOYAHTUNE_UPTIME_SOURCE"
     fi
 }
 kill() {
@@ -92,11 +103,12 @@ kill() {
                 TEST_DETACH=str(int(detach)),
                 TEST_CLOCK_JUMP=str(int(clock_jump)),
                 TEST_FINAL_CLOCK_JUMP=str(int(final_clock_jump)),
+                TEST_ELAPSED_SECONDS=str(elapsed_seconds),
                 VOYAHTUNE_UPTIME_SOURCE=str(self.uptime),
             ),
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=15,
         )
 
     def test_kills_owned_processes_and_preserves_updater_and_oem(self):
@@ -159,14 +171,21 @@ kill() {
         self.process(101, "/data/local/bin/voyahtune-new/voyahtune-inject")
         result = self.stop(clock_jump=True)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("exceeded five seconds", result.stderr)
+        self.assertIn("Runtime stop exceeded 60 seconds", result.stderr)
         self.assertFalse((self.directory / "init").exists())
 
-    def test_final_kill_retries_share_the_original_five_second_deadline(self):
+    def test_stop_can_complete_after_the_previous_five_second_limit(self):
+        self.process(101, "/data/local/bin/voyahtune-new/voyahtune-loader")
+        result = self.stop(elapsed_seconds=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.processes / "101").exists())
+        self.assertIn("-9 101", self.directory.joinpath("kills").read_text())
+
+    def test_final_kill_retries_share_the_original_deadline(self):
         self.process(101, "/data/local/bin/voyahtune-new/voyahtune-inject")
         result = self.stop(stuck=True, final_clock_jump=True)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("exceeded five seconds", result.stderr)
+        self.assertIn("Runtime stop exceeded 60 seconds", result.stderr)
         signals = self.directory.joinpath("kills").read_text().splitlines()
         self.assertEqual(signals.count("-9 101"), 1)
         self.assertTrue((self.directory / "init").exists())
