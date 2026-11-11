@@ -1,8 +1,8 @@
 # Updater
 
-Самостоятельный root-процесс `voyahtune-updater` и общая библиотека интерфейса `ui`.
-Экран входит в RestoreMode (`OtaActivity`, процесс `:ota`). Исполнитель обновления
-независим от APK и продолжает работу при замене приложения.
+Самостоятельный root-процесс `voyahtune-updater`, отдельный APK интерфейса `app`
+(`ru.big.town.updater`) и отдельные библиотеки `ui` и `client`. RestoreMode открывает внешний экран.
+Исполнитель и интерфейс продолжают работать при остановке и замене RestoreMode.
 
 Реализованы проверка каталога, загрузка архива, применение, проверка после reboot,
 отдельное меню, суточное уведомление, прогресс по шагам и выбор Яндекс DNS.
@@ -11,8 +11,8 @@
 в новой службе; у прежних служб сбрасывается представление. После ошибки записи
 USB-блокировка службы сохраняется. При отсутствии связи сброс службы откладывается
 до её восстановления; активная операция продолжает выполняться.
-Интерфейс обновляется последним вместе с RestoreMode перед reboot. Первое
-внедрение требует USB-установки root-службы и Installer 1.8.3; [контракт](../Docs/updater-ui-ota.md).
+Интерфейс и root-служба устанавливаются и обновляются через USB актуальным Installer.
+OTA сохраняет их установленными; [контракт](../Docs/updater-ui-ota.md).
 Вход из RestoreMode открывает новую Activity и начальный экран; прежний `finish` поддерживается.
 Служба сохраняет журналы сессии локально и отправляет чанки на voyahtune.ru с `isOta: true`, продолжая сессию после reboot. UI позволяет выбрать версию и переустановить текущую; кнопок журнала в UI нет. Компоненты включены в payload
 и Installer. [Приёмка на ГУ](../Docs/ota-acceptance.md) выполняется отдельно:
@@ -33,13 +33,14 @@ Arimo, голубые действия, карточки, закреплённа
 Из `Updater/`:
 
 ```sh
-./gradlew --offline :updater-ui:testDebugUnitTest
+./gradlew --offline :app:assembleDebug :updater-ui:testDebugUnitTest
 cargo test --locked --offline --manifest-path daemon/Cargo.toml
 python3 build-daemon.py --ndk "$ANDROID_NDK_HOME"
 ```
 
 Root executable: `build/daemon/arm64-v8a/voyahtune-updater`.
-Интерфейс собирается вместе с RestoreMode; отдельный APK Updater в единый payload не входит. Для сборки executable под эмулятор
+APK интерфейса: `app/build/outputs/apk/debug/app-debug.apk`; единый payload включает
+его release-сборку как `common/voyahtune-updater.apk`. Для сборки executable под эмулятор
 передать `--abi x86_64`; это не проверяет OEM init и SELinux.
 APK подписывается настроенным Gradle debug-ключом, как существующие Android-проекты;
 для воспроизводимого выпуска необходимо использовать один сохранённый ключ.
@@ -49,4 +50,4 @@ APK подписывается настроенным Gradle debug-ключом,
 `python3 Utils/test_android_integration.py --serial emulator-5554`.
 Покрытие и ограничения — [интеграционные проверки](../Docs/ota-updater.md#интеграционные-проверки-без-автомобиля).
 
-OTA допускает установку по единственному условию `minimumOtaVersion`. Хеши, размер, подписи APK, совпадение версий/metadata и capabilities не служат предварительными блокировками. Отдельного APK Updater и механизма его обновления больше нет; UI встроен в RestoreMode.
+OTA допускает установку по единственному условию `minimumOtaVersion`. Хеши, размер, подписи APK, совпадение версий/metadata и capabilities не служат предварительными блокировками. APK Updater и root-служба обновляются через USB; OTA не заменяет их.

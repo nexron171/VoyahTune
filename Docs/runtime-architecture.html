@@ -1664,7 +1664,7 @@
       "place": "Desktop Installer + root Updater",
       "summary": "Обе программы используют одну Rust-библиотеку, рецепт файлов и машину состояний обслуживания runtime.",
       "facts": [
-        "RuntimeMaintenance не разрешает Copy до успешного Quiesce/Drained и Stop.",
+        "RuntimeMaintenance не разрешает Copy до подтверждённой принудительной остановки собственных процессов.",
         "Если после reboot boot ID не сменился, postboot Check не допускается."
       ],
       "sources": [
@@ -1679,18 +1679,18 @@
     "maintenance": {
       "id": "maintenance",
       "title": "Обслуживание runtime",
-      "subtitle": "Block → Quiesce → Replace",
+      "subtitle": "Block → Force stop → Replace",
       "language": "Rust · Shell",
       "place": "ГУ · USB или OTA",
-      "summary": "Перед заменой файлов закрывает admission и ждёт подтверждения quiesce/drain. Затем останавливает loader, заменяет файлы и очищает старые пути.",
+      "summary": "Перед заменой файлов блокирует admission и принудительно завершает собственные процессы без ACK агентов. Затем заменяет файлы, очищает старые пути и перезагружает Android.",
       "facts": [
-        "Неопределённое состояние resident запрещает замену файлов.",
-        "Offline quiesce использует журнал, если supervisor уже не работает.",
+        "После принудительной остановки обязательна перезагрузка; ACK resident не требуется.",
+        "Updater сохраняет свой APK и root-процесс при OTA; их обновляет USB-установщик.",
         "Прежние Frida-пути присутствуют только в миграции/очистке."
       ],
       "sources": [
         "Packaging/installer/common/prepare-runtime-maintenance-device.sh",
-        "Packaging/installer/common/quiesce-runtime-device.sh",
+        "Packaging/installer/common/force-stop-runtime-device.sh",
         "Installer/crates/release-core/src/runtime_maintenance.rs",
         "Updater/daemon/src/install.rs"
       ],
@@ -2321,7 +2321,7 @@ views.system = {
     edge('installer', 'payload', 'читает ZIP', 'file'), edge('installer', 'init', 'устанавливает rc', 'file'),
     edge('payload', 'loader', 'доставляет runtime', 'file'),
     edge('updater', 'payload', 'использует ZIP', 'file'),
-    edge('updater', 'loader', 'quiesce / stop', 'rpc', {side: 'left'}), edge('init', 'loader', 'exec'),
+    edge('updater', 'loader', 'force stop', 'rpc', {side: 'left'}), edge('init', 'loader', 'exec'),
     edge('loader', 'helper', 'exec по ABI'), edge('helper', 'resident', 'ptrace → dlopen'),
     edge('loader', 'resident', 'Status / Apply / Quiesce', 'rpc'),
     edge('loader', 'state', 'сохраняет journal', 'file', {side: 'left'}),
@@ -2411,7 +2411,7 @@ views.delivery = {
     step('1 · Block', 'maintenance', 'Создать блокировку обслуживания и закрыть admission новых attach.'),
     step(
         '2 · Quiesce', 'resident',
-        'Подтвердить quiesce/drain каждого resident. Если supervisor недоступен, offline quiesce восстанавливает список из журнала. Ошибка запрещает замену.'),
+        'Принудительно завершить собственные loader/helpers и приложения, сохранив Updater и системные OEM-процессы до reboot. ACK resident не требуется.'),
     step(
         '3 · Stop', 'maintenance',
         'После Drained остановить loader. Остановка службы сама по себе не доказывает завершение внедрённых агентов.'),

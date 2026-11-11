@@ -40,7 +40,8 @@ ZIP распаковывается в новый закрытый каталог
 или прерывание требует USB-восстановления: автоматического продолжения и отката нет.
 
 Исполнитель создаёт `voyahtune-update.block`, останавливает загрузчик, Native и
-рабочие процессы RestoreMode. Процесс `:ota` сохраняется. Файлы устанавливаются
+все процессы RestoreMode и работающий RunYN без ожидания ACK агентов. Отдельный APK
+Updater сохраняется. Фактическое завершение собственных процессов проверяется по /proc. Файлы устанавливаются
 через rename на целевой файловой системе, применяются права и очистка из recipe.
 Native обновляется также через PackageManager, чтобы прежний APK из `/data/app`
 не перекрыл системную копию. При отсутствующем Native DE выполняется
@@ -58,11 +59,11 @@ RunYN устанавливается по условию `except-h97xy`.
 [Поведение и откат](installer-payload.md#шрифты-навигации-h97xh97y).
 
 RestoreMode устанавливается последним APK после Native, RunYN, DNS, шрифтов и sync.
-PackageManager закрывает UI, а внешний root-исполнитель продолжает работу:
-фиксация `reboot-pending`, снятие блока, sync и reboot. При ошибке записи блок
-сохраняется для USB-восстановления. [Порядок доставки UI](updater-ui-ota.md).
+Экран в отдельном APK Updater остаётся открыт; root-исполнитель завершает работу:
+фиксация `reboot-pending`, снятие блока, sync и reboot. При ошибке после принудительной остановки сохраняются ошибка и блокировка,
+выполняется попытка reboot для последующего USB-восстановления. [Порядок доставки UI](updater-ui-ota.md).
 
-При OTA бинарник службы, `voyahtune.updater.rc` и bootstrap остаются установленными;
+При OTA бинарник службы, APK Updater, `voyahtune.updater.rc` и bootstrap остаются установленными;
 их копии в архиве пропускаются. Общий recipe заменяет runtime и удаляет известные
 старые загрузчики/хуки. Изменение init загрузчика допускается общим исполнителем.
 
@@ -79,20 +80,20 @@ PackageManager закрывает UI, а внешний root-исполните�
 
 ## Процессы и запуск
 
-[Updater](../Updater/README.md) содержит Rust executable и общую Android-библиотеку UI.
-Activity входит в RestoreMode и работает в процессе `:ota`.
+[Updater](../Updater/README.md) содержит Rust executable, самостоятельный APK интерфейса
+`ru.big.town.updater` и общую Android-библиотеку IPC/UI.
 [Init rc](../Packaging/system/voyahtune.updater.rc) запускает единственный
 `voyahtune_updater` после `post-fs-data` от root, с `group inet` и `su` domain.
 Init перезапускает завершившийся процесс; дополнительный файловый lock исключает
 второй экземпляр. Служба не принадлежит процессу обновляемого приложения.
 Android init предоставляет [сокет и управление перезапуском](https://android.googlesource.com/platform/system/core/+/refs/tags/android-11.0.0_r12/init/README.md).
 
-USB-установщик 1.8.3 устанавливает единую root-службу, RestoreMode со встроенным UI и rc совместно:
+USB-установщик устанавливает root-службу, самостоятельный APK Updater и rc совместно:
 
 | Компонент | Путь | Владелец / права |
 | --- | --- | --- |
 | Служба | `/data/local/bin/voyahtune-updater` | root:root / 0755 |
-| Интерфейс | `ru.big.town.restoremode/.OtaActivity`, процесс `:ota` | APK в `/data/app`, UID RestoreMode |
+| Интерфейс | `/system/priv-app/VoyahTuneUpdater/VoyahTuneUpdater.apk` | root:root / 0644; отдельный UID Updater |
 | Init | `/system/etc/init/voyahtune.updater.rc` | root:root / 0644 |
 | Состояние и логи | `/data/local/voyahtune-updater/` | root:root / 0700 |
 
@@ -106,7 +107,7 @@ Init должен поддерживать службу постоянно, в �
 ## Интерфейс и закрытый канал
 
 Кнопка «Обновления VoyahTune» на странице «Другое» RestoreMode открывает
-`ru.big.town.restoremode.OtaActivity` в отдельном процессе `:ota`.
+APK `ru.big.town.updater` напрямую через `UpdaterActivity`.
 При открытии из RestoreMode задача OTA очищается и создаётся новая Activity:
 старые диалоги и положение прокрутки не восстанавливаются.
 Интерфейс отправляет службе `finish`: завершённый
@@ -129,7 +130,7 @@ boolean `reset_errors: true` (по умолчанию false). Новая слу�
 до восстановления связи. Активная операция не отменяется. После ошибки записи
 `repair-required` и блокирующий файл сохраняются: для повторной OTA нужно
 USB-восстановление, даже если представление ошибки закрыто.
-Интерфейс обновляется в составе RestoreMode по [контракту доставки](updater-ui-ota.md).
+Интерфейс обновляется через USB по [контракту доставки](updater-ui-ota.md).
 
 Собственный интерфейс отправляет службе JSON-строку через сокет init
 `/dev/socket/voyahtune_updater`. Допустимы `status`, `get_settings`, `set_settings`,
@@ -142,8 +143,9 @@ USB-восстановление, даже если представление �
 по этому пути запрещены. В ответе указано `infrastructure: "unified"`.
 
 Для остальных клиентов перед чтением запроса служба сверяет `SO_PEERCRED` с реестром PackageManager.
-Принимается только уникальный UID RestoreMode без shared UID, активный APK из
-`/data/app` и подпись, совпадающая с проверенным системным Native. Путь берётся из
+Принимаются уникальные UID Updater и RestoreMode без shared UID. Активный APK
+должен находиться в `/data/app` либо на фиксированном системном пути Updater,
+а его подпись — совпадать с проверенным системным Native. Путь берётся из
 `packages.xml`; APK принадлежит root или system, не доступен для записи группе/остальным
 и не содержит симлинков. Подписи проверяются повторно при смене идентичности файлов.
 UI проверяет UID 0 сервера.
@@ -306,8 +308,8 @@ python3 Utils/test_ota_process_isolation.py --serial emulator-5554
 Первый скрипт собирает debug APK и JVM-тесты, устанавливает Native первым (владелец
 signature permission), затем остальные APK, запускает три набора. `--suite native`,
 `--suite restore`, `--suite ota` выбирают наборы; `--no-build` использует готовые APK.
-Второй тест требует root-доступ на эмуляторе, проверяет реальную `OtaActivity` при
-блокировке рабочего процесса и удаляет только созданный им блок в `finally`.
+Второй тест требует root-доступ на эмуляторе, проверяет независимость `UpdaterActivity`
+от остановки RestoreMode и блокировку запуска рабочего процесса и удаляет только созданный им блок в `finally`.
 Оба скрипта запрещают запуск на физическом устройстве. Эмулятор должен быть тестовым:
 наборы заменяют debug APK и настройки mock-сценариев. Фактически проверено на AAOS 13 ARM64.
 

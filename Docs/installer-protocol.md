@@ -8,9 +8,9 @@
 ## Совместимость
 
 До обращения к автомобилю проверяются `requirements.minInstallerVersion` (SemVer)
-и `requirements.requiredCapabilities`. Текущий единый контракт требует Installer
-**1.8.3** и capabilities `qinggan-v3`, `single-package-v1`, `files-v1`,
-`ota-bootstrap-v1`, `infrastructure-v1`, `restoremode-ota-ui-v1`, `unified-runtime-v1`.
+и `requirements.requiredCapabilities`. Минимум Installer задаётся при сборке.
+Единый контракт использует capabilities `qinggan-v3`, `single-package-v1`, `files-v1`,
+`ota-bootstrap-v1`, `infrastructure-v1`, `unified-runtime-v1`, `fixed-payload-v1`.
 Имена capability являются стабильными идентификаторами протокола.
 
 APK metadata и root-служба используют `infrastructure: unified`. Версия нового релиза

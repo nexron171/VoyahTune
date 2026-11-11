@@ -10,8 +10,25 @@
 `voyahtune` для stable payload и APK, `installer` для GUI/движка. Beta получает
 согласованный номер с суффиксом `-beta`, например `4.5.0-beta`.
 
-Текущий единый контракт требует Installer **1.9.0**, capability `fixed-payload-v1`
-и совместимую root-службу. Первый переход на неё выполняется через USB; следующие
+`Installer/scripts/build_versions.py` читает этот файл, синхронизирует версию Cargo
+и версии локальных пакетов во всех трёх lock-файлах перед сборкой. Tauri
+наследует версию Cargo; собственного поля `version` в его конфиге нет. Скрипты сборки
+передают `VOYAH_INSTALLER_VERSION`, `VOYAH_RELEASE_VERSION` и
+`VOYAH_MINIMUM_INSTALLER_VERSION` через окружение. Gradle использует общий
+[release-versions.gradle](../SharedAndroid/release-versions.gradle); при прямом
+локальном запуске без окружения значения берутся из того же JSON.
+Явные параметры сборки сохраняют приоритет, в том числе beta и минимум совместимости.
+
+После изменения только `versions.json` обёртки `make_release.sh` и
+`Installer/scripts/build.mjs` обновляют производные файлы автоматически.
+Перед прямым запуском Cargo синхронизацию выполняют отдельно, без сборки:
+
+```sh
+python3 Installer/scripts/build_versions.py --sync-installer
+```
+
+Единый контракт использует capability `fixed-payload-v1` и совместимую
+root-службу. Минимум Installer задаётся при подготовке payload. Первый переход на неё выполняется через USB; следующие
 совместимые обновления используют тот же payload через OTA. Общий recipe заменяет
 прежний runtime, удаляет известные устаревшие файлы и перезагружает Android.
 RunYN входит в архив и устанавливается по условию `except-h97xy`.
@@ -22,12 +39,21 @@ RunYN входит в архив и устанавливается по усло
 
 ## 1. Выбрать состав сборки
 
+В примерах `VOYAH_MINIMUM_INSTALLER_VERSION` — выбранный минимум совместимости.
+Для первого USB-перехода на новый контракт его можно получить из текущей версии:
+
+```sh
+export VOYAH_MINIMUM_INSTALLER_VERSION=$(python3 -c 'import json; print(json.load(open("versions.json"))["installer"])')
+```
+
+Для последующих совместимых релизов сохраняйте ранее подтверждённый минимум.
+
 | Что собрать | Команда |
 | --- | --- |
-| Только единый payload | `./make_release.sh 4.5.0 --payload --minimum-installer-version 1.9.0 --minimum-ota-version 4.5.0` |
-| Только единый payload в Linux-контейнере | `./build_in_container.sh 4.5.0 --payload --minimum-installer-version 1.9.0 --minimum-ota-version 4.5.0` |
-| Payload и GUI macOS | `./make_release.sh 4.5.0 --mac --minimum-installer-version 1.9.0 --minimum-ota-version 4.5.0` |
-| Payload и стандартный набор GUI | `./make_release.sh 4.5.0 --installers --minimum-installer-version 1.9.0 --minimum-ota-version 4.5.0` |
+| Только единый payload | `./make_release.sh 4.5.0 --payload --minimum-installer-version $VOYAH_MINIMUM_INSTALLER_VERSION --minimum-ota-version 4.5.0` |
+| Только единый payload в Linux-контейнере | `./build_in_container.sh 4.5.0 --payload --minimum-installer-version $VOYAH_MINIMUM_INSTALLER_VERSION --minimum-ota-version 4.5.0` |
+| Payload и GUI macOS | `./make_release.sh 4.5.0 --mac --minimum-installer-version $VOYAH_MINIMUM_INSTALLER_VERSION --minimum-ota-version 4.5.0` |
+| Payload и стандартный набор GUI | `./make_release.sh 4.5.0 --installers --minimum-installer-version $VOYAH_MINIMUM_INSTALLER_VERSION --minimum-ota-version 4.5.0` |
 | Только GUI macOS | `./Installer/scripts/build-all-macos.sh --mac` |
 
 `--pi`, `--od`, `--legacy` и выбор инфраструктуры в Rust-сборщике удалены.
@@ -138,7 +164,7 @@ npm --version
 Desktop-зависимости устанавливаются автоматически через `npm ci` во время сборки.
 Глобально устанавливать Tauri CLI не требуется.
 
-Теперь можно выполнять `./make_release.sh 4.5.0 --mac --minimum-installer-version 1.9.0 --minimum-ota-version 4.5.0`. При выборе только macOS
+Теперь можно выполнять `./make_release.sh 4.5.0 --mac --minimum-installer-version $VOYAH_MINIMUM_INSTALLER_VERSION --minimum-ota-version 4.5.0`. При выборе только macOS
 Docker/Colima не проверяются и не запускаются.
 
 ### 2.4. Дополнительно для Windows/Linux из macOS
@@ -172,7 +198,7 @@ Payload — APK Native/RestoreMode/RunYN, root-служба, Go-загрузчи
 собирается на Linux x86-64 в контейнере, без macOS и Colima:
 
 ```sh
-./build_in_container.sh 4.5.0 --payload --minimum-installer-version 1.9.0 --minimum-ota-version 4.5.0
+./build_in_container.sh 4.5.0 --payload --minimum-installer-version $VOYAH_MINIMUM_INSTALLER_VERSION --minimum-ota-version 4.5.0
 ```
 
 Скрипт собирает образ из `build-env/Dockerfile` и выполняет в нём `./make_release.sh`
@@ -276,7 +302,7 @@ APK на автомобиле не резервируются; для сохра
 ## 4. Собрать и проверить payload
 
 ```sh
-./make_release.sh 4.5.0 --payload --minimum-installer-version 1.9.0 --minimum-ota-version 4.5.0
+./make_release.sh 4.5.0 --payload --minimum-installer-version $VOYAH_MINIMUM_INSTALLER_VERSION --minimum-ota-version 4.5.0
 Installer/target/release/installer-build verify-payload Releases/build/installer-payload-4.5.0
 python3 -m json.tool Releases/dist/payload_4.5.0.json
 ```
@@ -367,7 +393,7 @@ SHA-256 и минимумами совместимости. Шаблонный U
 Сборка GUI не собирает Android. Если нужны оба результата за один запуск:
 
 ```sh
-./make_release.sh 4.5.0 --mac --minimum-installer-version 1.9.0 --minimum-ota-version 4.5.0
+./make_release.sh 4.5.0 --mac --minimum-installer-version $VOYAH_MINIMUM_INSTALLER_VERSION --minimum-ota-version 4.5.0
 ```
 
 Developer ID/notarization и Authenticode проверяются отдельно от успешной сборки.
