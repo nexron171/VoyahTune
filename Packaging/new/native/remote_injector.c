@@ -14,6 +14,7 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/ptrace.h>
+#include <sys/stat.h>
 #include <sys/uio.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -144,8 +145,12 @@ static int wait_stop(TraceContext* context, uint64_t deadline, int* status) {
         } else if (result < 0 && errno != EINTR) {
             return fail(context, errno, "wait-target");
         }
-        if (deadline != 0 && milliseconds() >= deadline)
-            return ETIMEDOUT;
+        if (deadline != 0) {
+            if (atomic_load(&injection_cancelled))
+                return ECANCELED;
+            if (milliseconds() >= deadline)
+                return ETIMEDOUT;
+        }
         struct timespec pause = {0, 5000000};
         nanosleep(&pause, NULL);
     }
@@ -620,6 +625,11 @@ int VoyahtuneRemoteInject(const VoyahtuneRemoteRequest* request, VoyahtuneRemote
     if (atomic_load(&injection_cancelled)) {
         result->restored = result->detached = 1;
         return fail(&context, ECANCELED, "attach-cancelled-before-seize");
+    }
+    struct stat maintenance;
+    if (lstat("/data/local/bin/voyahtune-update.block", &maintenance) == 0 || errno != ENOENT) {
+        result->restored = result->detached = 1;
+        return fail(&context, EBUSY, "runtime-maintenance-before-seize");
     }
     stage(&context, VOYAHTUNE_ATTACH_WAITING);
     if (ptrace(PTRACE_SEIZE, bootstrap->pid, NULL, (void*)PTRACE_O_TRACESYSGOOD) != 0) {

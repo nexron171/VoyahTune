@@ -6,6 +6,7 @@ mod native_data;
 mod navigation_fonts;
 mod readiness;
 mod removal;
+mod updater;
 
 #[cfg(all(test, unix))]
 mod optional_steps_tests;
@@ -537,7 +538,7 @@ impl Engine {
         }
         Ok(())
     }
-    fn ota_prepare(&mut self) -> Result<()> {
+    fn stop_updater_service(&self) -> Result<()> {
         self.ignore("setprop ctl.stop voyahtune_updater 2>/dev/null || true\n");
         for _ in 0..20 {
             if self.shell("getprop init.svc.voyahtune_updater\n")? != "running" {
@@ -551,6 +552,11 @@ impl Engine {
                 "Повторите после завершения OTA",
             ));
         }
+        Ok(())
+    }
+
+    fn ota_prepare(&mut self) -> Result<()> {
+        self.stop_updater_service()?;
         let diagnostics = self.operation.dir.join("ota-diagnostics");
         fs::create_dir_all(&diagnostics)?;
         for name in [
@@ -1019,25 +1025,7 @@ impl Engine {
             self.ignore(&format!("settings put global {key} 1\n"));
         }
 
-        let path = self.payload.file("voyahtune-updater.apk")?;
-        let arguments = [
-            "install",
-            "-r",
-            "-d",
-            "--user",
-            "0",
-            path.to_str()
-                .ok_or_else(|| self.fail("Некорректный путь Updater", path.display()))?,
-        ];
-        let mut output = self.raw(&arguments)?;
-        if signature_update_rejected(&format!("{}\n{}", output.stdout, output.stderr)) {
-            require_package_success(
-                self.raw(&["uninstall", payload::UPDATER])?,
-                "Не удалось удалить прежний Updater",
-            )?;
-            output = self.raw(&arguments)?;
-        }
-        require_package_success(output, "Updater не установлен")?;
+        self.install_updater()?;
         self.install_restore(&self.payload.file("restore_mode.apk")?)?;
         for package in self
             .payload

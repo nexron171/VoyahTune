@@ -139,6 +139,33 @@ fn registered_apk(xml: &str, uid: u32, package: &str) -> io::Result<PathBuf> {
     found.ok_or_else(|| invalid("UI не зарегистрирован"))
 }
 
+fn trust_anchor(package: &str) -> &Path {
+    Path::new(if package == payload::UPDATER {
+        payload::UPDATER_PATH
+    } else {
+        payload::NATIVE_PATH
+    })
+}
+
+fn verify_client_signature(
+    package: &str,
+    path: &Path,
+    mut signers: impl FnMut(&Path) -> io::Result<Vec<String>>,
+    package_name: impl FnOnce(&Path) -> io::Result<String>,
+) -> io::Result<()> {
+    let trusted_signers = signers(trust_anchor(package))?;
+    let client_signers = signers(path)?;
+    if trusted_signers.is_empty()
+        || trusted_signers != client_signers
+        || package_name(path)? != package
+    {
+        return Err(invalid(
+            "Подпись интерфейса не соответствует доверенному системному APK",
+        ));
+    }
+    Ok(())
+}
+
 pub fn authorize(uid: u32) -> io::Result<()> {
     let packages = fs::read_to_string("/data/system/packages.list")?;
     let package = [payload::RESTORE, payload::UPDATER]
@@ -151,7 +178,7 @@ pub fn authorize(uid: u32) -> io::Result<()> {
         package,
     )?;
     let client = identity(&path, false)?;
-    let anchor = identity(Path::new(payload::NATIVE_PATH), true)?;
+    let anchor = identity(trust_anchor(package), true)?;
     let before = (client, anchor);
     let mut cache = VERIFIED
         .lock()
@@ -159,24 +186,20 @@ pub fn authorize(uid: u32) -> io::Result<()> {
     if cache.as_ref() == Some(&before) {
         return Ok(());
     }
-    let native_signers = payload::verified_signers(Path::new(payload::NATIVE_PATH))
-        .map_err(|e| invalid(&e.to_string()))?;
-    let client_signers = payload::verified_signers(&path).map_err(|e| invalid(&e.to_string()))?;
-    if native_signers.is_empty()
-        || native_signers != client_signers
-        || release_core::apk_identity::read(&path)
-            .map_err(|e| invalid(&e.to_string()))?
-            .0
-            != package
-    {
-        return Err(invalid(
-            "Подпись интерфейса не соответствует установленному Native",
-        ));
-    }
+    verify_client_signature(
+        package,
+        &path,
+        |path| payload::verified_signers(path).map_err(|error| invalid(&error.to_string())),
+        |path| {
+            release_core::apk_identity::read(path)
+                .map(|identity| identity.0)
+                .map_err(|error| invalid(&error.to_string()))
+        },
+    )?;
     // Cache only immutable file identities that stayed unchanged throughout verification.
     let current = (
         identity(&path, false)?,
-        identity(Path::new(payload::NATIVE_PATH), true)?,
+        identity(trust_anchor(package), true)?,
     );
     if current != before {
         return Err(invalid("APK изменился во время проверки"));
@@ -188,6 +211,65 @@ pub fn authorize(uid: u32) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn updater_keeps_access_after_native_signer_changes() {
+        let client = Path::new("/data/app/updater/base.apk");
+        for native_signer in ["old-key", "new-key"] {
+            verify_client_signature(
+                payload::UPDATER,
+                client,
+                |path| {
+                    Ok(vec![if path == Path::new(payload::NATIVE_PATH) {
+                        native_signer.into()
+                    } else {
+                        "old-key".into()
+                    }])
+                },
+                |_| Ok(payload::UPDATER.into()),
+            )
+            .unwrap();
+        }
+        assert!(verify_client_signature(
+            payload::RESTORE,
+            Path::new("/data/app/restore/base.apk"),
+            |path| Ok(vec![if path == Path::new(payload::NATIVE_PATH) {
+                "new-key".into()
+            } else {
+                "old-key".into()
+            }]),
+            |_| Ok(payload::RESTORE.into())
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn rejects_untrusted_signers_and_wrong_package_identity() {
+        let path = Path::new("/data/app/updater/base.apk");
+        for (client_signer, claimed_package) in [
+            ("other-key", payload::UPDATER),
+            ("usb-key", "unrelated.package"),
+        ] {
+            assert!(verify_client_signature(
+                payload::UPDATER,
+                path,
+                |candidate| Ok(vec![if candidate == Path::new(payload::UPDATER_PATH) {
+                    "usb-key".into()
+                } else {
+                    client_signer.into()
+                }]),
+                |_| Ok(claimed_package.into())
+            )
+            .is_err());
+        }
+        assert!(verify_client_signature(
+            payload::UPDATER,
+            path,
+            |_| Ok(vec![]),
+            |_| Ok(payload::UPDATER.into())
+        )
+        .is_err());
+    }
+
     #[test]
     fn only_registered_unique_restore_identity_is_accepted() {
         let valid = r#"<packages><package name="ru.big.town.restoremode" userId="10123" codePath="/data/app/restore-123"/></packages>"#;
