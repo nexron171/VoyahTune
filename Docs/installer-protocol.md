@@ -93,7 +93,7 @@ Native, whitelist, RestoreMode, RunYN, boot и DNS остаются типизи
 | Remount | Прежняя процедура, включая перезагрузку при необходимости |
 | Backup / подписи | Копии только системных/runtime-файлов; Native/RestoreMode APK не копируются; CE/DE reset только при смене подписи |
 | Runtime / files | Остановка hooks, единый runtime и файловый recipe |
-| Boot | Backup/миграция init.logcat, staging/publish/rollback boot-hook |
+| Boot | Раздельные установочный/OEM init.logcat, staging/publish/rollback boot-hook |
 | Native / RestoreMode / RunYN / DNS | APK, whitelist, RunYN по условию модели и DNS overlay |
 | Reboot / verify | Ожидание загрузки, проверка приложений, нового загрузчика, init-службы OTA и IPC 1 |
 | Remove | Отключение, DNS restore, boot cleanup, recipe cleanup, настройки, приложения, reboot |
