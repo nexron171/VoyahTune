@@ -754,12 +754,25 @@
     if (!plan) return;
     const options = { ...plan.request.options, [option]: checkbox.checked };
     checkbox.checked = plan.request.options[option];
+    await updateInstallOptions(options, plan.request.restoreTurnSound);
+  }
+  async function selectTurnSound(restore: boolean) {
+    if (!plan) return;
+    await updateInstallOptions(plan.request.options, restore);
+  }
+  async function updateInstallOptions(
+    options: InstallOptions,
+    restoreTurnSound: boolean,
+  ) {
     busy = true;
     error = null;
     try {
-      const updated = await command<Plan>("update_install_options", { options });
+      const updated = await command<Plan>("update_install_options", {
+        options,
+        restoreTurnSound,
+      });
       plan = { ...plan, ...updated };
-      await recordChoice("vehicle-options-selected", { options });
+      await recordChoice("installation-options-selected", { options, restoreTurnSound });
     } catch (cause) {
       error = caughtFailure(cause);
     } finally {
@@ -803,6 +816,7 @@
           action,
           dns,
           options: plan.request.options,
+          restoreTurnSound: plan.request.restoreTurnSound,
           restoreCunba,
           deviceConfirmed: confirmed,
         },
@@ -1735,6 +1749,22 @@
                       bind:group={dns}
                       onchange={() =>
                         recordChoice("dns-selected", { dns }, undefined, dns)}
+                    />
+                    {option.label}
+                  </label>
+                {/each}
+              </div>
+            </fieldset>
+            <fieldset class="dns-box" disabled={busy || sessionStarting}>
+              <legend>Звук поворотников</legend>
+              <div class="dns-options">
+                {#each [{ restore: true, label: "Восстановить оригинальный звук" }, { restore: false, label: "Оставить как есть" }] as option}
+                  <label>
+                    <input
+                      type="radio"
+                      name="turn-sound"
+                      checked={plan.request.restoreTurnSound === option.restore}
+                      onchange={() => selectTurnSound(option.restore)}
                     />
                     {option.label}
                   </label>

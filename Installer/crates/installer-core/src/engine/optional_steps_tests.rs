@@ -155,6 +155,7 @@ esac
         .execute(Request {
             action: Action::Remove,
             dns: Dns::Keep,
+            restore_turn_sound: false,
             options: Default::default(),
             serial: "CAR-001".into(),
             inventory_token: String::new(),

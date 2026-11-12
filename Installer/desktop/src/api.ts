@@ -20,6 +20,7 @@ export interface Device {
 export interface Request {
   action: Action;
   dns: Dns;
+  restoreTurnSound: boolean;
   options: InstallOptions;
   serial: string;
   inventoryToken: string;

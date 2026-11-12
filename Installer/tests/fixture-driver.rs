@@ -384,6 +384,7 @@ fn run(cli: Cli) -> Result<()> {
             engine.run(Request {
                 action: action.into(),
                 dns: dns.into(),
+                restore_turn_sound: false,
                 options: installer_core::vehicle_options::InstallOptions {
                     fake_account,
                     disable_chinese_navigation,

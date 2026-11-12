@@ -22,10 +22,18 @@ pub struct Request {
     pub action: Action,
     pub dns: Dns,
     #[serde(default)]
+    pub restore_turn_sound: bool,
+    #[serde(default)]
     pub options: InstallOptions,
     pub serial: String,
     pub inventory_token: String,
     pub confirmed: bool,
+}
+
+impl Request {
+    pub fn should_restore_turn_sound(&self) -> bool {
+        self.action == Action::Remove || self.restore_turn_sound
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,10 +65,19 @@ pub struct Plan {
 }
 
 impl Plan {
+    pub fn set_turn_sound_restore(&mut self, restore: bool) {
+        self.request.restore_turn_sound = restore;
+        self.steps = operation_steps(self.request.action, self.request.options, restore);
+    }
+
     pub fn set_options(&mut self, options: InstallOptions) -> Result<()> {
         options.validate(self.request.action, self.oem_options_available)?;
         self.request.options = options;
-        self.steps = operation_steps(self.request.action, options);
+        self.steps = operation_steps(
+            self.request.action,
+            options,
+            self.request.restore_turn_sound,
+        );
         Ok(())
     }
 }
@@ -120,7 +137,7 @@ pub fn plan(inventory: Inventory, payload: &Payload, action: Action, dns: Dns) -
         warnings.push(format!("Другой ключ подписи: {}. Эти приложения будут автоматически удалены вместе с настройками и данными, затем установлены заново.", resets.join(", ")));
     }
     let options = InstallOptions::default();
-    let steps = operation_steps(action, options);
+    let steps = operation_steps(action, options, false);
     use sha2::{Digest, Sha256};
     Ok(Plan {
         oem_options_available: false,
@@ -134,6 +151,7 @@ pub fn plan(inventory: Inventory, payload: &Payload, action: Action, dns: Dns) -
         request: Request {
             action,
             dns,
+            restore_turn_sound: false,
             options,
             serial: inventory.serial.clone(),
             inventory_token: inventory.token.clone(),
@@ -147,17 +165,19 @@ pub fn plan(inventory: Inventory, payload: &Payload, action: Action, dns: Dns) -
 }
 
 /// Presentation boundaries must match every step emitted by Engine::execute.
-fn operation_steps(action: Action, options: InstallOptions) -> Vec<Step> {
+fn operation_steps(action: Action, options: InstallOptions, restore_turn_sound: bool) -> Vec<Step> {
     let mut steps = vec![
         ("preflight", "Подготовка файлов релиза"),
         ("root", "Получение системного доступа"),
         ("updater-prepare", "Остановка OTA-службы и сохранение логов"),
-        (
+    ];
+    if action == Action::Remove || restore_turn_sound {
+        steps.push((
             "turn-sound-restore",
             "Восстановление штатного звука поворотников",
-        ),
-        ("navigation-fonts-check", "Проверка тем приборки"),
-    ];
+        ));
+    }
+    steps.push(("navigation-fonts-check", "Проверка тем приборки"));
     steps.push(("system", "Подготовка системного раздела"));
     if action == Action::Install {
         steps.push((
@@ -219,14 +239,43 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn turn_sound_restoration_requires_explicit_install_choice() {
+        let mut plan = fixture(Action::Install);
+        assert!(!plan.request.restore_turn_sound);
+        assert!(!plan
+            .steps
+            .iter()
+            .any(|step| step.id == "turn-sound-restore"));
+        for restore in [true, false] {
+            plan.set_turn_sound_restore(restore);
+            plan.set_options(InstallOptions::default()).unwrap();
+            assert_eq!(plan.request.should_restore_turn_sound(), restore);
+            assert_eq!(
+                plan.steps
+                    .iter()
+                    .any(|step| step.id == "turn-sound-restore"),
+                restore
+            );
+        }
+        let removal = fixture(Action::Remove);
+        assert!(removal.request.should_restore_turn_sound());
+        assert!(removal
+            .steps
+            .iter()
+            .any(|step| step.id == "turn-sound-restore"));
+    }
+
+    #[test]
     fn installation_request_preserves_explicit_vehicle_choices() {
         let request: Request = serde_json::from_value(json!({
             "action": "install", "dns": "keep", "serial": "CAR-001",
             "inventoryToken": "token", "confirmed": true,
+            "restoreTurnSound": true,
             "options": {"fakeAccount": true, "disableChineseNavigation": true}
         }))
         .unwrap();
         let saved = serde_json::to_value(request).unwrap();
+        assert_eq!(saved["restoreTurnSound"], true);
         assert_eq!(saved["options"]["fakeAccount"], true);
         assert_eq!(saved["options"]["disableChineseNavigation"], true);
     }
@@ -238,6 +287,7 @@ mod tests {
             "inventoryToken": "token", "confirmed": true
         }))
         .unwrap();
+        assert!(!request.restore_turn_sound);
         assert_eq!(request.options, InstallOptions::default());
     }
 
@@ -291,15 +341,14 @@ mod tests {
 
     #[test]
     fn install_prepares_third_party_solutions_immediately_after_remount() {
-        let steps = operation_steps(Action::Install, InstallOptions::default());
+        let steps = operation_steps(Action::Install, InstallOptions::default(), false);
         let ids: Vec<_> = steps.iter().map(|step| step.id.as_str()).collect();
         assert_eq!(
-            &ids[..8],
+            &ids[..7],
             &[
                 "preflight",
                 "root",
                 "updater-prepare",
-                "turn-sound-restore",
                 "navigation-fonts-check",
                 "system",
                 "third-party-loaders",
@@ -312,13 +361,13 @@ mod tests {
     #[test]
     fn navigation_fonts_are_applied_before_reboot_and_restored_before_removal() {
         {
-            let install = operation_steps(Action::Install, InstallOptions::default());
+            let install = operation_steps(Action::Install, InstallOptions::default(), false);
             let font = install
                 .iter()
                 .position(|step| step.id == "navigation-fonts")
                 .unwrap();
             assert_eq!(install[font + 1].id, "reboot");
-            let remove = operation_steps(Action::Remove, InstallOptions::default());
+            let remove = operation_steps(Action::Remove, InstallOptions::default(), false);
             let font = remove
                 .iter()
                 .position(|step| step.id == "navigation-fonts")

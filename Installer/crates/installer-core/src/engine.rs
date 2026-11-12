@@ -343,11 +343,13 @@ impl Engine {
             "Остановка OTA-службы и сохранение логов",
             |e| e.ota_prepare(),
         )?;
-        self.optional_step(
-            "turn-sound-restore",
-            "Восстановление штатного звука поворотников",
-            |engine| engine.adb.restore_turn_sound(),
-        )?;
+        if r.should_restore_turn_sound() {
+            self.optional_step(
+                "turn-sound-restore",
+                "Восстановление штатного звука поворотников",
+                |engine| engine.adb.restore_turn_sound(),
+            )?;
+        }
         self.optional_step(
             "navigation-fonts-check",
             "Проверка тем приборки",

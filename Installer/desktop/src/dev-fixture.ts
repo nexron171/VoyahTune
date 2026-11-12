@@ -219,6 +219,17 @@ export async function command(
     )
       throw Error("Дополнительные опции недоступны для этого автомобиля");
     preparedPlan.request.options = options;
+    preparedPlan.request.restoreTurnSound = args.restoreTurnSound === true;
+    preparedPlan.steps = preparedPlan.steps.filter(
+      (step) => step.id !== "turn-sound-restore",
+    );
+    if (preparedPlan.request.restoreTurnSound) {
+      const index = preparedPlan.steps.findIndex((step) => step.id === "navigation-fonts-check");
+      preparedPlan.steps.splice(index, 0, {
+        id: "turn-sound-restore",
+        title: "Восстановление штатного звука поворотников",
+      });
+    }
     preparedPlan.steps = preparedPlan.steps.filter(
       (step) => step.id !== "fake-account",
     );
@@ -238,6 +249,7 @@ export async function command(
       request: {
         action: args.action as Action,
         dns: args.dns as Dns,
+        restoreTurnSound: false,
         options: { fakeAccount: false, disableChineseNavigation: false },
         serial: String(args.serial),
         inventoryToken: "fixture-token",
@@ -264,6 +276,10 @@ export async function command(
           id: "updater-prepare",
           title: "Остановка OTA-службы и сохранение логов",
         },
+        ...(args.action === "remove"
+          ? [{ id: "turn-sound-restore", title: "Восстановление штатного звука поворотников" }]
+          : []),
+        { id: "navigation-fonts-check", title: "Проверка тем приборки" },
         ...(args.action !== "remove" && scenario === "canbus-conflict"
           ? [{ id: "permission", title: "Проверка владельца CAN-разрешения" }]
           : []),

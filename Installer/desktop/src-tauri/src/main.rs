@@ -533,6 +533,7 @@ async fn plan(app: tauri::AppHandle, serial: String, action: Action, dns: Dns) -
 fn update_install_options(
     app: tauri::AppHandle,
     options: installer_core::vehicle_options::InstallOptions,
+    restore_turn_sound: bool,
 ) -> Result<Plan> {
     let runtime = app.state::<Runtime>();
     let mut state = runtime.0.lock().unwrap();
@@ -547,6 +548,7 @@ fn update_install_options(
         .as_mut()
         .ok_or_else(|| Error::new("PLAN_REQUIRED", "Сначала проверьте автомобиль и план"))?;
     plan.set_options(options)?;
+    plan.set_turn_sound_restore(restore_turn_sound);
     Ok(plan.clone())
 }
 #[tauri::command]
@@ -773,6 +775,7 @@ fn run_operation(
         ));
     }
     plan.set_options(request.options)?;
+    plan.set_turn_sound_restore(request.restore_turn_sound);
     // Choices are confirmed on the review page after initial diagnosis.
     plan.request = request.clone();
     if restore_cunba {
