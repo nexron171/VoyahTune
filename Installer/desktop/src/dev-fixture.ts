@@ -305,10 +305,6 @@ export async function command(
               { id: "backup", title: "Сохранение файлов перед заменой" },
               { id: "signing-reset", title: "Переустановка при смене подписи" },
               { id: "runtime", title: "Остановка старых hooks" },
-              {
-                id: "apollo-migration",
-                title: "Отключение старой активации Apollo",
-              },
               { id: "files", title: "Установка файлов релиза" },
               { id: "migration", title: "Миграция старого init.logcat.sh" },
               { id: "boot-hooks", title: "Установка boot-hook" },

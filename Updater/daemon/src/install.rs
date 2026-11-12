@@ -433,15 +433,6 @@ fn apply_with_signature_reset(shared: &Shared, allow_native_reset: bool) -> io::
             60,
         )?;
     }
-    workflow::phase(shared, "applying", "Отключение старой активации Apollo")?;
-    command(
-        "/system/bin/sh",
-        &[
-            "-c",
-            include_str!("../../../Packaging/installer/common/apollo-safe-device.sh"),
-        ],
-        60,
-    )?;
     // Injected agents are unloaded by the mandatory reboot. Stop in-flight injector workers.
     let _ = command(
         "/system/bin/pkill",

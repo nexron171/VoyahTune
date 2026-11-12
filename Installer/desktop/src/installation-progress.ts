@@ -28,7 +28,6 @@ const installationStages: StageDefinition[] = [
     stepIds: [
       "signing-reset",
       "runtime",
-      "apollo-migration",
       "files",
       "migration",
       "boot-hooks",

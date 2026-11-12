@@ -403,17 +403,6 @@ impl Engine {
 
             self.shell(&release_core::native_package::prepare_script())?;
 
-            self.step(
-                "apollo-migration",
-                "Отключение старой активации Apollo",
-                |e| {
-                    e.shell(include_str!(
-                        "../../../../Packaging/installer/common/apollo-safe-device.sh"
-                    ))
-                    .map(|_| ())
-                },
-            )?;
-
             self.step("files", "Установка файлов релиза", |e| e.recipe_files())?;
 
             self.step("boot-hooks", "Установка boot-hook", |e| {

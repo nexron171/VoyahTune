@@ -6,11 +6,30 @@ import android.content.SharedPreferences;
 
 import org.junit.Test;
 
+import ru.big.town.common.VehiclePlatform;
+
 import java.lang.reflect.Proxy;
 import java.util.HashMap;
 import java.util.Map;
 
 public class ApolloSettingsTest {
+    @Test
+    public void stockMenuPreservesSavedChoiceAndExcludesXAndY() {
+        Map<String, Object> values = new HashMap<>();
+        SharedPreferences prefs = preferences(values);
+        for (VehiclePlatform platform : VehiclePlatform.values()) {
+            assertEquals(false, ApolloSettings.stockUiEnabled(prefs, platform));
+        }
+        values.put(ApolloSettings.STOCK_UI, true);
+        for (VehiclePlatform platform : VehiclePlatform.values()) {
+            assertEquals(
+                    platform != VehiclePlatform.H97X && platform != VehiclePlatform.H97Y,
+                    ApolloSettings.stockUiEnabled(prefs, platform));
+        }
+        values.put(ApolloSettings.STOCK_UI, false);
+        assertEquals(false, ApolloSettings.stockUiEnabled(prefs, VehiclePlatform.H97C));
+    }
+
     private static SharedPreferences preferences(Map<String, Object> values) {
         return (SharedPreferences)
                 Proxy.newProxyInstance(

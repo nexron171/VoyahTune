@@ -2,6 +2,8 @@ package ru.big.town.restoremode.vehicle;
 
 import android.content.SharedPreferences;
 
+import ru.big.town.common.VehiclePlatform;
+
 /** Persisted Apollo targets owned by VoyahTune; no live CAN state is mirrored into these values. */
 public final class ApolloSettings {
     public static final String STOCK_UI = "apolloStockUiEnabled";
@@ -20,6 +22,10 @@ public final class ApolloSettings {
     public static final int AUTO_CORRECTION = 2;
 
     public static final boolean DEFAULT_ENABLED = false;
+
+    public static boolean stockUiEnabled(SharedPreferences preferences, VehiclePlatform platform) {
+        return !platform.isH97XY() && preferences.getBoolean(STOCK_UI, false);
+    }
 
     public static int speedMode(SharedPreferences prefs) {
         int mode =

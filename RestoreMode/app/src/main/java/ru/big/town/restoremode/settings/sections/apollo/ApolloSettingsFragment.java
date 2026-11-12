@@ -7,12 +7,28 @@ import android.widget.RadioGroup;
 import android.widget.Switch;
 import android.widget.TextView;
 
+import ru.big.town.common.VehiclePlatform;
 import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.settings.core.SettingsSection;
 import ru.big.town.restoremode.settings.core.SettingsSectionFragment;
+import ru.big.town.restoremode.settings.core.SettingsSectionLayouts;
 import ru.big.town.restoremode.vehicle.ApolloSettings;
 
 public final class ApolloSettingsFragment extends SettingsSectionFragment {
+    @Override
+    protected SettingsSectionLayouts.Item[] sectionLayouts() {
+        SettingsSectionLayouts.Item[] rows = super.sectionLayouts();
+        if (VehiclePlatform.current().isH97XY()) {
+            return rows;
+        }
+        SettingsSectionLayouts.Item[] withStockMenu =
+                new SettingsSectionLayouts.Item[rows.length + 1];
+        withStockMenu[0] = rows[0];
+        withStockMenu[1] = SettingsSectionLayouts.layout(R.layout.settings_apollo_stock_menu);
+        System.arraycopy(rows, 1, withStockMenu, 2, rows.length - 1);
+        return withStockMenu;
+    }
+
     @Override
     public SettingsSection section() {
         return SettingsSection.APOLLO;
@@ -35,6 +51,16 @@ public final class ApolloSettingsFragment extends SettingsSectionFragment {
     private TextView textApolloStatus;
 
     private void initApolloTech() {
+        Switch stockMenu = settingView(R.id.switchApolloStockMenu);
+        if (stockMenu != null) {
+            stockMenu.setChecked(
+                    ApolloSettings.stockUiEnabled(preferences, VehiclePlatform.current()));
+            stockMenu.setOnCheckedChangeListener(
+                    (button, checked) -> {
+                        preferences.edit().putBoolean(ApolloSettings.STOCK_UI, checked).apply();
+                        requestApolloApply();
+                    });
+        }
         if (settingView(R.id.switchApolloTlc) != null) {
             switchApolloTlc = settingView(R.id.switchApolloTlc);
         }
@@ -152,6 +178,10 @@ public final class ApolloSettingsFragment extends SettingsSectionFragment {
         if (!ru.big.town.common.VehiclePlatform.current().isH97XY()) {
             return;
         }
+        requestApolloApply();
+    }
+
+    private void requestApolloApply() {
         try {
             requireContext()
                     .startForegroundService(

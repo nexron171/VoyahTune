@@ -205,7 +205,6 @@ fn operation_steps(action: Action, options: InstallOptions, restore_turn_sound: 
             ("backup", "Сохранение файлов перед заменой"),
             ("signing-reset", "Переустановка при смене подписи"),
             ("runtime", "Остановка старых hooks"),
-            ("apollo-migration", "Отключение старой активации Apollo"),
             ("files", "Установка файлов релиза"),
             ("boot-hooks", "Установка boot-hook"),
         ]);

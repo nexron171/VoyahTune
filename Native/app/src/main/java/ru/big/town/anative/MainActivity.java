@@ -45,6 +45,7 @@ public class MainActivity extends AppCompatActivity {
     private static int fragranceTaste = FragranceRestorePolicy.DEFAULT_TASTE;
     private static int fragranceDuration = FragranceRestorePolicy.DEFAULT_DURATION;
     private static int fragranceIntensity = FragranceRestorePolicy.DEFAULT_INTENSITY;
+    private static boolean apolloStockUiEnabled = false;
     private static boolean apolloTlcEnabled = false;
     private static boolean apolloTrafficLightsEnabled = false;
     private static boolean apolloGreenSoundEnabled = false;
@@ -375,6 +376,7 @@ public class MainActivity extends AppCompatActivity {
                 fragranceTaste = fragrance.taste;
                 fragranceDuration = fragrance.duration;
                 fragranceIntensity = fragrance.intensity;
+                apolloStockUiEnabled = cursor.getColumnCount() > 28 && cursor.getInt(28) == 1;
                 apolloTlcEnabled = cursor.getColumnCount() > 24 && cursor.getInt(24) == 1;
                 apolloTrafficLightsEnabled = cursor.getColumnCount() > 25 && cursor.getInt(25) == 1;
                 apolloGreenSoundEnabled = cursor.getColumnCount() > 26 && cursor.getInt(26) == 1;
@@ -563,7 +565,7 @@ public class MainActivity extends AppCompatActivity {
                 .putInt("cacheApolloSpeedMode", apolloSpeedMode)
                 .putBoolean("cacheApolloSpeedWarningEnabled", apolloSpeedWarningEnabled)
                 .remove("cacheApolloCruiseSpeedAdjustmentEnabled")
-                .remove("cacheApolloStockUiEnabled")
+                .putBoolean("cacheApolloStockUiEnabled", apolloStockUiEnabled)
                 .putBoolean("cacheWiperColdMode", wiperColdMode)
                 .putBoolean("cachePauseMediaOnDoor", pauseMediaOnDoor)
                 .putBoolean("cachePlayMediaOnDoor", playMediaOnDoor)
@@ -603,6 +605,7 @@ public class MainActivity extends AppCompatActivity {
         fragranceTaste = fragrance.taste;
         fragranceDuration = fragrance.duration;
         fragranceIntensity = fragrance.intensity;
+        apolloStockUiEnabled = p.getBoolean("cacheApolloStockUiEnabled", false);
         apolloTlcEnabled = p.getBoolean("cacheApolloTlcEnabled", false);
         apolloTrafficLightsEnabled = p.getBoolean("cacheApolloTrafficLightsEnabled", false);
         apolloGreenSoundEnabled = p.getBoolean("cacheApolloGreenSoundEnabled", false);
@@ -767,6 +770,24 @@ public class MainActivity extends AppCompatActivity {
         return createCanRestorePlan(true);
     }
 
+    static void appendApolloStockUiRestore(CanRestorePlan.Builder plan, Context context) {
+        final boolean enabled = !VehiclePlatform.current().isH97XY() && apolloStockUiEnabled;
+        plan.addOnce(
+                "Apollo stock subscription/exam UI",
+                () -> {
+                    ApolloSettingsRuntimeState.TargetApplyResult result =
+                            ApolloSettingsRuntimeState.applyTarget(context, enabled);
+                    if (result == ApolloSettingsRuntimeState.TargetApplyResult.CONFIRMED) {
+                        return CanRestorePlan.OperationResult.CONFIRMED;
+                    }
+                    if (result
+                            == ApolloSettingsRuntimeState.TargetApplyResult.ACCEPTED_UNCONFIRMED) {
+                        return CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED;
+                    }
+                    return CanRestorePlan.OperationResult.TRANSIENT_FAILURE;
+                });
+    }
+
     static void appendApolloRestore(CanRestorePlan.Builder plan, Context context) {
         if (!VehiclePlatform.current().isH97XY()) return;
         ApolloRestorePolicy.appendPlan(
@@ -842,20 +863,7 @@ public class MainActivity extends AppCompatActivity {
         final Map<String, Integer> apolloModes = new LinkedHashMap<>();
         final Map<String, Integer> stableIds = new LinkedHashMap<>();
 
-        plan.addOnce(
-                "Apollo stock subscription/exam UI",
-                () -> {
-                    ApolloSettingsRuntimeState.TargetApplyResult result =
-                            ApolloSettingsRuntimeState.applyTarget(context, false);
-                    if (result == ApolloSettingsRuntimeState.TargetApplyResult.CONFIRMED) {
-                        return CanRestorePlan.OperationResult.CONFIRMED;
-                    }
-                    if (result
-                            == ApolloSettingsRuntimeState.TargetApplyResult.ACCEPTED_UNCONFIRMED) {
-                        return CanRestorePlan.OperationResult.ACCEPTED_UNCONFIRMED;
-                    }
-                    return CanRestorePlan.OperationResult.TRANSIENT_FAILURE;
-                });
+        appendApolloStockUiRestore(plan, context);
 
         if (includeModes && driveEnabled) {
             if (!DriveModeCanTransport.appendStates(context, driveMode, primaryValues, stableIds)) {

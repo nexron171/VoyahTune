@@ -105,11 +105,6 @@ public class SettingsContentProvider extends ContentProvider {
         if (ru.big.town.common.VehiclePlatform.current().isH97XY()) {
             sharedPreferences.registerOnSharedPreferenceChangeListener(smartSaveListener);
         }
-        // Retired option: keep older installations from republishing the Apollo UI hook.
-        if (sharedPreferences.contains(ApolloSettings.STOCK_UI)
-                && !sharedPreferences.edit().remove(ApolloSettings.STOCK_UI).commit()) {
-            Log.e("ApolloSettings", "Unable to clear retired stock UI target");
-        }
         return true;
     }
 
@@ -461,7 +456,8 @@ public class SettingsContentProvider extends ContentProvider {
                             ApolloSettings.TRAFFIC_LIGHTS, // 25 — распознавание светофоров
                             ApolloSettings.GREEN_SOUND, // 26 — звук зелёного сигнала
                             ApolloSettings.TRAFFIC_SIGNS, // 27 — распознавание дорожных знаков
-                            ApolloSettings.STOCK_UI, // 28 — прежний ключ, колонка совместимости
+                            ApolloSettings
+                                    .STOCK_UI, // 28: stable IPC column for stock menu activation.
                             "driveRememberLast", // 29 — null/нет колонки трактуется Native как true
                             "energyRememberLast", // 30 — null/нет колонки трактуется Native как
                             // true
@@ -512,7 +508,10 @@ public class SettingsContentProvider extends ContentProvider {
                     apolloTrafficLightsEnabled ? 1 : 0,
                     apolloGreenSoundEnabled ? 1 : 0,
                     apolloTrafficSignsEnabled ? 1 : 0,
-                    0, // 28: retired stock UI target; preserve provider column positions.
+                    ApolloSettings.stockUiEnabled(
+                                    sharedPreferences, ru.big.town.common.VehiclePlatform.current())
+                            ? 1
+                            : 0,
                     driveRememberLast ? 1 : 0,
                     energyRememberLast ? 1 : 0,
                     recycleRememberLast ? 1 : 0,

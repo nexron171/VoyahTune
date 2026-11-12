@@ -11,7 +11,6 @@ const installStepIds = [
   "backup",
   "signing-reset",
   "runtime",
-  "apollo-migration",
   "files",
   "migration",
   "boot-hooks",
@@ -59,7 +58,7 @@ test("full installation has four stages and advances within a stage", () => {
     installStepIds.slice(0, 6),
     "signing-reset",
   );
-  assert.equal(prepared.percent, 33);
+  assert.equal(prepared.percent, 35);
   assert.equal(prepared.stages[0].completed, true);
   assert.equal(prepared.stages[1].active, true);
 });

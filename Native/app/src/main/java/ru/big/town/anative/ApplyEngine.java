@@ -231,24 +231,33 @@ public final class ApplyEngine {
         Log.i(TAG, "wake active: " + reason);
     }
 
-    /** Provider owns the durable ACC-cycle claim; Native executes its remaining settings once. */
     static void applyApolloTargets(Context context) {
-        if (!VehiclePlatform.current().isH97XY()) return;
-        // Serialize with the ACC pass; changing Apollo must not cancel unrelated restoration.
+        bg().post(() -> applySavedApolloTargets(context, false));
+    }
+
+    static void restoreApolloStockUi(Context context) {
+        if (usesAccRestore()) return;
+        final long wakeGeneration = capturePhysicalWakeGeneration();
         bg().post(
                         () -> {
-                            if (MainActivity.loadModes(context, false) != 2) {
-                                Log.w(TAG, "Apollo apply skipped: saved targets unavailable");
-                                return;
+                            if (isPhysicalWakeGenerationActive(wakeGeneration)) {
+                                applySavedApolloTargets(context, true);
                             }
-                            CanRestorePlan.Builder builder = new CanRestorePlan.Builder();
-                            MainActivity.appendApolloRestore(builder, context);
-                            Log.i(
-                                    TAG,
-                                    "Apollo apply: "
-                                            + builder.build()
-                                                    .sendPending((frames, label) -> false));
                         });
+    }
+
+    private static void applySavedApolloTargets(Context context, boolean allowCache) {
+        if (MainActivity.loadModes(context, allowCache) == 0) {
+            Log.w(TAG, "Apollo apply skipped: saved targets unavailable");
+            return;
+        }
+        CanRestorePlan.Builder builder = new CanRestorePlan.Builder();
+        if (usesAccRestore()) {
+            MainActivity.appendApolloRestore(builder, context);
+        } else {
+            MainActivity.appendApolloStockUiRestore(builder, context);
+        }
+        Log.i(TAG, "Apollo apply: " + builder.build().sendPending((frames, label) -> false));
     }
 
     public static void scheduleAccApply(Context context) {

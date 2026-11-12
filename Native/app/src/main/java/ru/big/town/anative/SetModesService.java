@@ -2078,6 +2078,7 @@ public class SetModesService extends Service {
     private void runWakeSideEffects(String source) {
         if (serviceDestroyed) return;
         requestSavedConfigSync("physical wake");
+        ApplyEngine.restoreApolloStockUi(this);
         restoreAutoLightState();
         reconcileWiperColdOnPowerOn();
         forwardPowerOnToTripStats();
