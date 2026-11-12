@@ -212,7 +212,7 @@ Native и выключении опции. PI использует другую 
 | Радиостанция FM/AM | Подтверждённые диапазон и частота в данных RdsApp | Раннее уведомление ACC, последующий Native и late attach восстанавливают выбранную частоту в UI на паузе без аудиофокуса/Play/tune. Реальная настройка тюнера выполняется при play/resume либо OEM-событии уже играющего радио. При активном воспроизведении, поиске или новом выборе тихий этап ничего не меняет |
 | Назначения руля, водительского дока, DPI приложений, fullscreen, клавиатура | Полный сохранённый снимок конфигурации | При старте Native и физическом wake через `SavedConfigSyncReceiver` → `SplitConfigSync.pushAll`, без открытия настроек. Устаревшие назначения пассажирских Air/Seat удаляются |
 | Геометрия окон и DPI в system_server | Настройки из Settings; исходные размеры отслеживаемых окон для отмены модификации | Подготовка агента, WIN_RELOAD и wake. Начальная/wake установка через 1 с, при быстрых переходах через 5 с; OFF снимает геометрические перехваты. WIN_RELOAD объединяет чтение через 50 мс и replay через 100 мс. Ошибка загрузки сохраняет предыдущий целый снимок |
-| Приложение перед подъёмом/опусканием экрана | Временный снимок верхней задачи на физических дисплеях | Возврат через 2 с после подтверждённой смены lift, если пользователь не открыл другое приложение. Это восстановление вокруг движения экрана, а не сохранённая сессия всех приложений после reboot |
+| Приложение при опускании экрана | Задача сохраняется через штатную проверку поддержки малого экрана в Login | Агент `screen-lift` отвечает `true` для установленных сторонних приложений и окон Native/RestoreMode на обоих дисплеях. Для системных пакетов и при ошибке определения пакета остаётся OEM-ответ. Требуются обе совместимые проверки `ScreenUpdateUtils`; при их отсутствии перехват не устанавливается. Возврата по таймеру нет |
 | Автозапуск VoyahTune | Флаг `autoLaunchOnWake` | Через 5 с после инициализации Native/физического wake, если разрешён; повторные события объединяются |
 | Плавающая кнопка «Назад» | Флаг и положение в NativePrefs | Повторное показание/подключение через 3 с после старта/физического wake |
 | Приложения внутри плиток | Конфигурация плитки, флаг и задержка автозапуска | Автозапуск при построении плитки главного экрана, через заданные 1–60 с. Это не общий ACC-запуск каждого приложения |
@@ -229,7 +229,8 @@ Native и выключении опции. PI использует другую 
 [SavedSettingsSyncReceiver](../RestoreMode/app/src/main/java/ru/big/town/restoremode/integration/config/SavedSettingsSyncReceiver.java),
 [SplitConfigSync](../RestoreMode/app/src/main/java/ru/big/town/restoremode/integration/config/SplitConfigSync.java),
 [геометрия](system-server-geometry.md),
-[ScreenLiftTaskRestorer](../Native/app/src/main/java/ru/big/town/anative/ScreenLiftTaskRestorer.java),
+[поддержка малого экрана](../Packaging/new/java/src/main/java/ru/voyahtune/agent/modules/ScreenDownSupportModule.java),
+[состояние панели](../Native/app/src/main/java/ru/big/town/anative/ScreenLiftStateObserver.java),
 [DashboardActivity](../RestoreMode/app/src/main/java/ru/big/town/restoremode/dashboard/DashboardActivity.java).
 
 ## Что отдельно не восстанавливается VoyahTune
