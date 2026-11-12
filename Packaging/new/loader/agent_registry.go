@@ -49,6 +49,14 @@ func compiledAgents() []nativeAgentConfig {
 			Modules:        []string{"steering"},
 		},
 		{
+			ID:             "screen-lift",
+			Target:         "com.qinggan.app.login",
+			MaxAttempts:    3,
+			TimeoutSeconds: 35,
+			CrashLimit:     3,
+			Modules:        []string{"screen-lift"},
+		},
+		{
 			ID:             "launcher",
 			Target:         "com.qinggan.app.launcher",
 			MaxAttempts:    1,

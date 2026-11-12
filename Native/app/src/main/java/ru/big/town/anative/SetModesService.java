@@ -1936,7 +1936,7 @@ public class SetModesService extends Service {
 
     // private boolean isWorking = false;
     private SetModesReceiverDynamic setModesReceiverDynamic;
-    private ScreenLiftTaskRestorer screenLiftTaskRestorer;
+    private ScreenLiftStateObserver screenLiftStateObserver;
     private boolean receiverRegistered = false;
     private final String CHANNEL_ID = "screen_monitor_channel";
     private volatile Car mCar;
@@ -2167,8 +2167,8 @@ public class SetModesService extends Service {
         setModesReceiverDynamic =
                 new SetModesReceiverDynamic(
                         this::handleScreenOffFallback, this::handleScreenOnFallback);
-        screenLiftTaskRestorer = new ScreenLiftTaskRestorer(getApplicationContext());
-        screenLiftTaskRestorer.register();
+        screenLiftStateObserver = new ScreenLiftStateObserver(getApplicationContext());
+        screenLiftStateObserver.register();
 
         Log.i(TAG, "onCreated");
     }
@@ -2667,9 +2667,9 @@ public class SetModesService extends Service {
         physicalWakeActions.onSleep();
         cancelAncillaryWakeTasks();
         mainHandler.removeCallbacksAndMessages(null);
-        ScreenLiftTaskRestorer liftRestorer = screenLiftTaskRestorer;
-        screenLiftTaskRestorer = null;
-        if (liftRestorer != null) liftRestorer.close();
+        ScreenLiftStateObserver liftObserver = screenLiftStateObserver;
+        screenLiftStateObserver = null;
+        if (liftObserver != null) liftObserver.close();
         if (receiverRegistered) {
             try {
                 getApplicationContext().unregisterReceiver(setModesReceiverDynamic);

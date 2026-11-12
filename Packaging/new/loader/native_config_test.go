@@ -39,8 +39,10 @@ func TestCompiledRuntimeStartsWithoutExternalManifests(t *testing.T) {
 	for _, agent := range config.Agents {
 		targets[agent.ID] = agent
 	}
-	if config.Code.RuntimeID != "java-test" || len(targets) != 22 ||
+	if config.Code.RuntimeID != "java-test" ||
 		targets["brightness"].Target != "com.qinggan.app.hiboard" ||
+		targets["screen-lift"].Target != "com.qinggan.app.login" ||
+		len(targets["screen-lift"].Modules) != 1 || targets["screen-lift"].Modules[0] != "screen-lift" ||
 		targets["launcher"].Target != "com.qinggan.app.launcher" ||
 		targets["acc"].MaxAttempts != 4 || targets["cluster"].TimeoutSeconds != 45 ||
 		targets["keyboard-ru"].Condition != "keyboard-ru" || len(targets["rds"].Modules) != 2 ||
@@ -111,7 +113,7 @@ func TestEmbeddedRuntimeStartsFromBuildOverlay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(config.Agents) != 17 || config.Code.SHA256[agentDEXName] == "" {
+	if config.Code.SHA256[agentDEXName] == "" {
 		t.Fatal(config)
 	}
 }

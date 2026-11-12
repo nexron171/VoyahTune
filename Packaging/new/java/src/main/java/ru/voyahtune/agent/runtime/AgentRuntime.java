@@ -39,6 +39,7 @@ import ru.voyahtune.agent.modules.NavigationSourceModule;
 import ru.voyahtune.agent.modules.OemMediaModule;
 import ru.voyahtune.agent.modules.PhoneModule;
 import ru.voyahtune.agent.modules.RdsModule;
+import ru.voyahtune.agent.modules.ScreenDownSupportModule;
 import ru.voyahtune.agent.modules.StatusBarModule;
 import ru.voyahtune.agent.modules.SteeringModule;
 import ru.voyahtune.agent.modules.VehicleAirModule;
@@ -119,6 +120,17 @@ public final class AgentRuntime {
                                         id -> {
                                             if (id.equals("phone")) {
                                                 return new PhoneModule(methods, hooks);
+                                            }
+                                            if (id.equals("screen-lift")) {
+                                                Context context = (Context) applicationContext;
+                                                return new ScreenDownSupportModule(
+                                                        methods,
+                                                        hooks,
+                                                        packageName ->
+                                                                context.getPackageManager()
+                                                                        .getApplicationInfo(
+                                                                                packageName, 0)
+                                                                        .flags);
                                             }
                                             if (id.equals("windows")) {
                                                 return AndroidWindowsPlatform.create(
@@ -206,7 +218,7 @@ public final class AgentRuntime {
                                                                 android.util.Log.w(
                                                                         "vt_brightness",
                                                                         "Calibration delivery"
-                                                                            + " failed",
+                                                                                + " failed",
                                                                         failure));
                                             }
                                             if (id.equals("vehicle-air")) {
