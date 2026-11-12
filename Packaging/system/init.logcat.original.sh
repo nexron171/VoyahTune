@@ -1,7 +1,4 @@
 #!/system/bin/sh
-# Чистая версия init.logcat.sh — ТОЛЬКО инициализация логирования, без наших «допов»
-# (без setenforce 0, telnetd и вечного цикла запуска load.bin). Используется переходной миграцией,
-# чтобы вернуть непосредственную предыдущую установку к логированию без рут-обвязки.
 
 LOG_TAG="logcat"
 LOG_NAME="${0}:"
@@ -35,13 +32,22 @@ start_logcat ()
         /system/bin/mkdir ${sdcard_path}/log/
     fi
 
-  /system/bin/logcat -b main -b system -b events -b crash -f ${sdcard_path}/log/logcat.log -r 1024 -n 100 -v threadtime &
+  /system/bin/logcat -b all -f ${sdcard_path}/log/logcat.log -r 1024 -n 100 -v usec &
   logcat_pid=$!
   logi "start_logcat: logcat pid = $logcat_pid"
 }
 
+kill_logcat ()
+{
+  logi "kill_logcat: pid = $logcat_pid"
+  ## careful not to kill zero or null!
+  kill -TERM $logcat_pid
+  # this shell doesn't exit now -- wait returns for normal exit
+}
+
 start_logcat
 
+#busybox sync
 wait $logcat_pid
 
 logi "logcat service stopped"

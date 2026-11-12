@@ -230,3 +230,58 @@ fn required_step_errors_still_stop_the_operation() {
     assert_eq!(error.code, "WRITE_FAILED");
     assert_eq!(events.lock().unwrap().last().unwrap().kind, "step-failed");
 }
+
+#[test]
+fn removal_uploads_oem_logcat_even_with_modified_recovery_and_backup() {
+    let directory = tempfile::tempdir().unwrap();
+    let (mut engine, _) = fixture(directory.path(), "unused");
+    let common = directory.path().join("common");
+    fs::create_dir(&common).unwrap();
+    fs::write(common.join("dns-helper.sh"), "#!/bin/sh\n").unwrap();
+    fs::write(common.join("init.logcat.original.sh"), "modified recovery").unwrap();
+    engine.payload = Payload::open(directory.path()).unwrap();
+    fs::create_dir_all(engine.backup_dir()).unwrap();
+    fs::write(
+        engine.backup_dir().join("init.logcat.sh"),
+        "modified backup",
+    )
+    .unwrap();
+    fs::create_dir_all(directory.path().join("device/system/etc")).unwrap();
+    let installed = directory.path().join("device/system/etc/init.logcat.sh");
+    fs::write(&installed, "modified script without legacy marker").unwrap();
+    fs::write(
+        directory.path().join("adb"),
+        r#"#!/bin/sh
+set -eu
+root=$(dirname "$0")
+if [ "$1" = -s ]; then shift 2; fi
+case "$1" in
+    push) cp "$2" "$root/device$3" ;;
+    shell)
+        {
+            printf '%s\n' 'chown() { :; }' 'restorecon() { :; }' 'sync() { :; }'
+            sed "s|/system/|$root/device/system/|g"
+        } > "$root/command.sh"
+        sh "$root/command.sh" ;;
+    *) exit 1 ;;
+esac
+"#,
+    )
+    .unwrap();
+
+    engine.restore_original_logcat().unwrap();
+
+    assert_eq!(fs::read(&installed).unwrap(), ORIGINAL_LOGCAT);
+    fs::remove_file(&installed).unwrap();
+    engine.restore_original_logcat().unwrap();
+    assert_eq!(fs::read(&installed).unwrap(), ORIGINAL_LOGCAT);
+}
+
+#[test]
+fn removal_reports_logcat_upload_failure() {
+    let directory = tempfile::tempdir().unwrap();
+    let (engine, _) = fixture(directory.path(), "unused");
+    fs::write(directory.path().join("adb"), "#!/bin/sh\nexit 1\n").unwrap();
+
+    assert!(engine.restore_original_logcat().is_err());
+}

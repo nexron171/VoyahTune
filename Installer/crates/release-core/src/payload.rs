@@ -208,7 +208,12 @@ impl Payload {
                         .iter()
                         .map(|package| package.artifact.as_str()),
                 )
-                .chain(["dns-helper.sh", "dns.apk", "init.logcat.original.sh"])
+                .chain([
+                    "dns-helper.sh",
+                    "dns.apk",
+                    "init.logcat.sh",
+                    "init.logcat.original.sh",
+                ])
                 .collect()
         };
         let mut artifacts = Vec::new();
@@ -455,7 +460,12 @@ impl Payload {
                 ));
             }
         }
-        for name in ["dns-helper.sh", "dns.apk", "init.logcat.original.sh"] {
+        for name in [
+            "dns-helper.sh",
+            "dns.apk",
+            "init.logcat.sh",
+            "init.logcat.original.sh",
+        ] {
             self.artifact(name)?;
         }
         Ok(())

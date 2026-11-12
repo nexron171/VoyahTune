@@ -416,7 +416,7 @@ fn apply_with_signature_reset(shared: &Shared, allow_native_reset: bool) -> io::
     })?;
     {
         device::atomic_copy(
-            &p.file("init.logcat.original.sh").map_err(error)?,
+            &p.file("init.logcat.sh").map_err(error)?,
             Path::new("/system/etc/init.logcat.sh"),
             0o644,
         )?;

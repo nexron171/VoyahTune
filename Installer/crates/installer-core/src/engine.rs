@@ -41,8 +41,9 @@ use std::{
 #[cfg(test)]
 const STOP_LOADER: &str =
     include_str!("../../../../Packaging/installer/common/stop-loader-device.sh");
-const LEGACY_INIT: &str = "/system/etc/init.logcat.sh";
-const LEGACY_MARKER: &str = "# init.logcat.sh Open Voyah:";
+const SYSTEM_LOGCAT: &str = "/system/etc/init.logcat.sh";
+const ORIGINAL_LOGCAT: &[u8] =
+    include_bytes!("../../../../Packaging/system/init.logcat.original.sh");
 fn postflight_script(script: &str, timeout_seconds: u32) -> String {
     format!(
         "/system/bin/timeout {timeout_seconds} /system/bin/sh -c {}\n",
@@ -95,7 +96,6 @@ pub struct Engine {
     pub canbus_consent: Option<Arc<RemovalConsent>>,
     restart_loader: bool,
     runtime_maintenance: Option<RuntimeMaintenance>,
-    legacy_migrated: bool,
 }
 impl Engine {
     pub fn new(
@@ -122,7 +122,6 @@ impl Engine {
             restore_cunba: false,
             restart_loader: false,
             runtime_maintenance: None,
-            legacy_migrated: false,
         })
     }
     pub fn run(&mut self, request: Request) -> Result<()> {
@@ -373,9 +372,9 @@ impl Engine {
                     "Проверка и отключение сторонних решений",
                     |e| {
                         e.push_file(
-                            &e.payload.file("init.logcat.original.sh")?,
+                            &e.payload.file("init.logcat.sh")?,
                             "/system/etc/init.logcat.sh.voyahtune.new",
-                            LEGACY_INIT,
+                            SYSTEM_LOGCAT,
                             0o644,
                             true,
                         )?;
@@ -415,11 +414,6 @@ impl Engine {
 
             self.step("files", "Установка файлов релиза", |e| e.recipe_files())?;
 
-            self.step(
-                "migration",
-                "Миграция старого init.logcat.sh",
-                |e| e.migrate_legacy(),
-            )?;
             self.step("boot-hooks", "Установка boot-hook", |e| {
                 e.boot_hooks()
             })?;
@@ -490,9 +484,9 @@ impl Engine {
                 e.dns("restore")
             })?;
             self.step(
-                "migration",
-                "Миграция старого init.logcat.sh",
-                |e| e.migrate_legacy(),
+                "restore-logcat",
+                "Восстановление оригинального init.logcat.sh",
+                |engine| engine.restore_original_logcat(),
             )?;
             self.step(
                 "runtime",
@@ -595,7 +589,7 @@ impl Engine {
         }
         let mut names = vec!["dns-helper.sh"];
         if a != Action::Remove {
-            names.extend(["dns.apk", "whitelist.xml"]);
+            names.extend(["dns.apk", "whitelist.xml", "init.logcat.sh"]);
         }
         names.push("init.logcat.original.sh");
 
@@ -1112,112 +1106,17 @@ impl Engine {
         Ok(())
     }
 
-    fn legacy_command(&self, s: &str) -> String {
-        s.replace("$LEGACY_INIT_DEVICE", LEGACY_INIT)
-            .replace("$LEGACY_INIT_MARKER", LEGACY_MARKER)
-    }
-    fn legacy_state(&self) -> Result<String> {
-        self.shell(&self.legacy_command(c::LEGACY_STATE))
-    }
-    fn syntax_check(&self, p: &Path) -> bool {
-        // .bat validators use marker checks; .sh validators also run local sh -n.
-        #[cfg(windows)]
-        {
-            let _ = p;
-            true
-        }
-        #[cfg(not(windows))]
-        {
-            std::process::Command::new("/bin/sh")
-                .arg("-n")
-                .arg(p)
-                .output()
-                .is_ok_and(|o| o.status.success())
-        }
-    }
-    fn valid_original(&self, p: &Path) -> bool {
-        fs::read(p).is_ok_and(|bytes| {
-            let s = String::from_utf8_lossy(&bytes);
-            s.lines()
-                .next()
-                .is_some_and(|l| l.trim_end_matches('\r') == "#!/system/bin/sh")
-                && s.contains("/system/bin/logcat")
-                && !s.contains(LEGACY_MARKER)
-        }) && self.syntax_check(p)
-    }
-    fn rollback_legacy(&mut self) -> Result<()> {
-        if !self.legacy_migrated {
-            return Ok(());
-        }
-        let p = self.backup_dir().join("init.logcat.voyahtune-legacy.sh");
-        if !fs::read(&p).is_ok_and(|s| String::from_utf8_lossy(&s).contains(LEGACY_MARKER))
-            || !self.syntax_check(&p)
-        {
-            return Err(self.fail("Rollback-копия init.logcat.sh повреждена", p.display()));
-        }
-        self.adb
-            .push(&p, &format!("{LEGACY_INIT}.voyahtune.rollback"))?;
-        self.shell(&self.legacy_command(c::LEGACY_ROLLBACK))?;
-        if self.legacy_state()? != "LEGACY" {
-            return Err(self.fail("Rollback init.logcat.sh не подтверждён", LEGACY_INIT));
-        }
-        self.legacy_migrated = false;
-        Ok(())
-    }
-    fn migrate_legacy(&mut self) -> Result<()> {
-        match self.legacy_state()?.as_str() {
-            "CLEAN" | "MISSING" => return Ok(()),
-            "LEGACY" => {}
-            s => return Err(self.fail("Не удалось проверить init.logcat.sh", s)),
-        }
-        let dir = self.backup_dir();
-        fs::create_dir_all(&dir)?;
-        let previous = dir.join("init.logcat.voyahtune-legacy.sh");
-        let temp = dir.join("init.logcat.voyahtune-legacy.sh.new");
-        let _ = fs::remove_file(&temp);
-        self.adb.pull(LEGACY_INIT, &temp)?;
-        if !fs::read(&temp).is_ok_and(|s| String::from_utf8_lossy(&s).contains(LEGACY_MARKER))
-            || !self.syntax_check(&temp)
-        {
-            let _ = fs::remove_file(&temp);
-            return Err(self.fail(
-                "Копия legacy init.logcat.sh не прошла проверку",
-                LEGACY_INIT,
-            ));
-        }
-        fs::rename(temp, previous)?;
-        let backup = dir.join("init.logcat.sh");
-        let source = if backup.is_file() && self.valid_original(&backup) {
-            backup
-        } else {
-            self.payload.file("init.logcat.original.sh")?
-        };
-        if !self.valid_original(&source) {
-            return Err(self.fail(
-                "Не прошёл проверку исходный init.logcat.sh",
-                source.display(),
-            ));
-        }
-        let stage = format!("{LEGACY_INIT}.voyahtune.new");
-        if let Err(e) = self.adb.push(&source, &stage) {
-            self.ignore(&format!("rm -f {stage}\n"));
-            return Err(e);
-        }
-        self.legacy_migrated = true;
-        let result = (|| {
-            self.shell(&self.legacy_command(c::LEGACY_PUBLISH))?;
-            if self.legacy_state()? != "CLEAN" {
-                return Err(self.fail("Legacy-marker остался после восстановления", LEGACY_INIT));
-            }
-            Ok(())
-        })();
-        if result.is_err() {
-            self.ignore(&format!("rm -f {stage}\n"));
-            if let Err(e) = self.rollback_legacy() {
-                self.warning(&e);
-            }
-        }
-        result
+    fn restore_original_logcat(&self) -> Result<()> {
+        // Saved recovery bundles may contain the old, modified logging script.
+        let original = self.operation.dir.join("init.logcat.original.sh");
+        fs::write(&original, ORIGINAL_LOGCAT)?;
+        self.push_file(
+            &original,
+            "/system/etc/init.logcat.sh.voyahtune.new",
+            SYSTEM_LOGCAT,
+            0o644,
+            true,
+        )
     }
     fn boot_rollback(&self) -> Result<()> {
         let result = self.shell(c::BOOT_ROLLBACK);
@@ -1316,19 +1215,7 @@ impl Engine {
         Ok(())
     }
     fn boot_hooks(&mut self) -> Result<()> {
-        let result = self.boot_transaction();
-        if let Err(e) = &result {
-            if e.code != "BOOT_ROLLBACK_FAILED"
-                && self.shell(c::BOOT_STATE).is_ok_and(|s| s == "ABSENT")
-            {
-                if let Err(rollback) = self.rollback_legacy() {
-                    self.warning(&rollback);
-                }
-            }
-        } else {
-            self.legacy_migrated = false;
-        }
-        result
+        self.boot_transaction()
     }
     fn stop_runtime_for_update(&self) -> Result<()> {
         self.shell(include_str!(
@@ -1346,16 +1233,8 @@ impl Engine {
                 ))
                 .map(|_| ())
         })?;
-        if let Err(error) =
-            self.maintenance_step(RuntimeStep::Stop, |engine| engine.stop_runtime_for_update())
-        {
-            if let Err(rollback) = self.rollback_legacy() {
-                self.warning(&rollback);
-            }
-            return Err(error);
-        }
+        self.maintenance_step(RuntimeStep::Stop, |engine| engine.stop_runtime_for_update())?;
         self.shell(c::REMOVE_BOOT)?;
-        self.legacy_migrated = false;
         self.ignore(c::REMOVE_TRANSACTIONS);
         Ok(())
     }

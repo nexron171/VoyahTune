@@ -13,7 +13,12 @@ fn fixture_with_readiness(root: &Path, format: u32, readiness: Option<u32>) {
         .iter()
         .map(|f| f.artifact.as_str())
         .chain(recipe.packages.iter().map(|p| p.artifact.as_str()))
-        .chain(["dns-helper.sh", "dns.apk", "init.logcat.original.sh"])
+        .chain([
+            "dns-helper.sh",
+            "dns.apk",
+            "init.logcat.sh",
+            "init.logcat.original.sh",
+        ])
     {
         if !name.ends_with("-agents.json") && !name.ends_with("-runtime-manifest.json") {
             fs::write(root.join("common").join(name), name).unwrap();
@@ -158,6 +163,7 @@ fn recovery_remains_usable_after_original_payload_is_deleted() {
     let recovery = tempfile::tempdir().unwrap();
     let payload = Payload::load(source.path()).unwrap();
     let original_helper = fs::read(payload.file("dns-helper.sh").unwrap()).unwrap();
+    let original_logcat = fs::read(payload.file("init.logcat.original.sh").unwrap()).unwrap();
     payload
         .save_removal(&recovery.path().join("payload"))
         .unwrap();
@@ -167,6 +173,11 @@ fn recovery_remains_usable_after_original_payload_is_deleted() {
     assert!(saved.manifest.removal_only);
     assert_eq!(saved.manifest.artifacts.len(), 2);
     assert_eq!(
+        fs::read(saved.file("init.logcat.original.sh").unwrap()).unwrap(),
+        original_logcat
+    );
+    assert!(!saved.root.join("common/init.logcat.sh").exists());
+    assert_eq!(
         fs::read(saved.file("dns-helper.sh").unwrap()).unwrap(),
         original_helper
     );
@@ -175,4 +186,17 @@ fn recovery_remains_usable_after_original_payload_is_deleted() {
         .recipe
         .remove_directories
         .contains(&"/data/local/bin/voyahtune-new".into()));
+}
+
+#[test]
+fn installation_requires_a_separate_logcat_script() {
+    let root = tempfile::tempdir().unwrap();
+    fixture(root.path(), 5);
+    let payload = Payload::load(root.path()).unwrap();
+    assert_ne!(
+        fs::read(payload.file("init.logcat.sh").unwrap()).unwrap(),
+        fs::read(payload.file("init.logcat.original.sh").unwrap()).unwrap()
+    );
+    fs::remove_file(root.path().join("common/init.logcat.sh")).unwrap();
+    assert!(Payload::load(root.path()).is_err());
 }

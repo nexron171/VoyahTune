@@ -170,7 +170,10 @@ fn operation_steps(action: Action, options: InstallOptions) -> Vec<Step> {
             ("navigation-fonts", "Восстановление шрифтов приборки"),
             ("deactivate", "Отключение Apollo"),
             ("dns", "Восстановление DNS"),
-            ("migration", "Миграция старого init.logcat.sh"),
+            (
+                "restore-logcat",
+                "Восстановление оригинального init.logcat.sh",
+            ),
             ("runtime", "Остановка и удаление boot-hook"),
             ("files", "Удаление hooks и временных файлов"),
             ("packages", "Удаление приложений"),
@@ -184,7 +187,6 @@ fn operation_steps(action: Action, options: InstallOptions) -> Vec<Step> {
             ("runtime", "Остановка старых hooks"),
             ("apollo-migration", "Отключение старой активации Apollo"),
             ("files", "Установка файлов релиза"),
-            ("migration", "Миграция старого init.logcat.sh"),
             ("boot-hooks", "Установка boot-hook"),
         ]);
         steps.extend([

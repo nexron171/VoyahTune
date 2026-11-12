@@ -315,7 +315,7 @@ fn build_recovery(root: &Path, output: &Path) -> Result<()> {
     Ok(())
 }
 // Developer inputs are application sources and Packaging files, not a release manifest.
-fn base_payload(root: &Path) -> Result<(installer_core::recipe::Recipe, serde_json::Value)> {
+fn base_payload(_root: &Path) -> Result<(installer_core::recipe::Recipe, serde_json::Value)> {
     let recipe = installer_core::recipe::Recipe::default();
     let mut artifacts = Vec::new();
     for name in recipe
@@ -328,7 +328,12 @@ fn base_payload(root: &Path) -> Result<(installer_core::recipe::Recipe, serde_js
                 .iter()
                 .map(|package| package.artifact.as_str()),
         )
-        .chain(["init.logcat.original.sh", "dns-helper.sh", "dns.apk"])
+        .chain([
+            "init.logcat.sh",
+            "init.logcat.original.sh",
+            "dns-helper.sh",
+            "dns.apk",
+        ])
     {
         let source = if let Some((_, filename, _)) = payload::NATIVE_RUNTIME_ROLES
             .iter()
@@ -347,6 +352,7 @@ fn base_payload(root: &Path) -> Result<(installer_core::recipe::Recipe, serde_js
             "voyahtune-ota-bootstrap.json" => "Updater/build/bootstrap.json",
             "voyahtune.load.sh" => "Packaging/new/system/voyahtune.load.sh",
             "voyahtune.load.rc" => "Packaging/new/system/voyahtune.load.rc",
+            "init.logcat.sh" => "Packaging/new/system/init.logcat.sh",
             "init.logcat.original.sh" => "Packaging/system/init.logcat.original.sh",
             "dns-helper.sh" => "Packaging/installer/common/dns-overlay-device.sh",
             "dns.apk" => {
