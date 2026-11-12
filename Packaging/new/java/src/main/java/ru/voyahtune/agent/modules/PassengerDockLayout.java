@@ -1,15 +1,18 @@
 package ru.voyahtune.agent.modules;
 
 import android.content.Context;
+import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.LinearLayout;
 import android.widget.RadioButton;
 
 import ru.voyahtune.agent.policy.LauncherCatalog;
 import ru.voyahtune.agent.policy.LauncherCommand;
 import ru.voyahtune.agent.policy.LauncherNavigation;
 import ru.voyahtune.agent.policy.LauncherPolicy;
+import ru.voyahtune.agent.policy.PassengerDockGeometry;
 import ru.voyahtune.agent.runtime.MethodAccess;
 import ru.voyahtune.agent.runtime.ViewOwnership;
 
@@ -25,6 +28,14 @@ final class PassengerDockLayout implements AutoCloseable {
     private final List<View> inserted = new ArrayList<>();
     private final View air;
     private final View home;
+    private final View vehicle;
+    private final View raisedPanel;
+    private final View loweredPanel;
+    private final View temperature;
+    private final int raisedHeight;
+    private final int loweredHeight;
+    private final View.OnLayoutChangeListener layoutListener;
+    private boolean closed;
     private View menu;
     private NavigationButton homeNavigation;
     private NavigationButton menuNavigation;
@@ -35,12 +46,28 @@ final class PassengerDockLayout implements AutoCloseable {
             throws Exception {
         this.group = group;
         this.platform = platform;
-        owned = new ViewOwnership(platform);
+        owned = new ViewOwnership(new PassengerDockViewAccess(platform));
         slots[0] = field(bar, "mScreenUpItemView1");
         slots[1] = field(bar, "mScreenUpItemView2");
         separateBar = slots[0] == null && slots[1] == null;
         air = field(bar, separateBar ? "mScreenUpAirView" : "mScreenUpItemView3");
         home = field(bar, "mScreenUpHomeView");
+        vehicle = field(bar, separateBar ? "mScreenUpSeatView" : "mScreenUpItemView4");
+        raisedPanel = field(bar, "mScreenUpView");
+        loweredPanel = field(bar, "mScreenDownView");
+        temperature = field(bar, "mScreenUpTemperatureContentView");
+        raisedHeight = height(raisedPanel);
+        loweredHeight = height(loweredPanel);
+        layoutListener =
+                (view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
+                    if (!closed) {
+                        try {
+                            updateGeometry();
+                        } catch (Exception failure) {
+                            platform.error(failure);
+                        }
+                    }
+                };
         menu = group.findViewById(resource("id", "screen_up_all_app_icon"));
     }
 
@@ -67,6 +94,13 @@ final class PassengerDockLayout implements AutoCloseable {
     }
 
     private boolean install() throws Exception {
+        if (!(group instanceof LinearLayout)
+                || raisedHeight <= 0
+                || loweredHeight <= 0
+                || home == null
+                || vehicle == null) {
+            return false;
+        }
         if (air == null || air.getParent() != group) return false;
         if (separateBar) {
             Context context = group.getContext();
@@ -83,6 +117,8 @@ final class PassengerDockLayout implements AutoCloseable {
         }
         if (home != null)
             homeNavigation = new NavigationButton(home, LauncherNavigation.Button.HOME);
+        raisedPanel.addOnLayoutChangeListener(layoutListener);
+        group.addOnLayoutChangeListener(layoutListener);
         return true;
     }
 
@@ -96,12 +132,67 @@ final class PassengerDockLayout implements AutoCloseable {
         updateNavigation();
         updateSlot(0, first);
         updateSlot(1, second);
-        if (separateBar) {
-            // The driver template supplies the spacing for six rows at this OEM density.
-            int margin = ((ViewGroup.MarginLayoutParams) slots[0].getLayoutParams()).topMargin;
-            owned.write(air, "topMargin", margin);
-            if (menu != null) owned.write(menu, "topMargin", margin);
+        updateGeometry();
+    }
+
+    private void updateGeometry() throws Exception {
+        View currentMenu = group.findViewById(resource("id", "screen_up_all_app_icon"));
+        if (currentMenu != menu) {
+            updateNavigation();
         }
+        if (menu == null) {
+            return;
+        }
+        View[] buttons = {home, slots[0], slots[1], air, vehicle, menu};
+        int[] heights = new int[buttons.length];
+        for (int index = 0; index < buttons.length; index++) {
+            if (buttons[index].getParent() != group) {
+                return;
+            }
+            heights[index] = height(buttons[index]);
+            if (heights[index] <= 0) {
+                return;
+            }
+        }
+        boolean lowered = platform.lift() == 1;
+        int availableHeight = lowered ? loweredHeight : raisedHeight;
+        int[] positions =
+                PassengerDockGeometry.positions(
+                        raisedHeight, availableHeight, heights, assigned(0), assigned(1), lowered);
+        owned.write(raisedPanel, "height", availableHeight);
+        owned.write(raisedPanel, "visibility", View.VISIBLE);
+        owned.write(loweredPanel, "visibility", View.GONE);
+        owned.write(group, "height", ViewGroup.LayoutParams.MATCH_PARENT);
+        owned.write(group, "dockGravity", Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        owned.write(
+                group,
+                "dockPadding",
+                List.of(group.getPaddingLeft(), 0, group.getPaddingRight(), 0));
+        int previousBottom = 0;
+        for (int index = 0; index < buttons.length; index++) {
+            boolean visible = positions[index] >= 0;
+            owned.write(buttons[index], "visibility", visible ? View.VISIBLE : View.GONE);
+            if (visible) {
+                owned.write(buttons[index], "topMargin", positions[index] - previousBottom);
+                owned.write(buttons[index], "bottomMargin", 0);
+                previousBottom = positions[index] + heights[index];
+            }
+        }
+        if (temperature != null && temperature.getParent() == raisedPanel) {
+            owned.write(temperature, "topMargin", positions[3]);
+        }
+    }
+
+    private boolean assigned(int index) {
+        return targets[index] != null && !targets[index].isEmpty();
+    }
+
+    private static int height(View view) {
+        if (view == null || view.getLayoutParams() == null) {
+            return 0;
+        }
+        int configured = view.getLayoutParams().height;
+        return configured > 0 ? configured : view.getHeight();
     }
 
     private void updateNavigation() throws Exception {
@@ -227,6 +318,11 @@ final class PassengerDockLayout implements AutoCloseable {
 
     @Override
     public void close() throws Exception {
+        closed = true;
+        if (raisedPanel != null) {
+            raisedPanel.removeOnLayoutChangeListener(layoutListener);
+        }
+        group.removeOnLayoutChangeListener(layoutListener);
         if (homeNavigation != null) homeNavigation.close();
         if (menuNavigation != null) menuNavigation.close();
         for (View child : inserted) group.removeView(child);
