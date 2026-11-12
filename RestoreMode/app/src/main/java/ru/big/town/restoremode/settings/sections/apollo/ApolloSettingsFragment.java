@@ -99,7 +99,7 @@ public final class ApolloSettingsFragment extends SettingsSectionFragment {
                                         ApolloSettings.GREEN_SOUND,
                                         checkedId == R.id.apolloGreenSoundOn)
                                 .apply();
-                        applyApolloTargets();
+                        requestApolloApply();
                     });
         }
         updateApolloUi();
@@ -115,18 +115,11 @@ public final class ApolloSettingsFragment extends SettingsSectionFragment {
         target.setOnCheckedChangeListener(
                 (button, checked) -> {
                     preferences.edit().putBoolean(preference, checked).apply();
-                    applyApolloTargets();
+                    requestApolloApply();
                     if (ApolloSettings.TRAFFIC_LIGHTS.equals(preference)) {
                         updateApolloUi();
                     }
                 });
-    }
-
-    private void applyApolloTargets() {
-        if (!ru.big.town.common.VehiclePlatform.current().isH97XY()) {
-            return;
-        }
-        requestApolloApply();
     }
 
     private void requestApolloApply() {
@@ -158,11 +151,8 @@ public final class ApolloSettingsFragment extends SettingsSectionFragment {
 
         if (textApolloStatus != null) {
             textApolloStatus.setText(
-                    ru.big.town.common.VehiclePlatform.current().isH97XY()
-                            ? "Применение при изменении, кнопкой «Применить» и при пробуждении "
-                                    + "автомобиля."
-                            : "Применение кнопкой «Применить», при открытии водительской двери "
-                                    + "и первом включении D после неё.");
+                    "Применение при изменении, кнопкой «Применить», при пробуждении автомобиля "
+                            + "и первом включении D после открытия водительской двери.");
         }
     }
 

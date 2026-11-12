@@ -76,21 +76,6 @@ final class ApolloRestorePolicy {
             boolean trafficLights,
             boolean greenSound,
             boolean trafficSigns,
-            boolean speedSigns) {
-        // Recognition-only firmware must not receive correction or warning commands.
-        appendBase(
-                entitlements, switches, tlc, trafficLights, greenSound, trafficSigns, speedSigns);
-        if (speedSigns) modes.put(ISA_ISLC_MODE, 4);
-    }
-
-    static void appendTo(
-            Map<String, Integer> entitlements,
-            Map<String, Integer> modes,
-            Map<String, Integer> switches,
-            boolean tlc,
-            boolean trafficLights,
-            boolean greenSound,
-            boolean trafficSigns,
             boolean speedSigns,
             int speedMode,
             boolean speedWarning) {
@@ -117,7 +102,7 @@ final class ApolloRestorePolicy {
             throw new IllegalArgumentException("Apollo target maps are null");
         }
 
-        // H97X serializes these values into one zero-initialized 0x40A frame. Therefore the
+        // The OEM transport serializes these values into one zero-initialized 0x40A frame. The
         // capability snapshot must contain all 18 bits. Match the stock subscription manager:
         // enable the subscription while any effective Apollo feature is selected, and explicitly
         // disable it when the last feature is turned off. This shared vector also includes the

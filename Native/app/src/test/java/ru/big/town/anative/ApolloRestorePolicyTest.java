@@ -77,7 +77,16 @@ public class ApolloRestorePolicyTest {
         Map<String, Integer> switches = new LinkedHashMap<>();
 
         ApolloRestorePolicy.appendTo(
-                entitlements, new LinkedHashMap<>(), switches, true, true, true, true, false);
+                entitlements,
+                new LinkedHashMap<>(),
+                switches,
+                true,
+                true,
+                true,
+                true,
+                false,
+                4,
+                false);
 
         assertEquals(18, entitlements.size());
         for (Integer value : entitlements.values()) {
@@ -95,7 +104,16 @@ public class ApolloRestorePolicyTest {
         Map<String, Integer> switches = new LinkedHashMap<>();
 
         ApolloRestorePolicy.appendTo(
-                entitlements, new LinkedHashMap<>(), switches, false, false, true, false, false);
+                entitlements,
+                new LinkedHashMap<>(),
+                switches,
+                false,
+                false,
+                true,
+                false,
+                false,
+                4,
+                false);
 
         assertEquals(18, entitlements.size());
         for (Integer value : entitlements.values()) {
@@ -108,16 +126,16 @@ public class ApolloRestorePolicyTest {
     }
 
     @Test
-    public void legacyPiEntryPointRemainsRecognitionOnly() {
+    public void recognitionTargetsExplicitlyResetCorrectionAndWarning() {
         for (boolean enabled : new boolean[] {false, true}) {
             Map<String, Integer> entitlements = new LinkedHashMap<>();
             Map<String, Integer> modes = new LinkedHashMap<>();
             Map<String, Integer> switches = new LinkedHashMap<>();
             ApolloRestorePolicy.appendTo(
-                    entitlements, modes, switches, false, false, false, false, enabled);
-            assertEquals(enabled ? Integer.valueOf(4) : null, modes.get("ISA_ISLC_MODE"));
+                    entitlements, modes, switches, false, false, false, false, enabled, 4, false);
+            assertEquals(Integer.valueOf(4), modes.get("ISA_ISLC_MODE"));
             assertEquals(Integer.valueOf(enabled ? 1 : 2), switches.get("ISA_ISLC_SWITCH"));
-            assertEquals(false, switches.containsKey("ISA_ISLC_OVER_SPEED_WARNING_SWITCH"));
+            assertEquals(Integer.valueOf(1), switches.get("ISA_ISLC_OVER_SPEED_WARNING_SWITCH"));
         }
     }
 }

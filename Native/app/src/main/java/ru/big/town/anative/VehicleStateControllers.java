@@ -35,6 +35,7 @@ final class VehicleStateControllers {
 
     private final Context appContext;
     private final ModeRestoreTriggers restoreTriggers = new ModeRestoreTriggers();
+    private final ApolloDriveRestoreController apolloDriveRestoreController;
     private final boolean accRestore;
     private final CanBusEventHub canBusEventHub;
     private final HandlerThread stateThread;
@@ -55,6 +56,10 @@ final class VehicleStateControllers {
 
     private VehicleStateControllers(Context context) {
         appContext = context;
+        apolloDriveRestoreController =
+                new ApolloDriveRestoreController(
+                        () -> ApplyEngine.restoreApolloOnDrive(appContext),
+                        ApplyEngine::capturePhysicalWakeGeneration);
         accRestore = ru.big.town.common.VehiclePlatform.current().isH97XY();
         stateThread = new HandlerThread("VehicleStateControllers");
         stateThread.start();
@@ -99,11 +104,12 @@ final class VehicleStateControllers {
     }
 
     void requestGearSnapshot() {
-        stateHandler.post(() -> {
-            if (canBusSubscription == null) return;
-            canBusSubscription.forgetGearStatus();
-            canBusEventHub.requestGearSnapshot();
-        });
+        stateHandler.post(
+                () -> {
+                    if (canBusSubscription == null) return;
+                    canBusSubscription.forgetGearStatus();
+                    canBusEventHub.requestGearSnapshot();
+                });
     }
 
     DriverDoorStateController driverDoor() {
@@ -126,6 +132,7 @@ final class VehicleStateControllers {
     }
 
     private void onCanBusEvent(CanBusEvent event) {
+        apolloDriveRestoreController.onEvent(event);
         switch (event.kind) {
             case CONNECTION:
                 // Connection replay only refreshes observable state.

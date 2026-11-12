@@ -767,7 +767,7 @@ public class MainActivity extends AppCompatActivity {
 
     /** Builds one validated pass before the first OEM request is submitted. */
     static CanRestorePlan createCanRestorePlan() {
-        return createCanRestorePlan(true);
+        return createCanRestorePlan(true, true);
     }
 
     static void appendApolloStockUiRestore(CanRestorePlan.Builder plan, Context context) {
@@ -789,7 +789,6 @@ public class MainActivity extends AppCompatActivity {
     }
 
     static void appendApolloRestore(CanRestorePlan.Builder plan, Context context) {
-        if (!VehiclePlatform.current().isH97XY()) return;
         ApolloRestorePolicy.appendPlan(
                 plan,
                 apolloTlcEnabled,
@@ -811,7 +810,7 @@ public class MainActivity extends AppCompatActivity {
                                 .accepted());
     }
 
-    static CanRestorePlan createCanRestorePlan(boolean includeModes) {
+    static CanRestorePlan createCanRestorePlan(boolean includeModes, boolean includeApollo) {
         Log.i(
                 "$$$ MainActivity runCmds $$$",
                 "driveMode: "
@@ -860,7 +859,6 @@ public class MainActivity extends AppCompatActivity {
                 });
         final Map<String, Integer> primaryValues = new LinkedHashMap<>();
         final Map<String, Integer> trailingValues = new LinkedHashMap<>();
-        final Map<String, Integer> apolloModes = new LinkedHashMap<>();
         final Map<String, Integer> stableIds = new LinkedHashMap<>();
 
         appendApolloStockUiRestore(plan, context);
@@ -876,21 +874,8 @@ public class MainActivity extends AppCompatActivity {
                 trailingValues, recycleEnabled, recycle, driveMode);
         stableIds.putAll(VehicleRestorePolicy.stableIds());
 
-        if (accRestore) {
-            // H97X/Y use independent Apollo tasks with ISA controls.
+        if (includeApollo) {
             appendApolloRestore(plan, context);
-        } else {
-            // Other firmware keeps capability, recognition-mode and switch ordering.
-            ApolloRestorePolicy.appendTo(
-                    primaryValues,
-                    apolloModes,
-                    trailingValues,
-                    apolloTlcEnabled,
-                    apolloTrafficLightsEnabled,
-                    apolloGreenSoundEnabled,
-                    apolloTrafficSignsEnabled,
-                    apolloSpeedSignsEnabled);
-            stableIds.putAll(ApolloRestorePolicy.stableIds());
         }
 
         OemVehicleStateTransport.StateValue fragranceDurationState = null;
@@ -925,14 +910,9 @@ public class MainActivity extends AppCompatActivity {
                                                 context,
                                                 firstState,
                                                 primaryValues,
-                                                apolloModes,
                                                 trailingValues,
                                                 stableIds,
-                                                accRestore
-                                                        ? "drive/energy/fragrance then recuperation"
-                                                        : "drive/energy/fragrance/Apollo"
-                                                                + " entitlements then ISA mode then"
-                                                                + " switches/recuperation")
+                                                "drive/energy/fragrance then recuperation")
                                         .accepted();
                         if (!accepted) return CanRestorePlan.OperationResult.TRANSIENT_FAILURE;
                         // These are current vehicle targets, never writes to the pinned menu

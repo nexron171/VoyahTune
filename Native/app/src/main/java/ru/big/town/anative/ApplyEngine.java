@@ -232,32 +232,42 @@ public final class ApplyEngine {
     }
 
     static void applyApolloTargets(Context context) {
-        bg().post(() -> applySavedApolloTargets(context, false));
+        bg().post(() -> applySavedApolloTargets(context, false, true));
     }
 
-    static void restoreApolloStockUi(Context context) {
-        if (usesAccRestore()) return;
+    static void restoreApolloOnWake(Context context) {
+        restoreApolloTargets(context, true);
+    }
+
+    static void restoreApolloOnDrive(Context context) {
+        restoreApolloTargets(context, false);
+    }
+
+    private static void restoreApolloTargets(Context context, boolean includeStockUi) {
         final long wakeGeneration = capturePhysicalWakeGeneration();
         bg().post(
-                        () -> {
-                            if (isPhysicalWakeGenerationActive(wakeGeneration)) {
-                                applySavedApolloTargets(context, true);
-                            }
-                        });
+                        () ->
+                                CanSender.runGuardedSend(
+                                        () -> isPhysicalWakeGenerationActive(wakeGeneration),
+                                        () ->
+                                                applySavedApolloTargets(
+                                                        context, true, includeStockUi)));
     }
 
-    private static void applySavedApolloTargets(Context context, boolean allowCache) {
+    private static boolean applySavedApolloTargets(
+            Context context, boolean allowCache, boolean includeStockUi) {
         if (MainActivity.loadModes(context, allowCache) == 0) {
             Log.w(TAG, "Apollo apply skipped: saved targets unavailable");
-            return;
+            return false;
         }
         CanRestorePlan.Builder builder = new CanRestorePlan.Builder();
-        if (usesAccRestore()) {
-            MainActivity.appendApolloRestore(builder, context);
-        } else {
+        if (includeStockUi) {
             MainActivity.appendApolloStockUiRestore(builder, context);
         }
-        Log.i(TAG, "Apollo apply: " + builder.build().sendPending((frames, label) -> false));
+        MainActivity.appendApolloRestore(builder, context);
+        CanRestorePlan.AttemptResult result = builder.build().sendPending((frames, label) -> false);
+        Log.i(TAG, "Apollo apply: " + result);
+        return result.isComplete();
     }
 
     public static void scheduleAccApply(Context context) {
@@ -643,7 +653,7 @@ public final class ApplyEngine {
         }
         final CanRestorePlan plan =
                 MainActivity.createCanRestorePlan(
-                        manual || !usesAccRestore() || isDriveEntryRestore());
+                        manual || !usesAccRestore() || isDriveEntryRestore(), manual);
         final CanRestorePlan.AttemptResult[] result = {
             CanRestorePlan.AttemptResult.TRANSIENT_FAILURE
         };
