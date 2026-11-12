@@ -1045,6 +1045,22 @@ impl Engine {
             }
             self.install_runyn(&path)?;
         }
+        self.install_runyn_service(model)
+    }
+
+    fn install_runyn_service(
+        &self,
+        model: release_core::vehicle_model::VehicleModel,
+    ) -> Result<()> {
+        if let Some(service) = self.payload.manifest.recipe.runyn_service(model) {
+            self.push_file(
+                &self.payload.file(&service.artifact)?,
+                &format!("{}.voyahtune.new", service.destination),
+                &service.destination,
+                service.mode,
+                true,
+            )?;
+        }
         Ok(())
     }
 
@@ -1218,6 +1234,7 @@ impl Engine {
         self.boot_transaction()
     }
     fn stop_runtime_for_update(&self) -> Result<()> {
+        self.shell(release_core::runyn::STOP_TELNET)?;
         self.shell(include_str!(
             "../../../../Packaging/installer/common/force-stop-runtime-device.sh"
         ))?;

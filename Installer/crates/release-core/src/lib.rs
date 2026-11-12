@@ -13,6 +13,8 @@ pub mod ota;
 pub mod installation_logcat;
 pub mod vehicle_model;
 
+pub mod native_package;
 pub mod runtime_maintenance;
 pub mod runtime_readiness;
-pub mod native_package;
+
+pub mod runyn;

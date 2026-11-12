@@ -285,3 +285,64 @@ fn removal_reports_logcat_upload_failure() {
 
     assert!(engine.restore_original_logcat().is_err());
 }
+
+#[test]
+fn runyn_telnet_file_is_installed_only_for_selected_models() {
+    use release_core::{runyn, vehicle_model::VehicleModel};
+
+    for model in [VehicleModel::H97X, VehicleModel::H97Y, VehicleModel::Other] {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut engine, _) = fixture(directory.path(), "unused");
+        engine.payload.root = directory.path().canonicalize().unwrap();
+        engine.payload.manifest.recipe = Default::default();
+        let service =
+            include_bytes!("../../../../../Packaging/new/system/voyahtune.runyn.telnet.rc");
+        let source = directory.path().join(runyn::TELNET_ARTIFACT);
+        fs::write(&source, service).unwrap();
+        engine.payload.manifest.artifacts.push(
+            serde_json::from_value(json!({
+                "name": runyn::TELNET_ARTIFACT,
+                "path": runyn::TELNET_ARTIFACT,
+                "size": service.len(),
+                "sha256": payload::sha256(&source).unwrap()
+            }))
+            .unwrap(),
+        );
+        fs::create_dir_all(directory.path().join("device/system/etc/init")).unwrap();
+        fs::write(
+            directory.path().join("adb"),
+            r#"#!/bin/sh
+set -eu
+root=$(dirname "$0")
+if [ "$1" = -s ]; then shift 2; fi
+case "$1" in
+    push) cp "$2" "$root/device$3" ;;
+    shell)
+        {
+            printf '%s\n' 'chown() { :; }' 'restorecon() { :; }' 'sync() { :; }'
+            sed "s|/system/|$root/device/system/|g"
+        } > "$root/command.sh"
+        sh "$root/command.sh" ;;
+    *) exit 1 ;;
+esac
+"#,
+        )
+        .unwrap();
+
+        engine.install_runyn_service(model).unwrap();
+
+        let installed = directory
+            .path()
+            .join("device")
+            .join(runyn::TELNET_DESTINATION.trim_start_matches('/'));
+        if model == VehicleModel::Other {
+            assert_eq!(fs::read(&installed).unwrap(), service);
+            assert_eq!(
+                fs::metadata(&installed).unwrap().permissions().mode() & 0o777,
+                0o644
+            );
+        } else {
+            assert!(!installed.exists());
+        }
+    }
+}

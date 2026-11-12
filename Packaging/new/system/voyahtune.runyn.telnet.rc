@@ -1,0 +1,9 @@
+on boot
+    start voyahtune_runyn_telnet
+
+service voyahtune_runyn_telnet /vendor/bin/busybox telnetd -F -b 127.0.0.1 -p 23 -l /system/bin/sh
+    class late_start
+    user root
+    group root
+    seclabel u:r:su:s0
+    disabled

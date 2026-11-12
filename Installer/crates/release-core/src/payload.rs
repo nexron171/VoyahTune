@@ -212,6 +212,7 @@ impl Payload {
                     "dns-helper.sh",
                     "dns.apk",
                     "init.logcat.sh",
+                    "voyahtune.runyn.telnet.rc",
                     "init.logcat.original.sh",
                 ])
                 .collect()
@@ -464,6 +465,7 @@ impl Payload {
             "dns-helper.sh",
             "dns.apk",
             "init.logcat.sh",
+            "voyahtune.runyn.telnet.rc",
             "init.logcat.original.sh",
         ] {
             self.artifact(name)?;

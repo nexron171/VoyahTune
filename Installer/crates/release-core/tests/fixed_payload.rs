@@ -17,6 +17,7 @@ fn fixture_with_readiness(root: &Path, format: u32, readiness: Option<u32>) {
             "dns-helper.sh",
             "dns.apk",
             "init.logcat.sh",
+            "voyahtune.runyn.telnet.rc",
             "init.logcat.original.sh",
         ])
     {

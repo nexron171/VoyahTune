@@ -406,6 +406,11 @@ fn apply_with_signature_reset(shared: &Shared, allow_native_reset: bool) -> io::
     maintenance.execute(RuntimeStep::Stop, || {
         command(
             "/system/bin/sh",
+            &["-c", release_core::runyn::STOP_TELNET],
+            15,
+        )?;
+        command(
+            "/system/bin/sh",
             &[
                 "-c",
                 include_str!("../../../Packaging/installer/common/force-stop-runtime-device.sh"),
@@ -555,6 +560,13 @@ fn apply_with_signature_reset(shared: &Shared, allow_native_reset: bool) -> io::
                         )?;
                         install_apk(payload::RUNYN, path)?;
                         fs::remove_file(path)?;
+                    }
+                    if let Some(service) = p.manifest.recipe.runyn_service(model) {
+                        device::atomic_copy(
+                            &p.file(&service.artifact).map_err(error)?,
+                            Path::new(&service.destination),
+                            service.mode,
+                        )?;
                     }
                 }
                 Step::Dns => {

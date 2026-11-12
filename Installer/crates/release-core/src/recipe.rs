@@ -196,6 +196,18 @@ fn owned(path: &str) -> bool {
             .any(|p| path.starts_with(p) && !path[p.len()..].is_empty()))
 }
 impl Recipe {
+    pub fn runyn_service(&self, model: crate::vehicle_model::VehicleModel) -> Option<CopyFile> {
+        self.packages
+            .iter()
+            .any(|package| package.package == payload::RUNYN && package.applies_to(model))
+            .then(|| CopyFile {
+                artifact: crate::runyn::TELNET_ARTIFACT.into(),
+                destination: crate::runyn::TELNET_DESTINATION.into(),
+                mode: 0o644,
+                phase: Phase::Files,
+            })
+    }
+
     pub fn validate(&self) -> Result<()> {
         let fail = |detail: String| {
             Error::new(
@@ -379,6 +391,9 @@ impl Recipe {
             .cloned()
             .chain(RETIRED_RUNTIME_FILES.lines().map(String::from))
             .chain(std::iter::once(
+                crate::runyn::TELNET_DESTINATION.to_string(),
+            ))
+            .chain(std::iter::once(
                 "/data/local/bin/voyahtune-native-migration.boot".to_string(),
             ))
             .chain(
@@ -455,6 +470,25 @@ mod tests {
             assert!(!recipe.remove_files.contains(&file.destination));
         }
         recipe.validate().unwrap();
+    }
+
+    #[test]
+    fn telnet_service_follows_runyn_package_selection() {
+        use crate::vehicle_model::VehicleModel;
+        let mut recipe = Recipe::default();
+        assert!(recipe.runyn_service(VehicleModel::H97X).is_none());
+        assert!(recipe.runyn_service(VehicleModel::H97Y).is_none());
+        let service = recipe.runyn_service(VehicleModel::Other).unwrap();
+        assert_eq!(
+            service.destination,
+            "/system/etc/init/voyahtune.runyn.telnet.rc"
+        );
+        assert_eq!(service.mode, 0o644);
+        assert!(recipe.cleanup_files().contains(&service.destination));
+        recipe
+            .packages
+            .retain(|package| package.package != payload::RUNYN);
+        assert!(recipe.runyn_service(VehicleModel::Other).is_none());
     }
 
     #[test]

@@ -330,6 +330,7 @@ fn base_payload(_root: &Path) -> Result<(installer_core::recipe::Recipe, serde_j
         )
         .chain([
             "init.logcat.sh",
+            "voyahtune.runyn.telnet.rc",
             "init.logcat.original.sh",
             "dns-helper.sh",
             "dns.apk",
@@ -352,6 +353,7 @@ fn base_payload(_root: &Path) -> Result<(installer_core::recipe::Recipe, serde_j
             "voyahtune-ota-bootstrap.json" => "Updater/build/bootstrap.json",
             "voyahtune.load.sh" => "Packaging/new/system/voyahtune.load.sh",
             "voyahtune.load.rc" => "Packaging/new/system/voyahtune.load.rc",
+            "voyahtune.runyn.telnet.rc" => "Packaging/new/system/voyahtune.runyn.telnet.rc",
             "init.logcat.sh" => "Packaging/new/system/init.logcat.sh",
             "init.logcat.original.sh" => "Packaging/system/init.logcat.original.sh",
             "dns-helper.sh" => "Packaging/installer/common/dns-overlay-device.sh",
