@@ -10,13 +10,27 @@ final class RearFogController {
             new OemVehicleStateTransport.StateKey("REAR_FOG_LIGHT", 218);
 
     static String execute(Context context, String action) {
+        return execute(context, action, target -> {});
+    }
+
+    static String execute(
+            Context context, String action, java.util.function.Consumer<String> resolved) {
         String result =
                 OemVehicleStateTransport.withSession(
-                        context, Collections.singleton(KEY), session -> execute(session, action));
+                        context,
+                        Collections.singleton(KEY),
+                        session -> execute(session, action, resolved));
         return result == null ? "Нет подключения к сервису автомобиля" : result;
     }
 
     static String execute(OemVehicleStateTransport.Session session, String action) {
+        return execute(session, action, target -> {});
+    }
+
+    private static String execute(
+            OemVehicleStateTransport.Session session,
+            String action,
+            java.util.function.Consumer<String> resolved) {
         Integer state = session.readRearFog();
         if (state == null || (state != 0 && state != 1)) {
             return "Не удалось прочитать состояние задней противотуманки";
@@ -35,6 +49,7 @@ final class RearFogController {
             default:
                 return "Неизвестное действие";
         }
+        resolved.accept("rear_fog:" + (target ? "on" : "off"));
         if (target == (state == 1)) return "";
         return session.sendVehicleState(new OemVehicleStateTransport.StateValue(KEY, 1), "rear fog")
                         .accepted()

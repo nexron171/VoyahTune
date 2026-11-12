@@ -1,7 +1,6 @@
 package ru.big.town.anative;
 
 import android.os.Handler;
-import android.widget.Toast;
 
 import ru.big.town.common.ScenarioProtocol;
 
@@ -35,6 +34,10 @@ interface ScenarioEnvironment {
     void execute(String action, ScenarioActionExecutor.Completion completion);
 
     void notifyUser(String text);
+
+    default void notifyUser(String text, boolean error) {
+        notifyUser(text);
+    }
 
     default boolean acceptTrigger(
             String scenarioId, ScenarioDefinition.Trigger trigger, ScenarioTriggerHistory history) {
@@ -195,7 +198,12 @@ interface ScenarioEnvironment {
 
             @Override
             public void notifyUser(String text) {
-                Toast.makeText(service, text, Toast.LENGTH_LONG).show();
+                notifyUser(text, false);
+            }
+
+            @Override
+            public void notifyUser(String text, boolean error) {
+                OemToastNotifier.show(service, text, error);
             }
         };
     }

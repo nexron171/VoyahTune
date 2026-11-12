@@ -121,6 +121,7 @@ public class SetModesService extends Service {
     private SuspensionWidgetController suspensionWidget;
     private HeadlightWidgetController headlightWidget;
     private FuelFlapWidgetController fuelFlapWidget;
+    private FuelFlapNotifier fuelFlapNotifier;
     private FragranceWidgetController fragranceWidget;
     private RecirculationWidgetController recirculationWidget;
     private BrightnessWidgetController brightnessWidget;
@@ -214,9 +215,10 @@ public class SetModesService extends Service {
                 case ru.big.town.common.CarPlayUltraProtocol.SET:
                 case ru.big.town.common.CarPlayClimateProtocol.SET:
                     if (carPlayAudio == null)
-                        carPlayAudio = new CarPlayAudioController(
-                                SetModesService.this,
-                                ((Anative) getApplication()).navigationMediaDucking());
+                        carPlayAudio =
+                                new CarPlayAudioController(
+                                        SetModesService.this,
+                                        ((Anative) getApplication()).navigationMediaDucking());
                     if (carPlayVehicle == null)
                         carPlayVehicle =
                                 new CarPlayVehicleController(SetModesService.this, carPlayAudio);
@@ -225,9 +227,10 @@ public class SetModesService extends Service {
                 case ru.big.town.common.CarPlayAudioProtocol.QUERY:
                 case ru.big.town.common.CarPlayAudioProtocol.SET:
                     if (carPlayAudio == null)
-                        carPlayAudio = new CarPlayAudioController(
-                                SetModesService.this,
-                                ((Anative) getApplication()).navigationMediaDucking());
+                        carPlayAudio =
+                                new CarPlayAudioController(
+                                        SetModesService.this,
+                                        ((Anative) getApplication()).navigationMediaDucking());
                     carPlayAudio.volumes(msg);
                     break;
                 case ru.big.town.common.EnergyWidgetProtocol.WATCH:
@@ -608,22 +611,30 @@ public class SetModesService extends Service {
      * одноразовый request-бит и его очистка на SCREEN_OFF/SCREEN_ON живут именно в нём ({@link
      * WashModeRequestLease}).
      */
-    static void requestWashAction(Context context, Runnable completion) {
+    static void requestWashAction(
+            Context context, java.util.function.Consumer<ActionResult> completion) {
         SetModesService service =
                 context instanceof SetModesService ? (SetModesService) context : activeInstance;
         WashModeController controller = service == null ? null : service.washModeController;
+        ActionResult[] result = {ActionResult.failed("wash", "Не удалось запустить режим мойки")};
         if (controller == null) {
-            Log.w(TAG, "STEER_ACTION wash: служба не запущена, запрос пропущен");
-            if (completion != null) completion.run();
+            completion.accept(result[0]);
             return;
         }
         ApplyEngine.postUserCommand(
                 "steer wash mode",
                 () -> {
                     WashModePolicy.Outcome outcome = controller.activate();
-                    Log.i(TAG, "STEER_ACTION wash outcome=" + outcome);
+                    result[0] =
+                            outcome == WashModePolicy.Outcome.ACCEPTED
+                                    ? ActionResult.sent("wash")
+                                    : ActionResult.failed(
+                                            "wash",
+                                            outcome == WashModePolicy.Outcome.NOT_IN_PARK
+                                                    ? "Для режима мойки переведите селектор в P"
+                                                    : "Не удалось запустить режим мойки");
                 },
-                completion);
+                () -> completion.accept(result[0]));
     }
 
     protected void requestMaintenance(boolean maintenance) {
@@ -2120,6 +2131,7 @@ public class SetModesService extends Service {
         enableWifiOnStartup();
         StartupBluetooth.enable(this);
         energyWidgets = new EnergyWidgetController(this);
+        fuelFlapNotifier = new FuelFlapNotifier(this);
         cabinTemperature = CabinTemperatureController.get(this);
         clearApps = new ClearAppsController(this::performCloseAllApps);
         ApplyEngine.activateWake("service create");
@@ -2205,9 +2217,10 @@ public class SetModesService extends Service {
             ScenarioTriggerPersistence.wake(this);
             requestWashModeCleanup("power state " + powerStateName(state));
             ApplyEngine.activateWake("power state " + powerStateName(state));
-            boolean screenReady = isScreenInteractive()
-                    || state == CarPowerManager.CarPowerStateListener.ON
-                    || state == CarPowerManager.CarPowerStateListener.SHUTDOWN_CANCELLED;
+            boolean screenReady =
+                    isScreenInteractive()
+                            || state == CarPowerManager.CarPowerStateListener.ON
+                            || state == CarPowerManager.CarPowerStateListener.SHUTDOWN_CANCELLED;
             if (screenReady) {
                 screenOffObserved = false;
             } else {
@@ -2620,6 +2633,7 @@ public class SetModesService extends Service {
             recirculationWidget.close();
         }
         if (fragranceWidget != null) fragranceWidget.close();
+        if (fuelFlapNotifier != null) fuelFlapNotifier.close();
         if (fuelFlapWidget != null) {
             fuelFlapWidget.close();
         }

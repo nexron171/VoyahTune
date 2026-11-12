@@ -80,12 +80,17 @@ public final class SplitConfigSync {
                 ScreenBrightnessSettings.RULES,
                 prefs.getString(
                         ScreenBrightnessSettings.RULES, ScreenBrightnessSettings.DEFAULT_RULES));
-        intent.putExtra(ScreenBrightnessSettings.ADAPTIVE,
+        intent.putExtra(
+                ScreenBrightnessSettings.ADAPTIVE,
                 prefs.getBoolean(ScreenBrightnessSettings.ADAPTIVE, true));
-        intent.putExtra(ScreenBrightnessSettings.NIGHT_THRESHOLD,
-                prefs.getInt(ScreenBrightnessSettings.NIGHT_THRESHOLD,
-                        ScreenBrightnessSettings.nightThreshold(prefs.getString(
-                                ScreenBrightnessSettings.RULES, ScreenBrightnessSettings.DEFAULT_RULES))));
+        intent.putExtra(
+                ScreenBrightnessSettings.NIGHT_THRESHOLD,
+                prefs.getInt(
+                        ScreenBrightnessSettings.NIGHT_THRESHOLD,
+                        ScreenBrightnessSettings.nightThreshold(
+                                prefs.getString(
+                                        ScreenBrightnessSettings.RULES,
+                                        ScreenBrightnessSettings.DEFAULT_RULES))));
         context.sendBroadcast(intent);
     }
 
@@ -166,6 +171,11 @@ public final class SplitConfigSync {
     public static void pushSteering(Context context, SharedPreferences prefs) {
         Intent i = configIntent("ru.big.town.anative.STEER_CONFIG");
         i.putExtra(
+                ru.big.town.common.ActionNotificationSettings.ENABLED,
+                prefs.getBoolean(
+                        ru.big.town.common.ActionNotificationSettings.ENABLED,
+                        ru.big.town.common.ActionNotificationSettings.DEFAULT_ENABLED));
+        i.putExtra(
                 "steerStarShort",
                 resolveSteerActions(prefs.getString("steerStarShort", "none"), prefs));
         i.putExtra(
@@ -195,6 +205,18 @@ public final class SplitConfigSync {
         i.putExtra(
                 "steerPhoneLong",
                 resolveSteerActions(prefs.getString("steerPhoneLong", "none"), prefs));
+        org.json.JSONObject contactNames = new org.json.JSONObject();
+        for (ru.big.town.restoremode.widgets.dials.DialWidgetStore.Entry entry :
+                ru.big.town.restoremode.widgets.dials.DialWidgetStore.load(prefs)) {
+            try {
+                if (!entry.name.isEmpty()) contactNames.put(entry.number, entry.name);
+            } catch (org.json.JSONException ignored) {
+                // Invalid entries fall back to their dialled number.
+            }
+        }
+        i.putExtra(
+                ru.big.town.common.ActionNotificationSettings.CONTACT_NAMES,
+                contactNames.toString());
         context.sendBroadcast(i);
     }
 

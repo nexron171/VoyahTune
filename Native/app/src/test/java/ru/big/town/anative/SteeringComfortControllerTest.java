@@ -17,6 +17,25 @@ public class SteeringComfortControllerTest {
     };
 
     @Test
+    public void notificationTargetIsTheValueSentWithoutReadingStateAgain() {
+        FakeSession session = new FakeSession(1);
+        String[] target = {null};
+        assertEquals(
+                "",
+                SteeringComfortController.execute(
+                        session, "wheel_heat:toggle", value -> target[0] = value));
+        assertEquals("wheel_heat:on", target[0]);
+        assertEquals(1, session.reads);
+        session.state = 2;
+        assertEquals(
+                "",
+                SteeringComfortController.execute(
+                        session, "wheel_heat:toggle", value -> target[0] = value));
+        assertEquals("wheel_heat:off", target[0]);
+        assertEquals(2, session.reads);
+    }
+
+    @Test
     public void explicitOnAndOffWriteOnlyTheRequestedSwitchWithoutReadingState() {
         for (String[] control : CONTROLS) {
             for (String operation : new String[] {"on", "off"}) {
@@ -53,7 +72,8 @@ public class SteeringComfortControllerTest {
             for (Integer state : new Integer[] {null, -1, 0, 3, 10}) {
                 FakeSession session = new FakeSession(state);
                 assertFalse(
-                        SteeringComfortController.execute(session, control[0] + ":toggle").isEmpty());
+                        SteeringComfortController.execute(session, control[0] + ":toggle")
+                                .isEmpty());
                 assertEquals(1, session.reads);
                 assertEquals(0, session.writes);
             }
@@ -76,11 +96,20 @@ public class SteeringComfortControllerTest {
 
     @Test
     public void passengerAndMalformedActionsNeverTouchTheTransport() {
-        for (String action : new String[] {
-            null, "", "wheel_heat", "wheel_heat:3", "wheel_heat:toggle:extra",
-            "seat:passenger:heat:on", "seat:passenger:vent:off", "seat:passenger:massage:toggle",
-            "seat:driver:heat:unknown", "seat:driver:massage:on:", "seat:rear:heat:toggle"
-        }) {
+        for (String action :
+                new String[] {
+                    null,
+                    "",
+                    "wheel_heat",
+                    "wheel_heat:3",
+                    "wheel_heat:toggle:extra",
+                    "seat:passenger:heat:on",
+                    "seat:passenger:vent:off",
+                    "seat:passenger:massage:toggle",
+                    "seat:driver:heat:unknown",
+                    "seat:driver:massage:on:",
+                    "seat:rear:heat:toggle"
+                }) {
             FakeSession session = new FakeSession(1);
             assertFalse(SteeringComfortController.handles(action));
             assertFalse(SteeringComfortController.execute(session, action).isEmpty());

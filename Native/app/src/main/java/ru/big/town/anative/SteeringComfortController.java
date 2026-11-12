@@ -17,12 +17,18 @@ final class SteeringComfortController {
     }
 
     static void execute(Context context, String action, Consumer<String> completion) {
+        executeWithResult(context, action, result -> completion.accept(result.error));
+    }
+
+    static void executeWithResult(
+            Context context, String action, Consumer<ActionResult> completion) {
         OemVehicleStateTransport.StateKey key = keyForAction(action);
         if (key == null) {
-            completion.accept("Неизвестное действие комфорта");
+            completion.accept(ActionResult.failed(action, "Неизвестное действие комфорта"));
             return;
         }
         String[] error = {"Не удалось отправить команду автомобилю"};
+        String[] resolved = {action};
         ApplyEngine.postIndependentUserCommand(
                 "steering comfort " + action,
                 () -> {
@@ -30,13 +36,22 @@ final class SteeringComfortController {
                             OemVehicleStateTransport.withSession(
                                     context,
                                     Collections.singleton(key),
-                                    session -> execute(session, action));
+                                    session ->
+                                            execute(
+                                                    session,
+                                                    action,
+                                                    target -> resolved[0] = target));
                     error[0] = result == null ? "Нет подключения к сервису автомобиля" : result;
                 },
-                () -> completion.accept(error[0]));
+                () -> completion.accept(ActionResult.from(resolved[0], error[0])));
     }
 
     static String execute(OemVehicleStateTransport.Session session, String action) {
+        return execute(session, action, target -> {});
+    }
+
+    static String execute(
+            OemVehicleStateTransport.Session session, String action, Consumer<String> resolved) {
         OemVehicleStateTransport.StateKey key = keyForAction(action);
         if (key == null) {
             return "Неизвестное действие комфорта";
@@ -51,6 +66,8 @@ final class SteeringComfortController {
         } else {
             target = action.endsWith(":on") ? 2 : 1;
         }
+        resolved.accept(
+                action.substring(0, action.lastIndexOf(':') + 1) + (target == 2 ? "on" : "off"));
         return session.sendVehicleState(
                                 new OemVehicleStateTransport.StateValue(key, target),
                                 "steering comfort " + action)

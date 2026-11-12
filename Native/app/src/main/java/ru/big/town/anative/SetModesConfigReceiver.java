@@ -25,6 +25,25 @@ public class SetModesConfigReceiver extends BroadcastReceiver {
 
         String action = intent.getAction();
         if ("ru.big.town.anative.STEER_CONFIG".equals(action)) {
+            String notificationKey = ru.big.town.common.ActionNotificationSettings.ENABLED;
+            if (intent.hasExtra(notificationKey)) {
+                context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE)
+                        .edit()
+                        .putBoolean(
+                                notificationKey,
+                                intent.getBooleanExtra(
+                                        notificationKey,
+                                        ru.big.town.common.ActionNotificationSettings
+                                                .DEFAULT_ENABLED))
+                        .apply();
+            }
+            String contactNamesKey = ru.big.town.common.ActionNotificationSettings.CONTACT_NAMES;
+            if (intent.hasExtra(contactNamesKey)) {
+                context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE)
+                        .edit()
+                        .putString(contactNamesKey, intent.getStringExtra(contactNamesKey))
+                        .apply();
+            }
             String[] buttons = {"Star", "Dvr", "Voice", "Phone"};
             boolean needsBackService = false;
             for (String button : buttons) {
@@ -59,7 +78,9 @@ public class SetModesConfigReceiver extends BroadcastReceiver {
                 String passengerKey = "passengerDockSlot" + slot;
                 String passengerApp = intent.getStringExtra(passengerKey);
                 if (passengerApp != null) {
-                    Settings.Global.putString(context.getContentResolver(), "voyahtune_" + passengerKey,
+                    Settings.Global.putString(
+                            context.getContentResolver(),
+                            "voyahtune_" + passengerKey,
                             passengerApp.isEmpty() ? "none" : passengerApp);
                 }
                 String key = DockIconStyle.configKey(slot);
@@ -155,9 +176,10 @@ public class SetModesConfigReceiver extends BroadcastReceiver {
                 Log.e(TAG, "Cluster navigation setting was not saved");
             }
             if (intent.hasExtra(ClusterNavigationSettings.SHOW_STREET)) {
-                boolean showStreet = intent.getBooleanExtra(
-                        ClusterNavigationSettings.SHOW_STREET,
-                        ClusterNavigationSettings.DEFAULT_SHOW_STREET);
+                boolean showStreet =
+                        intent.getBooleanExtra(
+                                ClusterNavigationSettings.SHOW_STREET,
+                                ClusterNavigationSettings.DEFAULT_SHOW_STREET);
                 if (!Settings.Global.putInt(
                         context.getContentResolver(),
                         ClusterNavigationSettings.GLOBAL_SHOW_STREET,
@@ -166,9 +188,10 @@ public class SetModesConfigReceiver extends BroadcastReceiver {
                 }
             }
             if (intent.hasExtra(ClusterNavigationSettings.TRANSLITERATION)) {
-                boolean transliteration = intent.getBooleanExtra(
-                        ClusterNavigationSettings.TRANSLITERATION,
-                        ClusterNavigationSettings.DEFAULT_TRANSLITERATION);
+                boolean transliteration =
+                        intent.getBooleanExtra(
+                                ClusterNavigationSettings.TRANSLITERATION,
+                                ClusterNavigationSettings.DEFAULT_TRANSLITERATION);
                 if (!Settings.Global.putInt(
                         context.getContentResolver(),
                         ClusterNavigationSettings.GLOBAL_TRANSLITERATION,

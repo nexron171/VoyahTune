@@ -623,7 +623,29 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         List<String> actions = SteeringActionSequence.decode(configured);
         if (actions.isEmpty()) return;
         Log.i(TAG, "STEER_ACTION sequence start, count=" + actions.size());
-        runConfiguredActions(ctx, actions, accepted -> {});
+        List<ActionResult> results = new java.util.ArrayList<>();
+        OrderedActionSequence.run(
+                actions,
+                (action, terminal) ->
+                        executeSteerAction(
+                                ctx,
+                                action,
+                                result -> {
+                                    if (!"voice_assistant".equals(action)
+                                            && !"carplay_siri".equals(action)) results.add(result);
+                                    terminal.run();
+                                }),
+                task -> STEER_SEQUENCE_HANDLER.post(task),
+                accepted -> {
+                    if (!accepted)
+                        results.add(
+                                ActionResult.failed("", "Не удалось выполнить действие кнопки"));
+                    if (results.isEmpty()) return;
+                    OemToastNotifier.show(
+                            ctx,
+                            ActionNoticeText.sequence(results, pkg -> actionDisplayName(ctx, pkg)),
+                            results.stream().anyMatch(result -> !result.accepted));
+                });
     }
 
     static void runConfiguredActions(
@@ -652,18 +674,33 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
      * вызова API.
      */
     static void handleSteerAction(Context ctx, String action, Runnable completion) {
+        executeSteerAction(ctx, action, result -> completeSteerAction(completion));
+    }
+
+    static void executeSteerAction(
+            Context ctx, String action, java.util.function.Consumer<ActionResult> completion) {
+        java.util.concurrent.atomic.AtomicBoolean settled =
+                new java.util.concurrent.atomic.AtomicBoolean();
+        java.util.function.Consumer<ActionResult> once =
+                result -> {
+                    if (settled.compareAndSet(false, true)) completion.accept(result);
+                };
+        try {
+            dispatchSteerAction(ctx, action, once);
+        } catch (RuntimeException exception) {
+            Log.w(TAG, "Steering action failed: " + action, exception);
+            once.accept(ActionResult.failed(action, "Не удалось выполнить действие"));
+        }
+    }
+
+    private static void dispatchSteerAction(
+            Context ctx, String action, java.util.function.Consumer<ActionResult> completion) {
         if (action == null || action.isEmpty()) {
-            completeSteerAction(completion);
+            completion.accept(ActionResult.failed(action, "Пустое действие"));
             return;
         }
         if (SteeringComfortController.handles(action)) {
-            SteeringComfortController.execute(
-                    ctx,
-                    action,
-                    error -> {
-                        if (!error.isEmpty()) Log.w(TAG, error);
-                        completeSteerAction(completion);
-                    });
+            SteeringComfortController.executeWithResult(ctx, action, completion);
             return;
         }
         if (VehicleClimateAction.handles(action)) {
@@ -672,19 +709,12 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                     action,
                     () -> true,
                     error -> {
-                        if (error != null) Log.w(TAG, error);
-                        completeSteerAction(completion);
+                        completion.accept(ActionResult.from(action, error));
                     });
             return;
         }
         if (ru.big.town.common.QuickControlProtocol.handles(action)) {
-            QuickControlController.execute(
-                    ctx,
-                    action,
-                    error -> {
-                        if (!error.isEmpty()) Log.w(TAG, error);
-                        completeSteerAction(completion);
-                    });
+            QuickControlController.executeWithResult(ctx, action, completion);
         } else if (action.startsWith("energy:")) {
             cycleMode(ctx, action.substring("energy:".length()), "energy", completion);
         } else if (action.startsWith("drive:")) {
@@ -702,7 +732,15 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         } else if ("toggle_headlights_auto".equals(action)) {
             toggleHeadlightsAuto(ctx, completion);
         } else if (action.startsWith("headlights:")) {
-            HeadlightCommandController.select(ctx, action, sent -> completeSteerAction(completion));
+            HeadlightCommandController.select(
+                    ctx,
+                    action,
+                    sent ->
+                            completion.accept(
+                                    sent
+                                            ? ActionResult.sent(action)
+                                            : ActionResult.failed(
+                                                    action, "Не удалось отправить команду света")));
         } else if ("wash".equals(action)) {
             SetModesService.requestWashAction(ctx, completion);
         } else if (action.startsWith("can:")) {
@@ -734,8 +772,28 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                 } else if (action.startsWith("app:")) {
                     // Открыть отдельное приложение (freeform-окно на display 0), закрыв активный
                     // сплит.
-                    openFreeformApp(ctx, action.substring("app:".length()));
-                    Log.i(TAG, "STEER_ACTION → приложение " + action.substring("app:".length()));
+                    String packageName = action.substring("app:".length());
+                    Runnable timeout =
+                            () ->
+                                    completion.accept(
+                                            ActionResult.failed(
+                                                    action, "Не удалось открыть приложение"));
+                    STEER_SEQUENCE_HANDLER.postDelayed(timeout, 7000);
+                    openFreeformApp(
+                            ctx,
+                            packageName,
+                            0,
+                            () -> {
+                                STEER_SEQUENCE_HANDLER.removeCallbacks(timeout);
+                                completion.accept(
+                                        ActionResult.failed(
+                                                action, "Не удалось открыть приложение"));
+                            },
+                            () -> {
+                                STEER_SEQUENCE_HANDLER.removeCallbacks(timeout);
+                                completion.accept(ActionResult.sent(action));
+                            });
+                    return;
                 } else if (action.startsWith("split:")) {
                     launchSteerSplit(ctx, action);
                 } else if (action.startsWith("call:")) {
@@ -749,11 +807,15 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                 } else if ("open_voyahtune".equals(action)) {
                     openVoyahTune(ctx);
                 } else {
-                    Log.i(TAG, "STEER_ACTION неизвестно: " + action);
+                    completion.accept(
+                            ActionResult.failed(action, "Действие недоступно: " + action));
+                    return;
                 }
-            } finally {
-                completeSteerAction(completion);
+            } catch (RuntimeException exception) {
+                completion.accept(ActionResult.failed(action, "Не удалось выполнить действие"));
+                return;
             }
+            completion.accept(ActionResult.sent(action));
         }
     }
 
@@ -782,8 +844,10 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                         presetId);
                 Log.i(TAG, "STEER_ACTION → сплит " + p[0] + "/" + p[1] + " ratio=" + ratio);
             } catch (Exception e) {
-                Log.w(TAG, "STEER_ACTION split parse: " + e.getMessage());
+                throw new IllegalArgumentException("Не удалось открыть сплит", e);
             }
+        } else {
+            throw new IllegalArgumentException("Некорректный сплит");
         }
     }
 
@@ -800,7 +864,7 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             launchOptions.putInt("android.activity.windowingMode", 1);
             context.startActivity(intent, launchOptions);
         } catch (Exception error) {
-            Log.w(TAG, "Cannot open CarPlay from steering action", error);
+            throw new IllegalStateException("Не удалось открыть CarPlay", error);
         }
     }
 
@@ -815,26 +879,51 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             ctx.startActivity(i, o.toBundle());
             Log.i(TAG, "STEER_ACTION → открыть VoyahTune");
         } catch (Exception e) {
-            Log.w(TAG, "open VoyahTune failed: " + e.getMessage());
+            throw new IllegalStateException("Не удалось открыть VoyahTune", e);
         }
     }
 
-    private static void sendCustomCan(String action, Runnable completion) {
+    private static void sendCustomCan(
+            String action, java.util.function.Consumer<ActionResult> completion) {
         byte[] frame = SteeringActionSequence.parseCustomCan(action);
         if (frame == null) {
-            Log.w(TAG, "STEER_ACTION custom CAN отклонён: " + action);
-            completeSteerAction(completion);
+            completion.accept(
+                    ActionResult.failed(action, "CAN-команда не отправлена: неверный формат"));
             return;
         }
+        ActionResult[] result = {ActionResult.failed(action, "Не удалось отправить CAN-команду")};
         ApplyEngine.postUserCommand(
                 "steer custom CAN",
                 () -> {
-                    boolean sent =
-                            MainActivity.setCanValues(
-                                    1, new byte[][] {frame}, "steering custom CAN");
-                    Log.i(TAG, "STEER_ACTION custom CAN: " + (sent ? "sent" : "failed"));
+                    if (MainActivity.setCanValues(1, new byte[][] {frame}, "steering custom CAN")) {
+                        result[0] = ActionResult.sent(action);
+                    }
                 },
-                completion);
+                () -> completion.accept(result[0]));
+    }
+
+    private static String actionDisplayName(Context context, String packageName) {
+        if (packageName.startsWith("call:")) {
+            String number = packageName.substring(5);
+            try {
+                return new org.json.JSONObject(
+                                context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE)
+                                        .getString(
+                                                ru.big.town.common.ActionNotificationSettings
+                                                        .CONTACT_NAMES,
+                                                "{}"))
+                        .optString(number, number);
+            } catch (org.json.JSONException invalid) {
+                return number;
+            }
+        }
+        try {
+            android.content.pm.PackageManager manager = context.getPackageManager();
+            return manager.getApplicationLabel(manager.getApplicationInfo(packageName, 0))
+                    .toString();
+        } catch (android.content.pm.PackageManager.NameNotFoundException exception) {
+            return packageName;
+        }
     }
 
     private static void completeSteerAction(Runnable completion) {
@@ -848,9 +937,30 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
 
     /** Always honor the clicked physical display, including when returning from the cluster. */
     static void openFreeformApp(Context context, String pkg, int displayId) {
-        if (pkg == null || pkg.isEmpty() || (displayId != 0 && displayId != 1)) return;
+        openFreeformApp(
+                context,
+                pkg,
+                displayId,
+                () ->
+                        android.widget.Toast.makeText(
+                                        context,
+                                        "Не удалось открыть приложение",
+                                        android.widget.Toast.LENGTH_LONG)
+                                .show(),
+                () -> {});
+    }
+
+    private static void openFreeformApp(
+            Context context, String pkg, int displayId, Runnable failure, Runnable started) {
+        if (pkg == null || pkg.isEmpty() || (displayId != 0 && displayId != 1)) {
+            failure.run();
+            return;
+        }
         Context app = context.getApplicationContext();
-        if (SplitHostActivity.resumeFullscreenCarPlay(pkg, 0, displayId)) return;
+        if (SplitHostActivity.resumeFullscreenCarPlay(pkg, 0, displayId)) {
+            started.run();
+            return;
+        }
         ClusterMediaHostActivity.closeForPackage(pkg);
         AppDisplayLauncher.launch(
                 app,
@@ -858,12 +968,8 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                 displayId,
                 isConfiguredFullscreenPackage(app, pkg),
                 () -> true,
-                () ->
-                        android.widget.Toast.makeText(
-                                        app,
-                                        "Не удалось открыть приложение",
-                                        android.widget.Toast.LENGTH_LONG)
-                                .show());
+                failure,
+                started);
     }
 
     /** Open the passenger task without moving or clearing the driver dashboard. */
@@ -879,8 +985,15 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
     }
 
     /** Cycle the vehicle state; only remember-last opt-in updates the saved UI selection. */
-    private static void cycleMode(Context ctx, String csv, String modeKey, Runnable completion) {
+    private static void cycleMode(
+            Context ctx,
+            String csv,
+            String modeKey,
+            java.util.function.Consumer<ActionResult> completion) {
         final Context app = ctx.getApplicationContext();
+        ActionResult[] result = {
+            ActionResult.failed("", "Не удалось отправить команду автомобилю")
+        };
         // Пользовательский выбор должен идти ПОСЛЕ уже запущенного wake-restore, а не параллельно с
         // ним:
         // иначе restore успевал отправить старый snapshot поверх только что выбранного режима.
@@ -904,6 +1017,9 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                                         + ": CAN failed, selection not persisted");
                         return;
                     }
+                    result[0] =
+                            ActionResult.sent(
+                                    ("driveMode".equals(modeKey) ? "drive" : modeKey) + ":" + next);
                     ApplyEngine.noteVehicleMode(modeKey, next);
                     MainActivity.persistExplicitMode(app, modeKey, next);
                     Log.i(
@@ -917,15 +1033,19 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                                     + " → "
                                     + next);
                 },
-                completion);
+                () -> completion.accept(result[0]));
     }
 
     /**
      * Переключить бинарную настройку относительно сохранённого значения, применить CAN и сохранить
      * новый state.
      */
-    private static void toggleSetting(Context ctx, String key, Runnable completion) {
+    private static void toggleSetting(
+            Context ctx, String key, java.util.function.Consumer<ActionResult> completion) {
         final Context app = ctx.getApplicationContext();
+        ActionResult[] result = {
+            ActionResult.failed("", "Не удалось отправить команду автомобилю")
+        };
         ApplyEngine.postUserCommand(
                 "steer " + key,
                 () -> {
@@ -946,15 +1066,27 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                         Log.w(TAG, "STEER_ACTION " + key + ": CAN failed, toggle not persisted");
                         return;
                     }
+                    String prefix =
+                            "forcedEv".equals(key)
+                                    ? "forced_ev"
+                                    : "suspensionMaintenance".equals(key)
+                                            ? "suspension_maintenance"
+                                            : "pedestrian";
+                    boolean enabled = "disablePedestrianSound".equals(key) ? !next : next;
+                    result[0] = ActionResult.sent(prefix + (enabled ? ":on" : ":off"));
                     MainActivity.persistSavedToggle(app, key, next);
                     Log.i(TAG, "STEER_ACTION " + key + ": " + current + " → " + next);
                 },
-                completion);
+                () -> completion.accept(result[0]));
     }
 
     /** Переключить фары теми же CAN-командами, которые использует автоматический свет. */
-    private static void toggleHeadlights(Context ctx, Runnable completion) {
+    private static void toggleHeadlights(
+            Context ctx, java.util.function.Consumer<ActionResult> completion) {
         final Context app = ctx.getApplicationContext();
+        ActionResult[] result = {
+            ActionResult.failed("", "Не удалось отправить команду автомобилю")
+        };
         final ManualAutoGate.Ticket manualTicket =
                 LightSensorService.reserveManualHeadlightCommand();
         ApplyEngine.postUserCommand(
@@ -970,18 +1102,23 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                         Log.w(TAG, "STEER_ACTION headlights: CAN failed, state not persisted");
                         return;
                     }
+                    result[0] = ActionResult.sent("headlights:" + (next ? "low" : "off"));
                     prefs.edit().putBoolean("steerHeadlightsOn", next).apply();
                     Log.i(TAG, "STEER_ACTION headlights: " + current + " → " + next);
                 },
                 () -> {
                     manualTicket.close();
-                    completeSteerAction(completion);
+                    completion.accept(result[0]);
                 });
     }
 
     /** Независимая пара для руля: штатный Auto ↔ ручной ближний свет. */
-    private static void toggleHeadlightsAuto(Context ctx, Runnable completion) {
+    private static void toggleHeadlightsAuto(
+            Context ctx, java.util.function.Consumer<ActionResult> completion) {
         final Context app = ctx.getApplicationContext();
+        ActionResult[] result = {
+            ActionResult.failed("", "Не удалось отправить команду автомобилю")
+        };
         final ManualAutoGate.Ticket manualTicket =
                 LightSensorService.reserveManualHeadlightCommand();
         ApplyEngine.postUserCommand(
@@ -1001,6 +1138,7 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                                         + " persisted");
                         return;
                     }
+                    result[0] = ActionResult.sent("headlights:" + (nextLowBeam ? "low" : "auto"));
                     prefs.edit().putBoolean("steerHeadlightsAutoLowBeam", nextLowBeam).apply();
                     Log.i(
                             TAG,
@@ -1011,7 +1149,7 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
                 },
                 () -> {
                     manualTicket.close();
-                    completeSteerAction(completion);
+                    completion.accept(result[0]);
                 });
     }
 }

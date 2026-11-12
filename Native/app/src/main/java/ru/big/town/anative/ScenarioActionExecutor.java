@@ -105,8 +105,8 @@ final class ScenarioActionExecutor {
             return;
         }
         // Режимы, toggle-команды, своя CAN и системная навигация: семантика совпадает с рулём.
-        SetModesReceiverDynamic.handleSteerAction(
-                service, action, () -> completion.onFinished(true, null));
+        SetModesReceiverDynamic.executeSteerAction(
+                service, action, result -> completion.onFinished(result.accepted, result.error));
     }
 
     private void executeIndependentWrite(String action, Completion completion) {
@@ -154,9 +154,11 @@ final class ScenarioActionExecutor {
 
     /** Открытие приложения через сплит-хост на физическом экране (как в Full-ветке голоса). */
     private void launchApp(String pkg, Completion completion) {
-        // Неудача запуска может прийти позже, когда об успехе уже сообщено: результат ровно один,
-        // иначе последовательность перескочит следующий шаг.
+        // The launcher reports the start request independently of later window rendering.
         final AtomicBoolean settled = new AtomicBoolean();
+        Handler handler = new Handler(Looper.getMainLooper());
+        Runnable timeout = () -> settleFailure(settled, completion);
+        handler.postDelayed(timeout, DEADLINE_MS);
         try {
             ClusterMediaHostActivity.closeForPackage(pkg);
             boolean fullscreen =
@@ -170,9 +172,16 @@ final class ScenarioActionExecutor {
                     0,
                     fullscreen,
                     () -> true,
-                    () -> settleFailure(settled, completion));
-            if (settled.compareAndSet(false, true)) completion.onFinished(true, null);
+                    () -> {
+                        handler.removeCallbacks(timeout);
+                        settleFailure(settled, completion);
+                    },
+                    () -> {
+                        handler.removeCallbacks(timeout);
+                        if (settled.compareAndSet(false, true)) completion.onFinished(true, null);
+                    });
         } catch (RuntimeException e) {
+            handler.removeCallbacks(timeout);
             settleFailure(settled, completion);
         }
     }

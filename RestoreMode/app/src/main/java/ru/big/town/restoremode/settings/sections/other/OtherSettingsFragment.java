@@ -299,6 +299,20 @@ public final class OtherSettingsFragment extends SettingsSectionFragment {
                 });
     }
 
+    private void bindActionNotifications() {
+        Switch toggle = settingView(R.id.switchActionNotifications);
+        if (toggle == null) return;
+        String key = ru.big.town.common.ActionNotificationSettings.ENABLED;
+        toggle.setChecked(
+                preferences.getBoolean(
+                        key, ru.big.town.common.ActionNotificationSettings.DEFAULT_ENABLED));
+        toggle.setOnCheckedChangeListener(
+                (button, checked) -> {
+                    preferences.edit().putBoolean(key, checked).apply();
+                    SplitConfigSync.pushSteering(requireContext(), preferences);
+                });
+    }
+
     private void bindAutoLaunch() {
         if (settingView(R.id.switchAutoLaunch) == null) {
             return;
@@ -310,7 +324,8 @@ public final class OtherSettingsFragment extends SettingsSectionFragment {
         Switch passengerAutoStart = settingView(R.id.switchPassengerAutoStart);
         passengerAutoStart.setChecked(preferences.getBoolean("passengerAutoStart", false));
         passengerAutoStart.setOnCheckedChangeListener(
-                (button, checked) -> preferences.edit().putBoolean("passengerAutoStart", checked).apply());
+                (button, checked) ->
+                        preferences.edit().putBoolean("passengerAutoStart", checked).apply());
     }
 
     private void bindDockNavigation(int rowId, int switchId, String preference) {
@@ -759,6 +774,7 @@ public final class OtherSettingsFragment extends SettingsSectionFragment {
         bindKeyboard();
         bindCustomCommandsVisibility();
         bindAutoLaunch();
+        bindActionNotifications();
         bindFloatingBack();
         bindDockNavigation(
                 R.id.dockHomePressRow, R.id.switchDockHomeShortVoyahTune, "dockHomeShortVoyahTune");

@@ -24,7 +24,17 @@ final class HotspotController {
         return execute(new PlatformBackend(context), action);
     }
 
+    static String execute(
+            Context context, String action, java.util.function.Consumer<String> resolved) {
+        return execute(new PlatformBackend(context), action, resolved);
+    }
+
     static String execute(Backend backend, String action) {
+        return execute(backend, action, target -> {});
+    }
+
+    private static String execute(
+            Backend backend, String action, java.util.function.Consumer<String> resolved) {
         try {
             Boolean current = backend.enabled();
             final boolean target;
@@ -42,6 +52,7 @@ final class HotspotController {
                 default:
                     return "Неизвестное действие";
             }
+            resolved.accept("hotspot:" + (target ? "on" : "off"));
             if (current != null && current == target) return "";
             if (target) backend.start();
             else backend.stop();

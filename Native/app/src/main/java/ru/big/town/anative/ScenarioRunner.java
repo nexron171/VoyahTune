@@ -4,69 +4,107 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 
-import java.util.concurrent.atomic.AtomicBoolean;
-
 import ru.big.town.common.ScenarioProtocol;
 
-/**
- * Последовательное выполнение шагов сценария. Пауза — обычная задержка Handler, следующее
- * действие стартует только после завершения предыдущего.
- */
-final class ScenarioRunner {
-    private static final String TAG = "$$$ ScenarioRunner $$$";
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
+/** Runs steps in order and counts command outcomes independently of pauses. */
+final class ScenarioRunner {
     interface Listener {
-        void onFinished(String scenarioId);
+        void onFinished(String scenarioId, int accepted, int total);
+    }
+
+    interface Scheduler {
+        void post(Runnable task, long delayMillis);
+
+        void clear();
     }
 
     private final ScenarioEnvironment environment;
+    private final Scheduler scheduler;
+    private final Consumer<String> log;
     private volatile boolean closed;
-    private final Handler handler = new Handler(Looper.getMainLooper());
 
     ScenarioRunner(ScenarioEnvironment environment) {
+        this(
+                environment,
+                new Scheduler() {
+                    private final Handler handler = new Handler(Looper.getMainLooper());
+
+                    @Override
+                    public void post(Runnable task, long delayMillis) {
+                        handler.postDelayed(task, delayMillis);
+                    }
+
+                    @Override
+                    public void clear() {
+                        handler.removeCallbacksAndMessages(null);
+                    }
+                },
+                message -> Log.i("ScenarioRunner", message));
+    }
+
+    ScenarioRunner(ScenarioEnvironment environment, Scheduler scheduler, Consumer<String> log) {
         this.environment = environment;
+        this.scheduler = scheduler;
+        this.log = log;
     }
 
     void close() {
         closed = true;
-        handler.removeCallbacksAndMessages(null);
+        scheduler.clear();
     }
 
     void run(ScenarioDefinition scenario, Listener listener) {
-        Log.i(TAG, "Сценарий «" + scenario.name + "»: шагов " + scenario.steps.size());
-        runStep(scenario, 0, listener);
+        runStep(scenario, 0, 0, 0, listener);
     }
 
-    private void runStep(ScenarioDefinition scenario, int index, Listener listener) {
+    private void runStep(
+            ScenarioDefinition scenario,
+            int index,
+            int acceptedCount,
+            int total,
+            Listener listener) {
         if (closed) return;
         if (index >= scenario.steps.size()) {
-            Log.i(TAG, "Сценарий «" + scenario.name + "» завершён");
-            listener.onFinished(scenario.id);
+            listener.onFinished(scenario.id, acceptedCount, total);
             return;
         }
         ScenarioDefinition.Step step = scenario.steps.get(index);
         if (step.isPause()) {
-            // Логируем и заданное, и фактическое значение: по logcat видно реальную выдержку.
             int seconds = ScenarioProtocol.clampPauseSeconds(step.seconds);
-            Log.i(TAG, "Сценарий «" + scenario.name + "»: пауза " + seconds + " с (задано "
-                    + step.seconds + ")");
-            handler.postDelayed(() -> {
-                Log.i(TAG, "Сценарий «" + scenario.name + "»: пауза " + seconds + " с истекла");
-                runStep(scenario, index + 1, listener);
-            }, seconds * 1000L);
+            log.accept("Сценарий «" + scenario.name + "»: пауза " + seconds + " с");
+            scheduler.post(
+                    () -> runStep(scenario, index + 1, acceptedCount, total, listener),
+                    seconds * 1000L);
             return;
         }
-        Log.i(TAG, "Сценарий «" + scenario.name + "» шаг " + (index + 1) + "/"
-                + scenario.steps.size() + ": " + step.value);
-        // Ровно одно продвижение на шаг: если асинхронное действие сообщит о завершении дважды,
-        // сценарий иначе перескочит следующий шаг (в том числе паузу).
-        final AtomicBoolean advanced = new AtomicBoolean();
-        environment.execute(step.value, (accepted, error) -> {
-            if (!advanced.compareAndSet(false, true)) return;
-            if (!accepted && error != null) {
-                Log.w(TAG, "Сценарий «" + scenario.name + "»: " + step.value + " — " + error);
-            }
-            runStep(scenario, index + 1, listener);
-        });
+        AtomicBoolean advanced = new AtomicBoolean();
+        ScenarioActionExecutor.Completion completion =
+                (accepted, error) -> {
+                    if (closed || !advanced.compareAndSet(false, true)) return;
+                    log.accept(
+                            "Сценарий «"
+                                    + scenario.name
+                                    + "»: "
+                                    + step.value
+                                    + " — "
+                                    + (accepted ? "отправлено" : error));
+                    scheduler.post(
+                            () ->
+                                    runStep(
+                                            scenario,
+                                            index + 1,
+                                            acceptedCount + (accepted ? 1 : 0),
+                                            total + 1,
+                                            listener),
+                            0);
+                };
+        try {
+            environment.execute(step.value, completion);
+        } catch (RuntimeException exception) {
+            completion.onFinished(false, "Не удалось выполнить действие: " + step.value);
+        }
     }
 }

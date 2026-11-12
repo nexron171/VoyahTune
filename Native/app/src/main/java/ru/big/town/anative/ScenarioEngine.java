@@ -20,6 +20,7 @@ import java.util.function.Predicate;
 /** Runs event-driven scenarios in Native independently of the RestoreMode UI. */
 final class ScenarioEngine {
     private static final String TAG = "$$$ ScenarioEngine $$$";
+
     /** Антидребезг повторного запуска одного сценария. */
     private static final long MIN_RUN_INTERVAL_MS = 5_000L;
 
@@ -112,7 +113,9 @@ final class ScenarioEngine {
         if (id == null) return false;
         for (ScenarioDefinition scenario : scenarios) {
             if (!scenario.id.equals(id)) continue;
-            if (!scenario.enabled || !scenario.hasSteps()) {
+            if (!scenario.enabled) return false;
+            if (!scenario.hasSteps()) {
+                toast("В сценарии «" + scenario.name + "» нет действий");
                 Log.w(TAG, "Сценарий " + id + " выключен или пуст");
                 return false;
             }
@@ -120,6 +123,7 @@ final class ScenarioEngine {
             return true;
         }
         Log.w(TAG, "Сценарий не найден: " + id);
+        toast("Сценарий не найден");
         return false;
     }
 
@@ -129,7 +133,7 @@ final class ScenarioEngine {
             if (!scenario.id.equals(id)) continue;
             if (!scenario.hasSteps()) {
                 Log.w(TAG, "Сценарий " + id + " пуст");
-                toast("В сценарии нет действий");
+                toast("В сценарии «" + scenario.name + "» нет действий");
                 return false;
             }
             handler.post(() -> evaluateAndRun(scenario, "тест", true));
@@ -179,7 +183,8 @@ final class ScenarioEngine {
             if (acceptTriggers(
                     scenario,
                     trigger ->
-                            ScenarioPolicy.matchesCabinTemperature(trigger, previous, temperature))) {
+                            ScenarioPolicy.matchesCabinTemperature(
+                                    trigger, previous, temperature))) {
                 evaluateAndRun(scenario, "температура в салоне " + temperature + " °C");
             }
         }
@@ -190,7 +195,8 @@ final class ScenarioEngine {
         lastDriveMode = mode;
         for (ScenarioDefinition scenario : enabledScenarios()) {
             if (acceptTriggers(
-                    scenario, trigger -> ScenarioPolicy.matchesDriveMode(trigger, previous, mode))) {
+                    scenario,
+                    trigger -> ScenarioPolicy.matchesDriveMode(trigger, previous, mode))) {
                 evaluateAndRun(scenario, "режим движения " + mode);
             }
         }
@@ -202,7 +208,8 @@ final class ScenarioEngine {
         if (closed || speedKmh == previous) return;
         for (ScenarioDefinition scenario : enabledScenarios()) {
             if (acceptTriggers(
-                    scenario, trigger -> ScenarioPolicy.matchesSpeed(trigger, previous, speedKmh))) {
+                    scenario,
+                    trigger -> ScenarioPolicy.matchesSpeed(trigger, previous, speedKmh))) {
                 evaluateAndRun(scenario, "скорость " + speedKmh + " км/ч");
             }
         }
@@ -246,7 +253,7 @@ final class ScenarioEngine {
 
     private void evaluateAndRun(ScenarioDefinition scenario, String reason, boolean test) {
         if (running.contains(scenario.id)) {
-            if (test) toast("Сценарий уже выполняется");
+            if (test) toast("Сценарий «" + scenario.name + "» уже выполняется");
             return;
         }
         if (scenario.conditions.isEmpty()) {
@@ -264,24 +271,41 @@ final class ScenarioEngine {
                                 } else {
                                     Log.i(
                                             TAG,
-                                            "«" + scenario.name + "» (" + reason
-                                                    + "): условия не выполнены — " + failure);
-                                    toast("Сценарий не выполнен из-за несоблюдения условия: " + failure);
+                                            "«"
+                                                    + scenario.name
+                                                    + "» ("
+                                                    + reason
+                                                    + "): условия не выполнены — "
+                                                    + failure);
+                                    toast(
+                                            "Сценарий «"
+                                                    + scenario.name
+                                                    + "» не запущен: "
+                                                    + failure);
                                 }
                             });
                 });
     }
 
     private void toast(String text) {
+        toast(text, true);
+    }
+
+    private void toast(String text, boolean error) {
         main.post(
                 () -> {
-                    if (!closed) environment.notifyUser(text);
+                    if (!closed) environment.notifyUser(text, error);
                 });
     }
 
     /** Только handler движка: держит running/lastRunElapsed без блокировок. */
     private void start(ScenarioDefinition scenario, String reason, boolean test) {
-        if (closed || running.contains(scenario.id)) return;
+        if (closed) return;
+        if (running.contains(scenario.id)) {
+            if (test || "manual".equals(reason))
+                toast("Сценарий «" + scenario.name + "» уже выполняется");
+            return;
+        }
         long now = SystemClock.elapsedRealtime();
         Long last = lastRunElapsed.get(scenario.id);
         if (!test && last != null && now - last < MIN_RUN_INTERVAL_MS) return;
@@ -290,11 +314,13 @@ final class ScenarioEngine {
         Log.i(TAG, "Запуск «" + scenario.name + "»: " + reason);
         runner.run(
                 scenario,
-                id ->
+                (id, accepted, total) ->
                         handler.post(
                                 () -> {
                                     running.remove(id);
-                                    toast("Сценарий " + scenario.name + " выполнен");
+                                    toast(
+                                            ActionNoticeText.scenario(
+                                                    scenario.name, accepted, total));
                                 }));
     }
 
