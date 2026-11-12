@@ -1,9 +1,7 @@
 package ru.voyahtune.agent.modules;
 
 import android.view.View;
-import android.view.ViewGroup;
 import android.widget.LinearLayout;
-import android.widget.RadioGroup;
 
 import ru.voyahtune.agent.runtime.ViewOwnership;
 
@@ -29,8 +27,6 @@ final class PassengerDockViewAccess implements ViewOwnership.Access {
                         view.getPaddingBottom());
             case "dockGravity":
                 return ((LinearLayout) view).getGravity();
-            case "bottomMargin":
-                return ((ViewGroup.MarginLayoutParams) view.getLayoutParams()).bottomMargin;
             default:
                 return delegate.read(owner, property);
         }
@@ -53,14 +49,6 @@ final class PassengerDockViewAccess implements ViewOwnership.Access {
                 break;
             case "dockGravity":
                 ((LinearLayout) view).setGravity((Integer) value);
-                break;
-            case "bottomMargin":
-                // OEM buttons can share LayoutParams; only this button owns the new margin.
-                RadioGroup.LayoutParams parameters =
-                        new RadioGroup.LayoutParams(
-                                (ViewGroup.MarginLayoutParams) view.getLayoutParams());
-                parameters.bottomMargin = (Integer) value;
-                view.setLayoutParams(parameters);
                 break;
             default:
                 delegate.write(owner, property, value);
