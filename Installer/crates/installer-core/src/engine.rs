@@ -52,12 +52,19 @@ fn postflight_script(script: &str, timeout_seconds: u32) -> String {
 // PackageManager may retain an older /data/app update with the same versionCode.
 // Never uninstall it (that risks preferences); replace it and verify the active bytes.
 fn active_apk_script(package: &str, expected: &str, repair: Option<&str>) -> String {
+    let repair = repair.filter(|_| package != NATIVE);
+    let system_native = if package == NATIVE {
+        release_core::native_package::VERIFY
+    } else {
+        ""
+    };
     let repair = repair.map(|path| format!(
         "source_hash=$(sha256sum {} ) || exit 1\n[ \"${{source_hash%% *}}\" = {expected} ] || exit 1\nresult=$(pm install -r --user 0 {}) || exit 1\nprintf '%s\\n' \"$result\" | grep -qx Success || exit 1\n",
         quote(path), quote(path)
     )).unwrap_or_else(|| "exit 1\n".into());
     format!(
-        r#"active_matches() {{
+        r#"{system_native}
+active_matches() {{
     paths=$(pm path --user 0 {package}) || return 1
     case "$paths" in package:*) ;; *) return 1 ;; esac
     active=${{paths#package:}}
@@ -392,6 +399,8 @@ impl Engine {
                 "Переустановка при смене подписи",
                 |e| e.signing_reset(r.action),
             )?;
+
+            self.shell(&release_core::native_package::prepare_script())?;
 
             self.step(
                 "apollo-migration",
@@ -1737,7 +1746,7 @@ pm() {
 }
 "#;
             let script = active_apk_script(
-                NATIVE,
+                payload::UPDATER,
                 &expected,
                 if repair {
                     Some(source.to_str().unwrap())
@@ -1763,6 +1772,34 @@ pm() {
                 "{mode}"
             );
         }
+    }
+
+    #[test]
+    fn native_apk_outside_system_is_rejected_without_installing_an_update() {
+        let directory = tempfile::tempdir().unwrap();
+        let apk = directory.path().join("base.apk");
+        fs::write(&apk, "native").unwrap();
+        let expected = payload::sha256(&apk).unwrap();
+        let script = active_apk_script(NATIVE, &expected, Some(apk.to_str().unwrap()));
+        let mock = r#"
+pm() {
+    case "$1" in
+        path) printf 'package:%s\n' "$ACTIVE" ;;
+        install) echo forbidden > "$INSTALL_MARKER"; echo Success ;;
+    esac
+}
+sha256sum() { shasum -a 256 "$@"; }
+"#;
+        let marker = directory.path().join("installed");
+        let output = Command::new("sh")
+            .args(["-c", &format!("{mock}\n{script}")])
+            .env("ACTIVE", &apk)
+            .env("INSTALL_MARKER", &marker)
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("Native must run from"));
+        assert!(!marker.exists());
     }
 
     #[test]

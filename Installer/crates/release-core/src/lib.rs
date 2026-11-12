@@ -15,3 +15,4 @@ pub mod vehicle_model;
 
 pub mod runtime_maintenance;
 pub mod runtime_readiness;
+pub mod native_package;

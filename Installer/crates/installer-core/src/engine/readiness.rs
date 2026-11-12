@@ -296,7 +296,7 @@ done
         let deadline = Instant::now() + DEADLINE;
         self.prepare_od_native_data(deadline)?;
         self.readiness_progress("Проверяем активный APK Native", deadline)?;
-        self.verify_active_apk(NATIVE, "native.apk", Some(NATIVE_PATH))?;
+        self.verify_active_apk(NATIVE, "native.apk", None)?;
         self.application_data("restore", NATIVE)?;
         self.verify_readiness()?;
         self.verify_active_apk(
@@ -533,7 +533,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn readiness_recovers_and_only_installation_repairs_stale_native() {
+    fn readiness_recovers_but_never_installs_a_native_data_update() {
         use std::os::unix::fs::PermissionsExt;
         let directory = tempfile::tempdir().unwrap();
         let adb_path = directory.path().join("adb");
@@ -812,16 +812,10 @@ esac
         fs::remove_file(directory.path().join("disconnected")).unwrap();
 
         fs::write(directory.path().join("commands"), "").unwrap();
-        engine.verify_installation().unwrap();
-        assert_eq!(
-            fs::read_to_string(directory.path().join("native-replacements")).unwrap(),
-            "replaced\n"
-        );
+        assert!(engine.verify_installation().is_err());
+        assert!(!directory.path().join("native-replacements").exists());
         let commands = fs::read_to_string(directory.path().join("commands")).unwrap();
-        assert!(
-            commands.find("pm install -r --user 0").unwrap()
-                < commands.find("--method health").unwrap()
-        );
-        assert!(!directory.path().join("stale-native").exists());
+        assert!(!commands.contains("pm install -r --user 0"));
+        assert!(directory.path().join("stale-native").exists());
     }
 }

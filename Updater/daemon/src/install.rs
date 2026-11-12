@@ -410,7 +410,7 @@ fn apply_with_signature_reset(shared: &Shared, allow_native_reset: bool) -> io::
                 "-c",
                 include_str!("../../../Packaging/installer/common/force-stop-runtime-device.sh"),
             ],
-            30,
+            75,
         )?;
         Ok::<_, io::Error>(())
     })?;
@@ -515,6 +515,7 @@ fn apply_with_signature_reset(shared: &Shared, allow_native_reset: bool) -> io::
             match step {
                 Step::Native => {
                     workflow::phase(shared, "applying", "Установка Native")?;
+                    application_data::transfer("backup", payload::NATIVE)?;
                     let result = install_apk(payload::NATIVE, Path::new(payload::NATIVE_PATH));
                     if allow_native_reset
                         && result.as_ref().is_err_and(|error| {
@@ -526,10 +527,11 @@ fn apply_with_signature_reset(shared: &Shared, allow_native_reset: bool) -> io::
                         return reset_native_signature(shared);
                     }
                     result?;
-                    {
-                        repair_native_data()?;
-                        application_data::transfer("restore", payload::NATIVE)?;
-                    }
+                    command(
+                        "/system/bin/sh",
+                        &["-c", &release_core::native_package::prepare_script()],
+                        1830,
+                    )?;
                     workflow::update(shared, |s| s.completed_steps = 5)?;
                 }
                 Step::Restore => {
@@ -586,7 +588,13 @@ fn apply_with_signature_reset(shared: &Shared, allow_native_reset: bool) -> io::
                             root(),
                             &format!("reboot_pending version={}", claims.version),
                         )?;
-                        fs::remove_file(BLOCK)?;
+                        if !Path::new(
+                            "/data/local/voyahtune-application-backups/ru.big.town.anative",
+                        )
+                        .is_dir()
+                        {
+                            fs::remove_file(BLOCK)?;
+                        }
                         fs::File::open("/data/local/bin")?.sync_all()?;
                         command("/system/bin/sync", &[], 30)?;
                         crate::telemetry::before_reboot()?;
@@ -636,6 +644,32 @@ fn validate_after_reboot(shared: &Shared) -> io::Result<()> {
     {
         let (payload, claims) = postboot_check::run(|| {
             repair_native_data()?;
+            command(
+                "/system/bin/sh",
+                &["-c", release_core::native_package::VERIFY],
+                30,
+            )?;
+            application_data::transfer("restore", payload::NATIVE)?;
+            command(
+                "/system/bin/sh",
+                &[
+                    "-c",
+                    include_str!("../../../Packaging/installer/common/start-restored-runtime.sh"),
+                ],
+                60,
+            )?;
+            command(
+                "/system/bin/am",
+                &[
+                    "broadcast",
+                    "-a",
+                    "com.qinggan.intent.QINGGAN_BOOT_COMPLETE",
+                    "--include-stopped-packages",
+                    "-n",
+                    "ru.big.town.anative/.SetModesReceiverStatic",
+                ],
+                30,
+            )?;
             let (payload, claims) = workflow::verified(shared)?;
             command(
                 "/data/local/bin/voyahtune-new/voyahtune-loader",

@@ -1,4 +1,4 @@
-pub const NATIVE_BROADCAST: &str = r###"am broadcast -a com.qinggan.intent.QINGGAN_BOOT_COMPLETE -n ru.big.town.anative/.SetModesReceiverStatic >/dev/null"###;
+pub const NATIVE_BROADCAST: &str = r###"am broadcast -a com.qinggan.intent.QINGGAN_BOOT_COMPLETE --include-stopped-packages -n ru.big.town.anative/.SetModesReceiverStatic >/dev/null"###;
 pub const MOUNT: &str =
     r###"mount -o rw,remount /system 2>/dev/null; mount -o rw,remount / 2>/dev/null"###;
 pub const RW_TEST: &str = r###"touch /system/.ovw_rwtest 2>/dev/null && rm -f /system/.ovw_rwtest && echo RW || echo RO"###;
