@@ -1,250 +1,159 @@
 #!/system/bin/sh
 set -eu
+set -f
 
 PROC_ROOT=${VOYAHTUNE_PROC_ROOT:-/proc}
 PACKAGES=${VOYAHTUNE_PACKAGES_LIST:-/data/system/packages.list}
-[ -r "$PACKAGES" ] || { echo 'Package registry is unavailable' >&2; exit 1; }
+UPTIME_SOURCE=${VOYAHTUNE_UPTIME_SOURCE:-/proc/uptime}
 
-package_uid() {
-    [ -r "$PACKAGES" ] || return 0
-    awk -v package="$1" '$1 == package { print $2; exit }' "$PACKAGES"
+fail_stop() {
+    printf 'Runtime stop: %s\n' "$*" >&2
+    exit 1
 }
 
-native_uid=$(package_uid ru.big.town.anative)
-restore_uid=$(package_uid ru.big.town.restoremode)
-runyn_uid=$(package_uid big.town.runyn)
+[ -r "$PACKAGES" ] || fail_stop 'Package registry is unavailable'
+native_uid=
+restore_uid=
+runyn_uid=
+while read -r package_name package_uid unused; do
+    case "$package_name" in
+        ru.big.town.anative) native_uid=$package_uid ;;
+        ru.big.town.restoremode) restore_uid=$package_uid ;;
+        big.town.runyn) runyn_uid=$package_uid ;;
+    esac
+done < "$PACKAGES"
 
-monotonic_ticks() {
-    read -r uptime unused < "${VOYAHTUNE_UPTIME_SOURCE:-/proc/uptime}" || return 1
+read_clock() {
+    read -r uptime unused < "$UPTIME_SOURCE" || fail_stop 'uptime is unavailable'
     whole=${uptime%.*}
     fraction=${uptime#*.}
-    case "$whole" in ''|*[!0-9]*) return 1 ;; esac
-    case "$fraction" in [0-9][0-9]) ;; *) return 1 ;; esac
-    printf '%s\n' "$((whole * 100 + 1${fraction} - 100))"
+    case "$whole" in ''|*[!0-9]*) fail_stop 'invalid uptime' ;; esac
+    case "$fraction" in [0-9][0-9]) ;; *) fail_stop 'invalid uptime' ;; esac
+    clock_ticks=$((whole * 100 + 1${fraction} - 100))
 }
 
-abort_timeout_seconds=60
-freeze_attempt_limit=$((abort_timeout_seconds * 10))
-stop_attempt_limit=$((abort_timeout_seconds * 4))
-abort_started=$(monotonic_ticks)
-abort_deadline=$((abort_started + abort_timeout_seconds * 100))
-require_abort_time() {
-    abort_now=$(monotonic_ticks) || { echo 'Runtime detach clock unavailable' >&2; exit 1; }
-    [ "$abort_now" -lt "$abort_deadline" ] || {
-        echo "Runtime stop exceeded $abort_timeout_seconds seconds; reboot required" >&2
-        exit 1
-    }
+stop_timeout_seconds=5
+read_clock
+stop_deadline=$((clock_ticks + stop_timeout_seconds * 100))
+pending=
+service_state=unknown
+
+check_deadline() {
+    read_clock
+    [ "$clock_ticks" -lt "$stop_deadline" ] ||
+        fail_stop "exceeded $stop_timeout_seconds seconds; init=$service_state remaining=$pending; reboot required"
 }
 
-owned_identity() (
-    directory=$1
-    pid=${directory##*/}
-    case "$pid" in ''|*[!0-9]*|0|1) exit 1 ;; esac
-    [ "$pid" != "$$" ] || exit 1
-    arguments=$(tr '\000' '\n' < "$directory/cmdline" 2>/dev/null) || { [ ! -d "$directory" ] && exit 1; exit 2; }
-    IFS='
-'
-    set -f
-    set -- $arguments
-    [ "$#" -gt 0 ] || exit 1
-    command=$1
-    case "$command" in
-        ru.big.town.anative|ru.big.town.anative:*)
-            expected_uid=$native_uid ;;
-        ru.big.town.restoremode|ru.big.town.restoremode:*)
-            expected_uid=$restore_uid ;;
-        big.town.runyn|big.town.runyn:*)
-            expected_uid=$runyn_uid ;;
+expected_owner() {
+    expected_uid=
+    case "$1" in
+        ru.big.town.anative|ru.big.town.anative:*) expected_uid=$native_uid ;;
+        ru.big.town.restoremode|ru.big.town.restoremode:*) expected_uid=$restore_uid ;;
+        big.town.runyn|big.town.runyn:*) expected_uid=$runyn_uid ;;
         /data/local/bin/voyahtune-new/voyahtune-loader|/data/local/bin/voyahtune-new/voyahtune-inject|/data/local/bin/voyahtune-new/voyahtune-inject-arm|/data/local/bin/load.bin|/data/local/bin/loaderFrida|loaderFrida)
             expected_uid=0 ;;
         /system/bin/sh|/system/bin/mksh|sh)
-            [ "$#" = 2 ] && [ "$2" = /data/local/bin/load.bin ] || exit 1
+            [ "$#" = 2 ] && [ "$2" = /data/local/bin/load.bin ] || return 1
             expected_uid=0 ;;
         /data/local/bin/frida-inject)
-            expected_uid=0
-            case "$arguments" in
-                *vd_bypass.js*|*steeringwheelkeys.js*|*launcherdock.js*|*multidisplay.js*|*apollo_tech.js*|*voyahtune_drive_reset.js*|*voyahtune_acc_restore.js*|*keyboard_lock_en.js*|*keyboard_ru.js*|*app_client.js*|*fullscreen_client.js*) ;;
-                *) exit 1 ;;
+            case "$*" in
+                *vd_bypass.js*|*steeringwheelkeys.js*|*launcherdock.js*|*multidisplay.js*|*apollo_tech.js*|*voyahtune_drive_reset.js*|*voyahtune_acc_restore.js*|*keyboard_lock_en.js*|*keyboard_ru.js*|*app_client.js*|*fullscreen_client.js*)
+                    expected_uid=0 ;;
             esac ;;
-        *) exit 1 ;;
     esac
-    [ -n "$expected_uid" ] || exit 1
-    stat=$(cat "$directory/stat" 2>/dev/null) || { [ ! -d "$directory" ] && exit 1; exit 2; }
-    fields=${stat##*) }
-    IFS=' '
-    set -- $fields
-    [ "$#" -ge 20 ] || exit 2
-    [ "$1" != Z ] || exit 1
+    [ -n "$expected_uid" ]
+}
+
+read_identity() {
+    identity_directory="$PROC_ROOT/$1"
+    if ! IFS= read -r process_stat 2>/dev/null < "$identity_directory/stat"; then
+        [ ! -d "$identity_directory" ] && return 1
+        fail_stop "cannot read identity of PID $1"
+    fi
+    process_fields=${process_stat##*) }
+    set -- $process_fields
+    [ "$#" -ge 20 ] || fail_stop "invalid identity: $identity_directory"
+    [ "$1" != Z ] || return 1
     shift 19
-    ticks=$1
-    uid=$(awk '$1 == "Uid:" { print $2; exit }' "$directory/status" 2>/dev/null) || { [ ! -d "$directory" ] && exit 1; exit 2; }
-    case "$uid" in ''|*[!0-9]*) exit 2 ;; esac
-    [ "$uid" = "$expected_uid" ] || exit 1
-    printf '%s:%s:%s\n' "$pid" "$ticks" "$uid"
-)
-
-read_owned_identity() {
-    if identity=$(owned_identity "$1"); then return 0; else identity_error=$?; fi
-    [ "$identity_error" = 1 ] || { echo "Runtime identity unreadable: $1; reboot required" >&2; exit 1; }
-    return 1
-}
-
-matches_identity() {
-    if actual_identity=$(owned_identity "$1"); then
-        [ "$actual_identity" = "$2" ]
-        return
-    else
-        identity_error=$?
-    fi
-    [ "$identity_error" = 1 ] || { echo "Runtime identity unreadable: $1; reboot required" >&2; exit 1; }
-    return 1
-}
-
-# Freeze launchers before inspecting helpers: a stopped helper cannot enter ptrace.
-threads_stopped() {
-    found_thread=0
-    for thread in "$1"/task/[0-9]*; do
-        [ -d "$thread" ] || continue
-        found_thread=1
-        state=$(awk '$1 == "State:" { print $2; exit }' "$thread/status") || return 1
-        case "$state" in T|t|Z) ;; *) return 1 ;; esac
-    done
-    [ "$found_thread" = 1 ]
-}
-
-has_tracees() {
-    tids=
-    for thread in "$1"/task/[0-9]*; do
-        [ -d "$thread" ] && tids="$tids ${thread##*/}"
-    done
-    [ -n "$tids" ] || return 2
-    awk -v tids="$tids" '
-        BEGIN {
-            split(tids, values, " ")
-            for (entry in values) owned[values[entry]] = 1
-            matched = 0
-            for (entry = 1; entry < ARGC; entry++) {
-                path = ARGV[entry]
-                readable = 0
-                while ((result = getline line < path) > 0) {
-                    split(line, fields, /[ \t]+/)
-                    if (fields[1] == "TracerPid:") {
-                        if (fields[2] !~ /^[0-9]+$/) exit 2
-                        readable = 1
-                        if (fields[2] != "0" && owned[fields[2]]) matched = 1
-                    }
-                }
-                close(path)
-                if ((result < 0 || !readable) && system("test ! -e \"" path "\"") != 0) exit 2
-            }
-            exit matched ? 0 : 1
-        }
-    ' "$PROC_ROOT"/[0-9]*/task/[0-9]*/status
-}
-
-previous=
-attempt=0
-while :; do
-    require_abort_time
-    frozen=
-    stopped=1
-    for directory in "$PROC_ROOT"/[0-9]*; do
-        require_abort_time
-        read_owned_identity "$directory" || continue
-        case "$identity" in *:0) ;; *) continue ;; esac
-        matches_identity "$directory" "$identity" || continue
-        if ! kill -STOP "${directory##*/}" 2>/dev/null; then
-            ! matches_identity "$directory" "$identity" || {
-                echo "Cannot freeze runtime process $identity; reboot required" >&2
-                exit 1
-            }
-            continue
-        fi
-        frozen="$frozen $identity"
-        threads_stopped "$directory" || stopped=0
-    done
-    if [ "$stopped" = 1 ] && [ "$frozen" = "$previous" ]; then break; fi
-    previous=$frozen
-    attempt=$((attempt + 1))
-    [ "$attempt" -lt "$freeze_attempt_limit" ] || { echo 'Runtime launchers did not freeze; reboot required' >&2; exit 1; }
-    sleep 0.1
-done
-
-# SIGTERM requests native cancellation; only detach permits cgroup termination.
-attempt=0
-while :; do
-    require_abort_time
-    pending=
-    for identity in $frozen; do
-        require_abort_time
-        pid=${identity%%:*}
-        directory="$PROC_ROOT/$pid"
-        matches_identity "$directory" "$identity" || continue
-        if ! kill -STOP "$pid" 2>/dev/null; then
-            ! matches_identity "$directory" "$identity" || {
-                echo "Cannot freeze tracer $identity; reboot required" >&2
-                exit 1
-            }
-            continue
-        fi
-        if ! threads_stopped "$directory"; then
-            pending="$pending $identity"
-            continue
-        fi
-        traced=0
-        has_tracees "$directory" || traced=$?
-        case "$traced" in
-            0) ;;
-            1) continue ;;
-            *) echo "Cannot inspect tracer $identity; reboot required" >&2; exit 1 ;;
-        esac
-        command=$(tr '\000' '\n' < "$directory/cmdline" | head -n 1)
-        case "$command" in
-            /data/local/bin/voyahtune-new/voyahtune-inject|/data/local/bin/voyahtune-new/voyahtune-inject-arm) ;;
-            *) echo "Legacy tracer $identity cannot safely detach; reboot required" >&2; exit 1 ;;
-        esac
-        kill -TERM "$pid" 2>/dev/null || true
-        kill -CONT "$pid" 2>/dev/null || true
-        pending="$pending $identity"
-    done
-    [ -n "$pending" ] || break
-    attempt=$((attempt + 1))
-    [ "$attempt" -lt "$stop_attempt_limit" ] || { echo "Native tracers did not detach; reboot required:$pending" >&2; exit 1; }
-    sleep 0.25
-done
-
-# Every owned tracer is detached and frozen before init kills the service cgroup.
-require_abort_time
-setprop ctl.stop voyahtune_load
-attempt=0
-while :; do
-    require_abort_time
-    remaining=
-    for directory in "$PROC_ROOT"/[0-9]*; do
-        require_abort_time
-        read_owned_identity "$directory" || continue
-        matches_identity "$directory" "$identity" || continue
-        pid=${directory##*/}
-        require_abort_time
-        kill -9 "$pid" 2>/dev/null || {
-            if matches_identity "$directory" "$identity"; then
-                printf 'Cannot kill owned runtime process: %s\n' "$identity" >&2
-                exit 1
+    process_ticks=$1
+    process_uid=
+    if [ -r "$identity_directory/status" ]; then
+        while read -r field value unused; do
+            if [ "$field" = Uid: ]; then
+                process_uid=$value
+                break
             fi
-        }
-        remaining="$remaining $identity"
+        done < "$identity_directory/status"
+    fi
+    case "$process_uid" in
+        ''|*[!0-9]*)
+            [ ! -d "$identity_directory" ] && return 1
+            fail_stop "cannot read UID: $identity_directory" ;;
+    esac
+    observed_identity="${identity_directory##*/}:$process_ticks:$process_uid"
+}
+
+stop_snapshot() {
+    process_snapshot=$(ps -A -w -o PID,UID,CMDLINE) || fail_stop 'ps could not list processes'
+    snapshot_found=0
+    while read -r candidate_pid candidate_uid candidate_command candidate_arguments; do
+        case "$candidate_pid" in ''|*[!0-9]*|0|1) continue ;; esac
+        [ "$candidate_pid" != "$$" ] || continue
+        expected_owner "$candidate_command" "$candidate_arguments" || continue
+        [ "$candidate_uid" = "$expected_uid" ] || continue
+
+        # Recheck only candidates; ps is discovery, not proof of current ownership.
+        if ! arguments=$(tr '\000' '\n' 2>/dev/null < "$PROC_ROOT/$candidate_pid/cmdline"); then
+            [ ! -d "$PROC_ROOT/$candidate_pid" ] && continue
+            fail_stop "cannot read command of PID $candidate_pid"
+        fi
+        IFS='
+'
+        set -- $arguments
+        unset IFS
+        [ "$#" -gt 0 ] || continue
+        expected_owner "$@" || continue
+        read_identity "$candidate_pid" || continue
+        [ "$process_uid" = "$expected_uid" ] || continue
+        stop_identity=$observed_identity
+        check_deadline
+        if ! kill -9 "$candidate_pid" 2>/dev/null; then
+            if read_identity "$candidate_pid" && [ "$observed_identity" = "$stop_identity" ]; then
+                fail_stop "SIGKILL failed for PID $candidate_pid"
+            fi
+            continue
+        fi
+        pending="$pending $stop_identity"
+        snapshot_found=1
+    done <<EOF
+$process_snapshot
+EOF
+}
+
+service_state=$(getprop init.svc.voyahtune_load) || fail_stop 'getprop failed'
+if [ -n "$service_state" ]; then
+    setprop ctl.stop voyahtune_load || fail_stop 'setprop could not stop voyahtune_load'
+fi
+stop_snapshot
+
+while :; do
+    remaining=
+    for saved_identity in $pending; do
+        process_id=${saved_identity%%:*}
+        if read_identity "$process_id" && [ "$observed_identity" = "$saved_identity" ]; then
+            remaining="$remaining $saved_identity"
+        fi
     done
-    require_abort_time
-    state=$(getprop init.svc.voyahtune_load)
-    require_abort_time
-    if [ -z "$remaining" ] && { [ -z "$state" ] || [ "$state" = stopped ]; }; then
-        exit 0
+    pending=$remaining
+    service_state=$(getprop init.svc.voyahtune_load) || fail_stop 'getprop failed'
+    if [ -z "$pending" ] && { [ -z "$service_state" ] || [ "$service_state" = stopped ]; }; then
+        [ "$snapshot_found" = 1 ] || exit 0
+        # Catch children created while the launchers were being terminated.
+        check_deadline
+        stop_snapshot
+        [ -n "$pending" ] || exit 0
+        continue
     fi
-    attempt=$((attempt + 1))
-    if [ "$attempt" -ge "$stop_attempt_limit" ]; then
-        printf 'Owned runtime processes did not exit; init=%s processes=%s\n' "$state" "$remaining" >&2
-        exit 1
-    fi
-    require_abort_time
-    sleep 0.25
+    check_deadline
+    sleep 0.05
 done
