@@ -37,6 +37,7 @@ import ru.voyahtune.agent.modules.MultidisplayModule;
 import ru.voyahtune.agent.modules.NavigationAudioModule;
 import ru.voyahtune.agent.modules.NavigationSourceModule;
 import ru.voyahtune.agent.modules.OemMediaModule;
+import ru.voyahtune.agent.modules.PassengerHeadphonesModule;
 import ru.voyahtune.agent.modules.PhoneModule;
 import ru.voyahtune.agent.modules.RdsModule;
 import ru.voyahtune.agent.modules.ScreenDownSupportModule;
@@ -292,6 +293,17 @@ public final class AgentRuntime {
                                                                 (Context) applicationContext,
                                                                 methods,
                                                                 hooks));
+                                            }
+                                            if (id.equals("passenger-headphones")) {
+                                                return new PassengerHeadphonesModule(
+                                                        methods,
+                                                        hooks,
+                                                        packageName ->
+                                                                ((Context) applicationContext)
+                                                                        .getPackageManager()
+                                                                        .getApplicationInfo(
+                                                                                packageName, 0)
+                                                                        .flags);
                                             }
                                             if (id.equals("oem-media")) {
                                                 return new OemMediaModule(

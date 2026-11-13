@@ -94,6 +94,14 @@ func compiledAgents() []nativeAgentConfig {
 			Modules:        []string{"keyboard-ru"},
 		},
 		{
+			ID:             "passenger-headphones",
+			Target:         "com.qinggan.audiopolicy.service",
+			MaxAttempts:    1,
+			TimeoutSeconds: 35,
+			CrashLimit:     2,
+			Modules:        []string{"passenger-headphones"},
+		},
+		{
 			ID:             "phone",
 			Target:         "com.qinggan.bluetoothphone",
 			MaxAttempts:    1,
