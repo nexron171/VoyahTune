@@ -21,11 +21,11 @@ import android.view.KeyEvent;
 
 import androidx.core.app.NotificationCompat;
 
+import ru.big.town.common.DoorMediaSettings;
+
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-
-import ru.big.town.common.DoorMediaSettings;
 
 /** Door-triggered parking position; a confirmed Drive is the only automatic release. */
 public class WiperColdService extends Service {
@@ -65,9 +65,9 @@ public class WiperColdService extends Service {
     private static final int MEDIA_PROXY_ACK = -1;
     private static final int MEDIA_PROXY_UNHANDLED = 0;
 
-    // Одна команда-переключатель (toggle): включает и выключает сервисный режим
-    private static final String WIPER_TOGGLE_FRAME = "65 08 00 00 c1 c0 00 00 40 00";
-    private static final int CAN_CMD_NUM = 1;
+    // H97C/X/Y use value 1 as a toggle for both service-position transitions.
+    private static final OemVehicleStateTransport.StateKey WIPER_MAINTENANCE_KEY =
+            new OemVehicleStateTransport.StateKey("WIPPER_MAINTAIN_SWITCH", 894);
 
     private static final int DOOR_OPEN = 1;
 
@@ -149,8 +149,11 @@ public class WiperColdService extends Service {
         boolean settled = reconcileWiperPosition();
         wiperState.setEnabled(isWiperEnabled());
         Boolean target = wiperState.nextTarget();
-        Log.i(TAG, "evaluate(" + source + "): target=" + target + " active=" + isServiceActive()
-                + " uncertain=" + wiperState.positionUncertain());
+        Log.i(
+                TAG,
+                "evaluate(" + source + "): target=" + target
+                        + " active=" + isServiceActive()
+                        + " uncertain=" + wiperState.positionUncertain());
         if (wiperTogglePending) return;
         if (!settled) {
             scheduleSafeRetry();
@@ -165,7 +168,8 @@ public class WiperColdService extends Service {
             scheduleSafeRetry();
             return;
         }
-        requestServiceActive(target, "wiper service " + (target ? "ON" : "OFF") + " (" + source + ")");
+        requestServiceActive(
+                target, "wiper service " + (target ? "ON" : "OFF") + " (" + source + ")");
     }
 
     private boolean reconcileWiperPosition() {
@@ -203,24 +207,30 @@ public class WiperColdService extends Service {
         AtomicBoolean frameAttempted = new AtomicBoolean();
         ApplyEngine.postWakeAction(
                 label,
-                () -> CanSender.runGuardedSend(
-                        () -> !destroyed && wiperState.canSend(targetActive),
-                        () -> {
-                            frameAttempted.set(true);
-                            wiperState.onFrameAttempted();
-                        },
-                        () -> {
-                            byte[] frame = MainActivity.parseHexBinary(WIPER_TOGGLE_FRAME);
-                            receiptWritten.set(true);
-                            persistWiperAttemptReceipt();
-                            Log.i(TAG, "sendToggle: [" + label + "] frame=" + WIPER_TOGGLE_FRAME);
-                            // CanSender rechecks the target after the synchronous receipt write.
-                            return CanSender.send(CAN_CMD_NUM, frame, label);
-                        }),
+                () ->
+                        CanSender.runGuardedSend(
+                                () -> !destroyed && wiperState.canSend(targetActive),
+                                () -> {
+                                    frameAttempted.set(true);
+                                    wiperState.onFrameAttempted();
+                                },
+                                () -> {
+                                    receiptWritten.set(true);
+                                    persistWiperAttemptReceipt();
+                                    // The OEM transport rechecks the guard immediately before
+                                    // Binder TX58.
+                                    return OemVehicleStateTransport.sendVehicleState(
+                                                    getApplicationContext(),
+                                                    WIPER_MAINTENANCE_KEY,
+                                                    1,
+                                                    label)
+                                            .accepted();
+                                }),
                 result -> {
                     boolean sent = result == ApplyEngine.WakeActionResult.SUCCESS;
                     try {
-                        // Persist accepted sends before the service callback; its host can die meanwhile.
+                        // Persist accepted sends before the service callback; its host can die
+                        // meanwhile.
                         if (sent) {
                             setServiceActive(targetActive);
                         } else if (receiptWritten.get() && !frameAttempted.get()) {
@@ -231,7 +241,9 @@ public class WiperColdService extends Service {
                     }
                     if (!destroyed) {
                         timerHandler.post(
-                                () -> finishWiperToggle(targetActive, label, sent, frameAttempted.get()));
+                                () ->
+                                        finishWiperToggle(
+                                                targetActive, label, sent, frameAttempted.get()));
                     }
                 });
     }
@@ -248,7 +260,8 @@ public class WiperColdService extends Service {
         wiperState.onFailed();
         Log.w(TAG, "wiper toggle failed/cancelled: " + label + " attempted=" + frameAttempted);
         if (!frameAttempted && wiperState.nextTarget() != null) {
-            // Only retry a suppressed frame. A failed toggle attempt has no reliable position feedback.
+            // Only retry a suppressed frame. A failed toggle attempt has no reliable position
+            // feedback.
             scheduleSafeRetry();
         }
         stopIfIdle();
@@ -262,7 +275,8 @@ public class WiperColdService extends Service {
     }
 
     private void persistDoorCloseGuard() {
-        preferences.edit()
+        preferences
+                .edit()
                 .putBoolean(PREF_WAIT_FOR_DOOR_CLOSE, wiperState.waitForDoorClose())
                 .apply();
     }
@@ -628,7 +642,7 @@ public class WiperColdService extends Service {
     }
 
     private void persistWiperAttemptReceipt() {
-        // A restart between JNI and its result must not retry an already transmitted toggle.
+        // A restart between Binder submission and its result must not repeat the toggle.
         if (!preferences.edit().putBoolean(PREF_POSITION_UNCERTAIN, true).commit()) {
             throw new IllegalStateException("Cannot persist wiper position uncertainty before CAN");
         }
@@ -664,19 +678,24 @@ public class WiperColdService extends Service {
         timerHandler = new Handler(Looper.getMainLooper());
         preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         Map<String, ?> saved = preferences.getAll();
-        wiperState = new ColdWiperState(
-                Boolean.TRUE.equals(saved.get(PREF_SERVICE_ACTIVE)),
-                Boolean.TRUE.equals(saved.get(PREF_WAIT_FOR_DOOR_CLOSE)),
-                Boolean.TRUE.equals(saved.get(PREF_POSITION_UNCERTAIN)));
+        wiperState =
+                new ColdWiperState(
+                        Boolean.TRUE.equals(saved.get(PREF_SERVICE_ACTIVE)),
+                        Boolean.TRUE.equals(saved.get(PREF_WAIT_FOR_DOOR_CLOSE)),
+                        Boolean.TRUE.equals(saved.get(PREF_POSITION_UNCERTAIN)));
         wiperState.setEnabled(isWiperEnabled());
-        preferenceListener = (changed, key) -> {
-            if (PREF_WIPER_ENABLED.equals(key)
-                    || PREF_SERVICE_ACTIVE.equals(key)
-                    || PREF_POSITION_UNCERTAIN.equals(key)) {
-                // SharedPreferences delivers listeners on main, before this sender's completion.
-                evaluate("preference " + key, PREF_WIPER_ENABLED.equals(key) || !wiperTogglePending);
-            }
-        };
+        preferenceListener =
+                (changed, key) -> {
+                    if (PREF_WIPER_ENABLED.equals(key)
+                            || PREF_SERVICE_ACTIVE.equals(key)
+                            || PREF_POSITION_UNCERTAIN.equals(key)) {
+                        // SharedPreferences delivers listeners on main, before this sender's
+                        // completion.
+                        evaluate(
+                                "preference " + key,
+                                PREF_WIPER_ENABLED.equals(key) || !wiperTogglePending);
+                    }
+                };
         preferences.registerOnSharedPreferenceChangeListener(preferenceListener);
 
         createNotificationChannel();
@@ -703,7 +722,8 @@ public class WiperColdService extends Service {
         String action = intent != null ? intent.getAction() : null;
         Log.i(TAG, "onStartCommand() action=" + action);
         vehicleState.requestGearSnapshot();
-        // Wake, sticky recreation and option changes reconcile the saved latch without toggling it off.
+        // Wake, sticky recreation and option changes reconcile the saved latch without toggling it
+        // off.
         timerHandler.post(() -> evaluate("start " + action));
         return START_STICKY;
     }
