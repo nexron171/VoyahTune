@@ -1973,10 +1973,36 @@ feedback опираются на неё; независимые настенны
 Обычный UDP `/feedback` не менялся. Параметры/качество time-stretch, работа resend
 с iPhone, длинные ноты, звонки/Siri и маршрутизация Voyah требуют испытания на ГУ.
 
-Экспериментальный Bluetooth audio остаётся отдельной выключенной по умолчанию
-настройкой: при включении штатный вывод DiPlay отключается, поэтому независимые
-OEM streams из таблицы к этому режиму не относятся. Проверка звонков/Siri/навигации
-в Bluetooth audio на Voyah не выполнена.
+Экспериментальный Bluetooth audio включён по умолчанию, если пользователь ещё
+не сохранял значение `xcertplay_airplay/car_bluetooth_audio`. Явное `false`
+сохраняется. Переключатель «Звук через Bluetooth автомобиля» в CarPlay VoyahTune
+и переключатель в звуковых настройках DiPlay читают и записывают один ключ через
+`CarPlaySettingsAccess`/`AirPlayPersistence`, без копии в настройках приложения.
+Изменение в VoyahTune применяется при следующем подключении; DiPlay сохраняет
+свой существующий reconnect при переключении. В этом режиме DiPlay не предлагает
+iPhone аудиовыходы CarPlay (`disableAudioOutput`); независимые OEM streams из
+таблицы выше к нему не относятся. iPhone должен быть подключён к Bluetooth машины.
+
+При успешном `onSessionActive` используется **согласованный режим controller**
+(`usesBluetoothAudio`), а не изменённое после handshake значение preference.
+`VoyahCarPlayIntegration` создаёт token для конкретного AirPlay session, bridge
+передаёт его как `CarPlayAudioProtocol.BLUETOOTH_SESSION` в существующем
+signature-protected `NAVIGATION` heartbeat. Native принимает его только от
+текущего подписчика. Открытие настроек/ожидание телефона не выбирает источник.
+Повторный callback, heartbeat и IPC reconnect с тем же token не перехватывают
+последующий ручной выбор источника. Новая сессия снова выбирает Bluetooth;
+окончание/очистка сессии отменяют незавершённый запрос.
+
+`CarPlayBluetoothAudio` в Native подключается через Android MediaBrowser к
+`com.qinggan.media/com.qinggan.media.btmusic.BTMediaBrowserService` и отправляет
+custom action `com.qinggan.media.audio_focus` с непустым Bundle. По локальной
+декомпиляции QGMedia (`BTPlayer.onCustomAction`; версия APK в этих материалах
+не зафиксирована) команда запрашивает
+OEM Bluetooth stream 4 без `play()` и открытия Activity. Подключение ограничено
+пятью секундами; ошибка/таймаут освобождают browser без повторов на каждом heartbeat,
+запоздалые callbacks игнорируются. Отправка команды не подтверждает выбор источника
+на ГУ. Реальный Bluetooth-маршрут музыки/звонков/Siri/навигации после изменения
+на Voyah не проверен; другие OEM реализации требуют отдельного подтверждения.
 
 `VoyahCarPlayDefaults.initialize` вызывается из DiPlayActivity и DiPlayBootstrap.
 Основные defaults применяются один раз по `voyah_carplay/initialized`:
@@ -2139,6 +2165,7 @@ DEFAULT_OEM_LABEL в AirPlayPersistence — **Voyah Free**, в том числе
 | Файл | Что восстановить |
 | --- | --- |
 | [common/build.gradle.kts](../RestoreMode/diplay/common/build.gradle.kts) | Переименовать catalog → diplayLibs, dependency → :diplay-shared; сохранить Compose/тестовое окружение; исключить WorkManager. Из gradle/libs.versions.toml удалить work и androidx-work-runtime; не возвращать при обновлении upstream. |
+| `common/{AirPlayPersistence,CarPlaySettingsAccess,VoyahCarPlayIntegration,CarPlayHostActivity}.kt`, `shared/orchestration/CarPlayController.kt` | Bluetooth audio default=true при отсутствующем ключе; общий preference для обоих UI, read-only режим согласованного controller; token только успешной сессии, отмена при ended/clear (§9). |
 | [shared/build.gradle](../RestoreMode/diplay/shared/build.gradle) | Использовать diplayLibs; сохранить JNI/NDK и library namespace. |
 | [common/src/main/java/com/shilapi/xcertplay/CarPlayDock.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/CarPlayDock.kt)<br>[common/src/main/res/values/strings.xml](../RestoreMode/diplay/common/src/main/res/values/strings.xml)<br>[common/src/main/res/values-ru/strings.xml](../RestoreMode/diplay/common/src/main/res/values-ru/strings.xml) | Загрузка трёх тем из сохранённого выбора; AUTOMATIC/unknown → DRIVER_SIDE, DUAL_SIDES требует Ultra+fullscreen. UI выбора принадлежит VoyahTune (§5/6). |
 | [shared/src/main/java/com/shilapi/xcertplay/airplay/AirPlayConfig.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/airplay/AirPlayConfig.kt)<br>[shared/src/main/java/com/shilapi/xcertplay/airplay/AirPlayInfoPlist.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/airplay/AirPlayInfoPlist.kt)<br>[shared/src/main/java/com/shilapi/xcertplay/airplay/AirPlaySession.kt](../RestoreMode/diplay/shared/src/main/java/com/shilapi/xcertplay/airplay/AirPlaySession.kt) | Optional vehicleTheme, единый mainDisplayIdentifier для main/HID/view area; VSP-панели для климата или темы; main определяется type=110, обычные UUID остаются прежними (§6). |
@@ -2387,6 +2414,13 @@ OEM-снимка и подтверждают переход чтением. IPC 
 Замена только `RestoreMode/diplay` не восстанавливает перечисленные ниже точки.
 Сохранить их в checkout и заново связать с новой версией библиотеки.
 
+Для Bluetooth audio (§9) дополнительно сохраняются app `CarPlaySettingsFragment`,
+`settings_carplay.xml`, `carplay_home.xml`, `CarPlayVehicleBridge`; общий
+`CarPlayAudioProtocol.BLUETOOTH_SESSION`; Native `CarPlayVehicleController` и
+`CarPlayBluetoothAudio`. Вход остаётся в существующем `NAVIGATION` Messenger,
+новой внешней команды/receiver нет. Изменение требует обновления обоих APK;
+код, ресурсы и установочный контракт Installer не меняются.
+
 | Файл/группа | Контракт |
 | --- | --- |
 | [CarPlayReconnectTimeout.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/CarPlayReconnectTimeout.kt)<br>[CarPlayHostActivity.kt](../RestoreMode/diplay/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt) | Общее пятиминутное окно recovery в `CarPlayBackgroundSession`, монотонное время со сном, проверки Bluetooth/отложенного restart/позднего session-active, teardown по таймауту и сброс после успеха или ручного запуска (§5). |
@@ -2544,6 +2578,7 @@ Authentication assets и бинарную иконку сохранить отд
 | Identity и подпись | Установленную identity, путь/формат noBackupFilesDir, bootstrap и MFi assets по §3; не заменять ключи на demo и не публиковать их содержимое. |
 | `xcertplay_airplay/carplay_night_mode` | При отсутствующем ключе VEHICLE (`voyah_light`); сохранённые SYSTEM/AMBIENT/DAY/NIGHT/SCHEDULE/VEHICLE не перезаписывать. `fromKey(null)` сам по себе остаётся SYSTEM: default задаёт persistence getter. |
 | `location_reporting_enabled` | Отсутствие ключа означает true, явное false сохраняется; разрешение Android не выдаётся этим default. |
+| `xcertplay_airplay/car_bluetooth_audio` | Default true, явное false сохраняется; одна настройка для CarPlay VoyahTune и звукового раздела DiPlay. Текущая сессия использует согласованное значение, новый выбор применяется при переподключении (§9). |
 | DiPlay `auto_connect`, выбранный телефон и транспорт | Сохранить значения, несмотря на скрытие переключателей. Не смешивать подключение iPhone с автозапуском окна Dashboard; не включать BootReceiver/Bluetooth wake. |
 | `AppWidgetStore.Entry` | ID, profiles/packageName, DPI, width/height, autoStart и autoStartDelay. Новый виджет — 1×1; 1×1 всегда ярлык. Смешанные профили не удалять. При дедупликации чистого CarPlay сохраняется первая запись. |
 | `carPlayWindow:<entry.id>` в TileSizeStore | Последний размер окна; переключение в ярлык не стирает его. Первый размер окна 8×5, сетка 12×5, окно не может быть 1×1. |
@@ -2653,6 +2688,7 @@ UI-тесты и испытания на ГУ выполнять только в
 | Пароли iAP2 и новый запуск | shared `iap2.Iap2TraceRedactionTest`, `iap2.Iap2ProtocolTest`; common `WirelessStartupRecoveryTest`: маскирование без изменения пакетов, повреждённые TLV/группы, ошибка и reconnect новой попытки, сохранение лимита retries. |
 | Манёвры | shared `hud.VoyahNavigationTest`; Native `ClusterNavigationLeaseTest`, `ClusterNavigationSourcesTest`; `Packaging/new/tests/navigation-source-lifecycle.test.js`, `test_cluster_navigation.js` |
 | Аудио | shared `media.VoyahAudioRoutingTest`, `media.NavigationAudioFocusTest`, `media.VoyahAudioFocusTest`, `media.AudioFocusAutoYieldTest`, `media.LegacyAudioFallbackTest`, `airplay.CarPlayAudioStreamIsolationTest`; Native `CarPlayAudioPolicyTest`; app `carplay.CarPlayAudioValuesTest`; common `VoyahAudioDefaultsTest` |
+| Bluetooth audio | common `VoyahAudioDefaultsTest`, `CarPlaySettingsAccessTest`, `CarPlayReconnectLifecycleTest`: default/opt-out, двусторонняя синхронизация, режим controller, повторные и устаревшие callbacks. app `CarPlaySettingsLifecycleTest`, `CarPlayBluetoothAudioBridgeTest`: переключатель/refresh, token до bind, heartbeat/reconnect и очистка. Native `CarPlayBluetoothAudioTest`: одно переключение на сессию, отмена/замена/таймаут, ошибки, OEM custom action с Bundle без play. Реальные iPhone, Bluetooth и OEM Binder проверяются отдельно на ГУ. |
 | Скорость музыки и повторное заполнение | shared `media.MediaClockTrimTest`, `media.MediaClockTrimRecoveryTest`, `media.AudioClockTrimTest`, `media.MediaPacketLagGuardTest`, `media.AudioRebufferCapacityTest`, `media.MediaAudioBufferTest`, `media.MusicPlaybackControlTest`: порции 300/500/1000 мс, дрейф ±0.05/0.15/0.25/0.76% в 15-минутной модели, независимое обучение при tempo recovery, отсутствие штатного PCM skip, пределы темпа/очереди и плавный спад резерва; отказ PlaybackParams/clock API и отсутствие второго контроллера. |
 | Повторная доставка музыки | shared `airplay.AudioPacketRecoveryTest`, `airplay.AudioStreamRecoveryTest`: порядок/wrap/dedup, срок восстановления и предел retries, большой radio gap, AEAD и timestamp ответа, endpoint и retired owner; реальные loopback UDP-сокеты с зашифрованным resend. `BufferedAudioStreamTest`/`BufferedAudioSessionTest`: выбранная стартовая задержка, credit по renderer, pause/flush/anchor и изоляция владельца. |
 
