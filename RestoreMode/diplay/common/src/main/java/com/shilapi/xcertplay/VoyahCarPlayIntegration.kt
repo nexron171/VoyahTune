@@ -11,6 +11,7 @@ object VoyahCarPlayIntegration {
         fun start()
         fun stop()
         fun audioFocus(stream: Int) {}
+        fun bluetoothAudioSession(sessionId: String?) {}
         fun openProjection(activity: Activity, displayId: Int, result: ProjectionResult): Boolean = false
         fun openDashboard(displayId: Int): Boolean = false
         fun physicalDisplayId(displayId: Int): Int = displayId
@@ -18,6 +19,7 @@ object VoyahCarPlayIntegration {
     }
 
     private var host: Host? = null
+    private var bluetoothSession: Any? = null
     val available: Boolean get() = host != null
     val speed = VoyahVehicleSpeedSource(SystemClock::elapsedRealtime)
     @Volatile var night: Boolean? = null
@@ -29,7 +31,16 @@ object VoyahCarPlayIntegration {
 
     @JvmStatic fun install(host: Host?) { this.host = host }
     internal fun start() { host?.start() }
-    internal fun stop() { host?.stop(); reset() }
+    internal fun stop() {
+        bluetoothAudioSession(null)
+        host?.stop()
+        reset()
+    }
+    internal fun bluetoothAudioSession(session: Any?) {
+        if (bluetoothSession === session) return
+        bluetoothSession = session
+        host?.bluetoothAudioSession(session?.let { java.util.UUID.randomUUID().toString() })
+    }
     internal fun audioFocus(stream: Int) { host?.audioFocus(stream) }
     internal fun openProjection(activity: Activity, displayId: Int, result: ProjectionResult): Boolean =
         host?.openProjection(activity, displayId, result) == true

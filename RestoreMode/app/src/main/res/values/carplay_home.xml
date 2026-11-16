@@ -42,6 +42,8 @@
     <string name="carplay_theme_by_light">Смена темы CarPlay по освещенности</string>
     <string name="carplay_theme_by_light_description">Дневной и ночной режим CarPlay по датчику света автомобиля. Оформление приложения DiPlay сохраняется.</string>
     <string name="carplay_volume_title">Громкость</string>
+    <string name="carplay_bluetooth_audio">Звук через Bluetooth автомобиля</string>
+    <string name="carplay_bluetooth_audio_description">При подключении CarPlay автоматически выбирается источник Bluetooth. iPhone должен быть подключён к Bluetooth автомобиля. Экспериментальная функция; изменение применяется при следующем подключении CarPlay.</string>
     <string name="carplay_volume_description">Штатные уровни громкости ГУ. Кнопки на руле регулируют звучащий канал; изменения отображаются здесь.</string>
     <string name="carplay_volume_media">Музыка</string>
     <string name="carplay_volume_navigation">Навигация</string>

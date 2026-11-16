@@ -35,6 +35,17 @@ class CarPlaySettingsAccessTest {
     }
 
     @Test
+    fun bluetoothAudioUsesTheDiPlayPreferenceInBothDirections() {
+        assertTrue(CarPlaySettingsAccess.bluetoothAudio(app))
+        CarPlaySettingsAccess.setBluetoothAudio(app, false)
+        assertFalse(AirPlayPersistence.loadCarBluetoothAudio(app))
+        AirPlayPersistence.saveCarBluetoothAudio(app, true)
+        assertTrue(CarPlaySettingsAccess.bluetoothAudio(app))
+        AirPlayPersistence.saveCarBluetoothAudio(app, false)
+        assertFalse(CarPlaySettingsAccess.bluetoothAudio(app))
+    }
+
+    @Test
     fun ultraDefaultsOnAndSurvivesFeatureToggle() {
         assertTrue(CarPlaySettingsAccess.ultra(app))
         CarPlaySettingsAccess.setUltra(app, false)

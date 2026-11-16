@@ -6647,6 +6647,9 @@ class CarPlayHostActivity : ComponentActivity() {
                         )
                     } else clearIphoneCornerMask()
                     CarPlayBackgroundSession.active = true
+                    VoyahCarPlayIntegration.bluetoothAudioSession(
+                        session.takeIf { controller?.usesBluetoothAudio == true },
+                    )
                     LastConnectionProblem.clear(this@CarPlayHostActivity)
                     showConnectionHelp(null)
                     callPopupSessionReady = true
@@ -6729,6 +6732,7 @@ class CarPlayHostActivity : ComponentActivity() {
                     activeAirPlaySession = null
                     clearIphoneCornerMask()
                     CarPlayBackgroundSession.active = false
+                    VoyahCarPlayIntegration.bluetoothAudioSession(null)
                     callPopupSessionReady = false
                     updateCallPopupGuard()
                     if (menuOpen) {
@@ -9096,6 +9100,7 @@ internal object CarPlayBackgroundSession {
     @Synchronized
     fun clear(expected: CarPlayController? = null, keepOwner: Boolean = false) {
         if (expected != null && controller !== expected) return
+        VoyahCarPlayIntegration.bluetoothAudioSession(null)
         controller = null
         sink = null
         if (!keepOwner) {

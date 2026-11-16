@@ -2,6 +2,8 @@ package com.shilapi.xcertplay
 
 import android.content.Context
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -11,6 +13,15 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30], manifest = Config.NONE)
 class VoyahAudioDefaultsTest {
+    @Test
+    fun bluetoothAudioDefaultsOnAndPreservesAnExplicitOptOut() {
+        val context = RuntimeEnvironment.getApplication()
+        assertTrue(AirPlayPersistence.loadCarBluetoothAudio(context))
+        AirPlayPersistence.saveCarBluetoothAudio(context, false)
+        repeat(2) { VoyahCarPlayDefaults.initialize(context) }
+        assertFalse(AirPlayPersistence.loadCarBluetoothAudio(context))
+    }
+
     @Test fun previouslyInitializedInstallStopsInheritingMusicForNavigation() {
         val context = RuntimeEnvironment.getApplication()
         context.getSharedPreferences("voyah_carplay", Context.MODE_PRIVATE)

@@ -146,6 +146,14 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
                     }
                 });
         bindUiScale();
+        Switch bluetoothAudio = settingView(R.id.carPlayBluetoothAudio);
+        bluetoothAudio.setSaveEnabled(false);
+        bluetoothAudio.setOnCheckedChangeListener(
+                (button, enabled) -> {
+                    if (!updating) {
+                        CarPlaySettingsAccess.setBluetoothAudio(requireContext(), enabled);
+                    }
+                });
         for (int i = 0; i < SLIDERS.length; i++) {
             bindVolume(i);
         }
@@ -356,6 +364,8 @@ public final class CarPlaySettingsFragment extends SettingsSectionFragment {
                 CarPlaySettingsAccess.fullscreen(requireContext())
                         && selectedDock != CarPlayDock.DUAL_SIDES);
         updateUiScale(enabled);
+        ((Switch) settingView(R.id.carPlayBluetoothAudio))
+                .setChecked(CarPlaySettingsAccess.bluetoothAudio(requireContext()));
         Switch duckMusic = settingView(R.id.carPlayDuckMusic);
         if (duckMusic != null) {
             duckMusic.setChecked(CarPlayAudioSettings.duckMusic(requireContext()));

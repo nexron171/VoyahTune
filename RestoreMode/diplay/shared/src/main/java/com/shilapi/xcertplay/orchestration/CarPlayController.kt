@@ -212,6 +212,8 @@ class CarPlayController(
         BydNavigationOutputs.setClusterStreamControl(::applyClusterUi)
     }
 
+    val usesBluetoothAudio: Boolean get() = airPlayConfig.disableAudioOutput
+
     private enum class Phase {
         IDLE,
         MFI,

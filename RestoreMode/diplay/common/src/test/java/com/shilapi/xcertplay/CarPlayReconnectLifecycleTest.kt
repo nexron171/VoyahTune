@@ -19,6 +19,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.verify
+import org.mockito.Mockito.`when`
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
@@ -53,10 +54,63 @@ class CarPlayReconnectLifecycleTest {
     fun cleanup() {
         CarPlaySessionHosts.unregister(activity)
         CarPlayBackgroundSession.clear()
+        VoyahCarPlayIntegration.install(null)
         ReflectionHelpers.getField<Handler>(activity, "mainHandler")
             .removeCallbacksAndMessages(null)
         teardown.shutdownNow()
         ReflectionHelpers.getField<ExecutorService>(activity, "airPlayCommandExecutor").shutdownNow()
+    }
+
+    @Test
+    fun bluetoothSelectionFollowsTheNegotiatedSessionAndIgnoresDuplicateCallbacks() {
+        val sessions = mutableListOf<String?>()
+        VoyahCarPlayIntegration.install(object : VoyahCarPlayIntegration.Host {
+            override fun start() = Unit
+            override fun stop() = Unit
+            override fun bluetoothAudioSession(sessionId: String?) {
+                sessions += sessionId
+            }
+        })
+        `when`(controller.usesBluetoothAudio).thenReturn(true)
+        // A preference change applies to the next handshake, not the current transport.
+        AirPlayPersistence.saveCarBluetoothAudio(activity, false)
+        val listener = ReflectionHelpers.callInstanceMethod<AirPlaySessionListener>(
+            activity,
+            "createSessionListener",
+            ReflectionHelpers.ClassParameter(Int::class.javaPrimitiveType, 0),
+        )
+        val session = mock(AirPlaySession::class.java)
+        listener.onSessionActive(session)
+        listener.onSessionActive(session)
+        assertEquals(1, sessions.size)
+        assertTrue(sessions.single()!!.isNotEmpty())
+        CarPlayBackgroundSession.clear(keepOwner = true)
+        assertEquals(null, sessions.last())
+        listener.onSessionActive(mock(AirPlaySession::class.java))
+        assertEquals(3, sessions.size)
+        assertTrue(sessions.first() != sessions.last())
+    }
+
+    @Test
+    fun nativeCarPlayAudioAndStaleCallbacksDoNotSelectBluetooth() {
+        val sessions = mutableListOf<String?>()
+        VoyahCarPlayIntegration.install(object : VoyahCarPlayIntegration.Host {
+            override fun start() = Unit
+            override fun stop() = Unit
+            override fun bluetoothAudioSession(sessionId: String?) {
+                sessions += sessionId
+            }
+        })
+        val listener = ReflectionHelpers.callInstanceMethod<AirPlaySessionListener>(
+            activity,
+            "createSessionListener",
+            ReflectionHelpers.ClassParameter(Int::class.javaPrimitiveType, 0),
+        )
+        listener.onSessionActive(mock(AirPlaySession::class.java))
+        `when`(controller.usesBluetoothAudio).thenReturn(true)
+        ReflectionHelpers.setField(activity, "restartGeneration", 1)
+        listener.onSessionActive(mock(AirPlaySession::class.java))
+        assertTrue(sessions.isEmpty())
     }
 
     @Test

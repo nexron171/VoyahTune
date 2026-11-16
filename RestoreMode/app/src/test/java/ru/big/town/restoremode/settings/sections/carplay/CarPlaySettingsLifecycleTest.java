@@ -77,6 +77,14 @@ public class CarPlaySettingsLifecycleTest {
             shadowOf(Looper.getMainLooper()).idle();
             Switch enabled = root.findViewById(R.id.carPlayEnabled);
             assertTrue(enabled.isChecked());
+            Switch bluetoothAudio = root.findViewById(R.id.carPlayBluetoothAudio);
+            assertTrue(bluetoothAudio.isChecked());
+            bluetoothAudio.setChecked(false);
+            assertFalse(CarPlaySettingsAccess.bluetoothAudio(controller.get()));
+            com.shilapi.xcertplay.AirPlayPersistence.INSTANCE.saveCarBluetoothAudio(
+                    controller.get(), true);
+            shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(1));
+            assertTrue(bluetoothAudio.isChecked());
             Switch fullscreen = root.findViewById(R.id.carPlayFullscreen);
             assertFalse(fullscreen.isChecked());
             for (boolean selectedFullscreen : new boolean[] {true, false}) {

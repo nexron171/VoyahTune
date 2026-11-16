@@ -28,6 +28,7 @@ final class CarPlayVehicleController implements AutoCloseable {
     private final CanBusEventHub hub;
     private final ClusterNavigationController navigation;
     private final CarPlayAudioController audio;
+    private final CarPlayBluetoothAudio bluetoothAudio;
     private final CarPlayClimateController climate;
     private final CarPlayUltraController ultra;
     private final CarPlayLightState lightState;
@@ -57,6 +58,7 @@ final class CarPlayVehicleController implements AutoCloseable {
         hub = CanBusEventHub.get(context);
         navigation = ClusterNavigationController.get(context);
         this.audio = audio;
+        bluetoothAudio = new CarPlayBluetoothAudio(context.getApplicationContext(), handler);
         climate = new CarPlayClimateController(context, handler, this::publish);
         ultra = new CarPlayUltraController(context, handler, this::publish);
         Context applicationContext = context.getApplicationContext();
@@ -104,6 +106,8 @@ final class CarPlayVehicleController implements AutoCloseable {
         if (message.what == CarPlayVehicleProtocol.NAVIGATION) {
             if (owner != null && owner.equals(message.replyTo) && client.active()) {
                 navigation.update(ClusterNavigationSources.Source.CARPLAY, message.getData());
+                bluetoothAudio.update(
+                        message.getData().getString(CarPlayAudioProtocol.BLUETOOTH_SESSION));
                 if (wifiScan != null) {
                     wifiScan.update(
                             message.getData().getBoolean(CarPlayWifiScanProtocol.PAUSED, false),
@@ -206,6 +210,7 @@ final class CarPlayVehicleController implements AutoCloseable {
         lightState.reset();
         navigation.clear(ClusterNavigationSources.Source.CARPLAY);
         audio.setFocus(CarPlayAudioProtocol.NONE);
+        bluetoothAudio.close();
         if (wifiScan != null) wifiScan.update(false, 0);
         if (subscription != null) subscription.close();
         subscription = null;

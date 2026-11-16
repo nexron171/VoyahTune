@@ -101,6 +101,7 @@ public final class CarPlayVehicleBridge
     private boolean started, bound;
     private boolean ultraEnabled;
     private int audioStream = CarPlayAudioProtocol.NONE;
+    private String bluetoothAudioSession;
     private final Runnable retry = this::bind;
     private final Runnable navigationTick =
             new Runnable() {
@@ -117,6 +118,7 @@ public final class CarPlayVehicleBridge
         com.shilapi.xcertplay.hud.VoyahManeuver maneuver =
                 com.shilapi.xcertplay.hud.VoyahNavigation.snapshot();
         Bundle values = new Bundle();
+        values.putString(CarPlayAudioProtocol.BLUETOOTH_SESSION, bluetoothAudioSession);
         values.putBoolean(CarPlayWifiScanProtocol.PAUSED, !wifiScanOwners.isEmpty());
         values.putBoolean(CarPlayVehicleProtocol.NAV_ACTIVE, maneuver != null);
         values.putLong(CarPlayVehicleProtocol.NAV_TIME, android.os.SystemClock.elapsedRealtime());
@@ -275,6 +277,12 @@ public final class CarPlayVehicleBridge
         sendAudioFocus();
     }
 
+    @Override
+    public void bluetoothAudioSession(String sessionId) {
+        bluetoothAudioSession = sessionId;
+        sendNavigation();
+    }
+
     private void sendAudioFocus() {
         if (!started || service == null) return;
         Message message = Message.obtain(null, CarPlayAudioProtocol.FOCUS);
@@ -376,6 +384,7 @@ public final class CarPlayVehicleBridge
         started = false;
         wifiScanOwners.clear();
         audioStream = CarPlayAudioProtocol.NONE;
+        bluetoothAudioSession = null;
         send(CarPlayVehicleProtocol.UNWATCH);
         generation++;
         handler.removeCallbacks(retry);

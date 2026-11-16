@@ -117,6 +117,13 @@ object CarPlaySettingsAccess {
     @JvmStatic fun autoConnect(context: Context): Boolean = DiPlayPreferences.autoConnect(context)
 
     @JvmStatic
+    fun bluetoothAudio(context: Context): Boolean = AirPlayPersistence.loadCarBluetoothAudio(context)
+
+    @JvmStatic
+    fun setBluetoothAudio(context: Context, enabled: Boolean) =
+        AirPlayPersistence.saveCarBluetoothAudio(context, enabled)
+
+    @JvmStatic
     fun setAutoConnect(context: Context, enabled: Boolean) =
         DiPlayPreferences.saveAutoConnect(context, enabled)
 
