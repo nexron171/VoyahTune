@@ -20,6 +20,7 @@ import ru.voyahtune.agent.modules.AndroidLauncherPlatform;
 import ru.voyahtune.agent.modules.AndroidMultidisplayPlatform;
 import ru.voyahtune.agent.modules.AndroidNavigationAudioPlatform;
 import ru.voyahtune.agent.modules.AndroidNavigationSourcePlatform;
+import ru.voyahtune.agent.modules.AndroidPassengerHeadphonesPlatform;
 import ru.voyahtune.agent.modules.AndroidRdsPlatform;
 import ru.voyahtune.agent.modules.AndroidStatusBarPlatform;
 import ru.voyahtune.agent.modules.AndroidWindowsPlatform;
@@ -298,12 +299,8 @@ public final class AgentRuntime {
                                                 return new PassengerHeadphonesModule(
                                                         methods,
                                                         hooks,
-                                                        packageName ->
-                                                                ((Context) applicationContext)
-                                                                        .getPackageManager()
-                                                                        .getApplicationInfo(
-                                                                                packageName, 0)
-                                                                        .flags);
+                                                        new AndroidPassengerHeadphonesPlatform(
+                                                                (Context) applicationContext));
                                             }
                                             if (id.equals("oem-media")) {
                                                 return new OemMediaModule(
