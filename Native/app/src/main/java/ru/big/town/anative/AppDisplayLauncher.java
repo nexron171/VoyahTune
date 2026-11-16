@@ -76,22 +76,31 @@ final class AppDisplayLauncher {
             return;
         }
         long generation = next(pkg);
+        BooleanSupplier currentRequest = () -> current(pkg, generation) && valid.getAsBoolean();
         MAIN.post(
-                () ->
-                        EmbeddedAppWindows.prepare(
-                                pkg,
-                                displayId,
-                                () -> current(pkg, generation) && valid.getAsBoolean(),
-                                () ->
-                                        launchPrepared(
-                                                context,
-                                                pkg,
-                                                displayId,
-                                                fullscreen,
-                                                generation,
-                                                valid,
-                                                onFailure,
-                                                onStarted)));
+                () -> {
+                    if (!currentRequest.getAsBoolean()) return;
+                    // The standalone host owns reuse; generic preparation would retire its VD.
+                    if (CarPlayTarget.isCarPlay(pkg) && (displayId == 0 || displayId == 1)) {
+                        SplitHostActivity.launchSingle(
+                                context, pkg, 0, displayId, currentRequest, onStarted);
+                        return;
+                    }
+                    EmbeddedAppWindows.prepare(
+                            pkg,
+                            displayId,
+                            currentRequest,
+                            () ->
+                                    launchPrepared(
+                                            context,
+                                            pkg,
+                                            displayId,
+                                            fullscreen,
+                                            generation,
+                                            valid,
+                                            onFailure,
+                                            onStarted));
+                });
     }
 
     private static void launchPrepared(
@@ -103,16 +112,6 @@ final class AppDisplayLauncher {
             BooleanSupplier valid,
             Runnable onFailure,
             Runnable onStarted) {
-        if (CarPlayTarget.isCarPlay(pkg) && (displayId == 0 || displayId == 1)) {
-            SplitHostActivity.launchSingle(
-                    context,
-                    pkg,
-                    0,
-                    displayId,
-                    () -> current(pkg, generation) && valid.getAsBoolean(),
-                    onStarted);
-            return;
-        }
         Context app = context.getApplicationContext();
         WORKER.post(
                 () ->

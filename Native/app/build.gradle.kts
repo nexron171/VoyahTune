@@ -63,6 +63,7 @@ dependencies {
     implementation(libs.legacy.support.v13)
     implementation(files("lib/android.car.jar"))
     testImplementation(libs.junit)
+    testImplementation("org.robolectric:robolectric:4.17")
     androidTestImplementation(libs.ext.junit)
     androidTestImplementation(libs.espresso.core)
 
