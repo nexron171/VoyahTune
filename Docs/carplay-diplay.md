@@ -1990,19 +1990,36 @@ iPhone аудиовыходы CarPlay (`disableAudioOutput`); независим
 signature-protected `NAVIGATION` heartbeat. Native принимает его только от
 текущего подписчика. Открытие настроек/ожидание телефона не выбирает источник.
 Повторный callback, heartbeat и IPC reconnect с тем же token не перехватывают
-последующий ручной выбор источника. Новая сессия снова выбирает Bluetooth;
+последующий ручной выбор источника. Новая сессия снова запрашивает Bluetooth;
 окончание/очистка сессии отменяют незавершённый запрос.
 
 `CarPlayBluetoothAudio` в Native подключается через Android MediaBrowser к
-`com.qinggan.media/com.qinggan.media.btmusic.BTMediaBrowserService` и отправляет
-custom action `com.qinggan.media.audio_focus` с непустым Bundle. По локальной
-декомпиляции QGMedia (`BTPlayer.onCustomAction`; версия APK в этих материалах
-не зафиксирована) команда запрашивает
-OEM Bluetooth stream 4 без `play()` и открытия Activity. Подключение ограничено
-пятью секундами; ошибка/таймаут освобождают browser без повторов на каждом heartbeat,
+`com.qinggan.media/com.qinggan.media.btmusic.BTMediaBrowserService`, вызывает
+`TransportControls.prepare()` для подключения A2DP, затем отправляет custom action
+`com.qinggan.media.audio_focus` с ненулевым Bundle. Команда `play()` не отправляется.
+В QGMedia 1.0 (versionCode 1) из прошивки `AR.01.20260318170344.rc1`, SHA-256
+`abb1dfa176eed67b985a39a5298f35ab522c61e66adba8eba5f5aaaa6b75115d`,
+`BTPlayer.onPrepare` вызывает `BlueToothPlayerEngine.connectEngine` →
+`A2dpManager.connectA2dp`: уже подключённый профиль сохраняется, иначе OEM
+запрашивает подключение музыкального профиля доступного телефона.
+`BTPlayer.onCustomAction` отдельно запрашивает OEM Bluetooth stream 4 без
+открытия Activity. Возвращаемые результаты подготовки и запроса фокуса не
+передаются в Native; порядок команд не подтверждает готовность A2DP.
+Подключение MediaBrowser ограничено пятью секундами;
+ошибка/таймаут освобождают browser без повторов на каждом heartbeat,
 запоздалые callbacks игнорируются. Отправка команды не подтверждает выбор источника
-на ГУ. Реальный Bluetooth-маршрут музыки/звонков/Siri/навигации после изменения
-на Voyah не проверен; другие OEM реализации требуют отдельного подтверждения.
+на ГУ; запуск музыки после подключения CarPlay не создаёт нового запроса.
+
+17 ноября 2026 пользователь сообщил: на **Sport+ rc12.1** при активной опции
+запуск музыки из CarPlay не переключил источник. Проверка относилась к версии
+без `prepare()`; подготовка A2DP добавлена после неё и на машине ещё не проверена.
+Копии rc12.1 для анализа нет; по согласованию с пользователем статический разбор
+опирается на указанную rc1.
+Причина конкретного отказа без журнала Native/OEM не установлена.
+Текущая реализация не проверяет фактический источник и не восстанавливает
+неудачную попытку в той же сессии. Успешный Bluetooth-маршрут
+музыки/звонков/Siri/навигации этой интеграцией не подтверждён; исследованный APK
+не доказывает идентичного поведения другой прошивки.
 
 `VoyahCarPlayDefaults.initialize` вызывается из DiPlayActivity и DiPlayBootstrap.
 Основные defaults применяются один раз по `voyah_carplay/initialized`:
@@ -2688,7 +2705,7 @@ UI-тесты и испытания на ГУ выполнять только в
 | Пароли iAP2 и новый запуск | shared `iap2.Iap2TraceRedactionTest`, `iap2.Iap2ProtocolTest`; common `WirelessStartupRecoveryTest`: маскирование без изменения пакетов, повреждённые TLV/группы, ошибка и reconnect новой попытки, сохранение лимита retries. |
 | Манёвры | shared `hud.VoyahNavigationTest`; Native `ClusterNavigationLeaseTest`, `ClusterNavigationSourcesTest`; `Packaging/new/tests/navigation-source-lifecycle.test.js`, `test_cluster_navigation.js` |
 | Аудио | shared `media.VoyahAudioRoutingTest`, `media.NavigationAudioFocusTest`, `media.VoyahAudioFocusTest`, `media.AudioFocusAutoYieldTest`, `media.LegacyAudioFallbackTest`, `airplay.CarPlayAudioStreamIsolationTest`; Native `CarPlayAudioPolicyTest`; app `carplay.CarPlayAudioValuesTest`; common `VoyahAudioDefaultsTest` |
-| Bluetooth audio | common `VoyahAudioDefaultsTest`, `CarPlaySettingsAccessTest`, `CarPlayReconnectLifecycleTest`: default/opt-out, двусторонняя синхронизация, режим controller, повторные и устаревшие callbacks. app `CarPlaySettingsLifecycleTest`, `CarPlayBluetoothAudioBridgeTest`: переключатель/refresh, token до bind, heartbeat/reconnect и очистка. Native `CarPlayBluetoothAudioTest`: одно переключение на сессию, отмена/замена/таймаут, ошибки, OEM custom action с Bundle без play. Реальные iPhone, Bluetooth и OEM Binder проверяются отдельно на ГУ. |
+| Bluetooth audio | common `VoyahAudioDefaultsTest`, `CarPlaySettingsAccessTest`, `CarPlayReconnectLifecycleTest`: default/opt-out, двусторонняя синхронизация, режим controller, повторные и устаревшие callbacks. app `CarPlaySettingsLifecycleTest`, `CarPlayBluetoothAudioBridgeTest`: переключатель/refresh, token до bind, heartbeat/reconnect и очистка. Native `CarPlayBluetoothAudioTest`: один запрос на сессию, отмена/замена/таймаут, ошибки, prepare A2DP перед OEM custom action с Bundle без play; ошибка отправки prepare прерывает запрос фокуса. Реальные iPhone, Bluetooth и OEM Binder проверяются отдельно на ГУ. |
 | Скорость музыки и повторное заполнение | shared `media.MediaClockTrimTest`, `media.MediaClockTrimRecoveryTest`, `media.AudioClockTrimTest`, `media.MediaPacketLagGuardTest`, `media.AudioRebufferCapacityTest`, `media.MediaAudioBufferTest`, `media.MusicPlaybackControlTest`: порции 300/500/1000 мс, дрейф ±0.05/0.15/0.25/0.76% в 15-минутной модели, независимое обучение при tempo recovery, отсутствие штатного PCM skip, пределы темпа/очереди и плавный спад резерва; отказ PlaybackParams/clock API и отсутствие второго контроллера. |
 | Повторная доставка музыки | shared `airplay.AudioPacketRecoveryTest`, `airplay.AudioStreamRecoveryTest`: порядок/wrap/dedup, срок восстановления и предел retries, большой radio gap, AEAD и timestamp ответа, endpoint и retired owner; реальные loopback UDP-сокеты с зашифрованным resend. `BufferedAudioStreamTest`/`BufferedAudioSessionTest`: выбранная стартовая задержка, credit по renderer, pause/flush/anchor и изоляция владельца. |
 
