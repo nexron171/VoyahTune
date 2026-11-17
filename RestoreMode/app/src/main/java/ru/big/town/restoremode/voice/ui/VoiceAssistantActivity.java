@@ -28,6 +28,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import ru.big.town.common.CustomVoiceCommandProtocol;
 import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.voice.audio.VoiceRecognizer;
+import ru.big.town.restoremode.voice.audio.VoiceStartupTrace;
 import ru.big.town.restoremode.voice.commands.VoiceCommandCatalog;
 import ru.big.town.restoremode.voice.commands.VoiceCommandMessage;
 import ru.big.town.restoremode.voice.commands.VoiceCommandSequence;
@@ -75,6 +76,7 @@ public class VoiceAssistantActivity extends AppCompatActivity {
                 @Override
                 public void onServiceConnected(ComponentName name, IBinder binder) {
                     nativeService = new Messenger(binder);
+                    VoiceStartupTrace.mark("nativeConnected");
                     if (!ended && session != null) {
                         beginRecognition();
                     }
@@ -104,6 +106,7 @@ public class VoiceAssistantActivity extends AppCompatActivity {
 
     @Override
     public void onCreate(Bundle state) {
+        long createdStartedAt = VoiceStartupTrace.now();
         super.onCreate(state);
         sounds = new VoiceSounds(this);
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
@@ -151,6 +154,7 @@ public class VoiceAssistantActivity extends AppCompatActivity {
         root.addView(center, new FrameLayout.LayoutParams(-1, -2, Gravity.CENTER));
         setContentView(root);
         audio = (AudioManager) getSystemService(AUDIO_SERVICE);
+        VoiceStartupTrace.took("activityOnCreate", createdStartedAt);
         newSession();
         ensureBinding();
     }
@@ -208,6 +212,8 @@ public class VoiceAssistantActivity extends AppCompatActivity {
     private void newSession(boolean activationCue) {
         cancelSession();
         clearRecording();
+        VoiceStartupTrace.beginSession();
+        VoiceStartupTrace.mark("sessionCreated");
         testOnly = getIntent().getBooleanExtra(TEST_ONLY, false);
         closeControl.testMode(testOnly);
         session = UUID.randomUUID().toString();
@@ -306,6 +312,7 @@ public class VoiceAssistantActivity extends AppCompatActivity {
             fail("Сервис автомобиля недоступен");
             return;
         }
+        VoiceStartupTrace.mark("beginSent");
         recognizer.start(
                 this,
                 new VoiceRecognizer.Listener() {
@@ -323,6 +330,7 @@ public class VoiceAssistantActivity extends AppCompatActivity {
                             recognizer.cancel();
                             return;
                         }
+                        VoiceStartupTrace.mark("readyOnUi");
                         focus =
                                 new AudioFocusRequest.Builder(
                                                 AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
@@ -345,6 +353,7 @@ public class VoiceAssistantActivity extends AppCompatActivity {
                             fail("Аудиоканал занят. Завершите звонок и повторите команду.");
                             return;
                         }
+                        VoiceStartupTrace.mark("audioFocus");
                         beginCapture.run();
                     }
 
@@ -354,6 +363,7 @@ public class VoiceAssistantActivity extends AppCompatActivity {
                             return;
                         }
                         ui.removeCallbacksAndMessages(null);
+                        VoiceStartupTrace.mark("listeningShown");
                         status.setText("Слушаю…");
                         orb.state(true, false);
                         sounds.activation();

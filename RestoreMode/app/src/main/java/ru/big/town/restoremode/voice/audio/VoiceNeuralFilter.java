@@ -37,8 +37,13 @@ final class VoiceNeuralFilter implements AutoCloseable {
             return;
         }
         if (state == null) {
+            long loadedAt = VoiceStartupTrace.now();
             deepFilter = Native.load("voyah_df", DeepFilter.class);
+            VoiceStartupTrace.took("dfLibraryLoaded", loadedAt);
+            VoiceStartupTrace.mark("dfLibraryLoaded");
             state = deepFilter.voice_df_create(deepFilterDb);
+            VoiceStartupTrace.took("dfModelCreated", loadedAt);
+            VoiceStartupTrace.mark("dfModelCreated");
             if (state == null) {
                 throw new IOException("Cannot initialize DeepFilterNet3");
             }
@@ -51,6 +56,7 @@ final class VoiceNeuralFilter implements AutoCloseable {
         if (attenuationDb == 0 || warmed) {
             return;
         }
+        long startedAt = VoiceStartupTrace.now();
         float[] input = new float[480], output = new float[480];
         for (int i = 0; i < input.length; i++) {
             input[i] = (float) Math.sin(i * .17) * .01f;
@@ -59,6 +65,8 @@ final class VoiceNeuralFilter implements AutoCloseable {
             process(input, output);
         }
         reset(attenuationDb);
+        VoiceStartupTrace.took("dfWarmed", startedAt);
+        VoiceStartupTrace.mark("dfWarmed");
         warmed = true;
     }
 

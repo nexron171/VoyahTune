@@ -5,7 +5,6 @@ import android.content.Context;
 import com.k2fsa.sherpa.onnx.*;
 
 import ru.big.town.restoremode.voice.commands.VoiceCommands;
-import ru.big.town.restoremode.voice.commands.VoiceHotwords;
 
 import java.io.*;
 import java.util.Arrays;
@@ -29,7 +28,10 @@ final class VoiceModels {
 
     private static void load(Context context) throws Exception {
         if (zipformer == null) {
+            long unpackedAt = VoiceStartupTrace.now();
             File root = unpack(context, "zipformer-ru-0.54-int8");
+            VoiceStartupTrace.took("modelsUnpacked", unpackedAt);
+            VoiceStartupTrace.mark("modelsUnpacked");
             OfflineRecognizerConfig config = new OfflineRecognizerConfig();
             config.getFeatConfig().setSampleRate(16000);
             config.getFeatConfig().setDither(3e-5f);
@@ -45,9 +47,13 @@ final class VoiceModels {
             model.getTransducer().setEncoder(new File(root, "encoder.int8.onnx").getAbsolutePath());
             model.getTransducer().setDecoder(new File(root, "decoder.int8.onnx").getAbsolutePath());
             model.getTransducer().setJoiner(new File(root, "joiner.int8.onnx").getAbsolutePath());
+            long asrStartedAt = VoiceStartupTrace.now();
             zipformer = new OfflineRecognizer(null, config);
+            VoiceStartupTrace.took("asrModelLoaded", asrStartedAt);
+            VoiceStartupTrace.mark("asrModelLoaded");
         }
         if (detector == null) {
+            long vadStartedAt = VoiceStartupTrace.now();
             VadModelConfig vadConfig = new VadModelConfig();
             vadConfig.setNumThreads(1);
             vadConfig.setSampleRate(16000);
@@ -56,6 +62,8 @@ final class VoiceModels {
             vadConfig.getSileroVadModelConfig().setMinSpeechDuration(.15f);
             vadConfig.getSileroVadModelConfig().setMaxSpeechDuration(10);
             detector = new Vad(context.getAssets(), vadConfig);
+            VoiceStartupTrace.took("vadLoaded", vadStartedAt);
+            VoiceStartupTrace.mark("vadLoaded");
         }
     }
 
@@ -64,6 +72,7 @@ final class VoiceModels {
         if (warmed) {
             return;
         }
+        long startedAt = VoiceStartupTrace.now();
         // Decode synthetic silence directly: VAD would normally skip this inference.
         OfflineStream stream = zipformer.createStream();
         try {
@@ -75,13 +84,25 @@ final class VoiceModels {
             stream.release();
             resetDetector();
         }
+        VoiceStartupTrace.took("syntheticWarmup", startedAt);
+        VoiceStartupTrace.mark("syntheticWarmed");
         warmed = true;
     }
 
     static Session open(Context context) throws Exception {
         load(context);
         resetDetector();
-        String hotwords = VoiceHotwords.fromCommands(VoiceCommands.load(context));
+        long startedAt = VoiceStartupTrace.now();
+        String hotwords = VoiceCommands.hotwords(context);
+        VoiceStartupTrace.took("hotwordsResolved", startedAt);
+        int separators = 0;
+        for (int index = 0; index < hotwords.length(); index++) {
+            if (hotwords.charAt(index) == '/') {
+                separators++;
+            }
+        }
+        VoiceStartupTrace.mark(
+                "hotwordsReady phrases=" + (hotwords.isEmpty() ? 0 : separators + 1));
         return new ZipformerSession(zipformer, detector, hotwords);
     }
 

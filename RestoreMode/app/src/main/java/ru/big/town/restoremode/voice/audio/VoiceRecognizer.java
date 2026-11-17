@@ -24,6 +24,8 @@ public final class VoiceRecognizer {
     /** Service lifetime is independent of an Activity/session cancellation token. */
     static void keepWarm(Context context, Consumer<Boolean> prepared) {
         final Context app = context.getApplicationContext();
+        VoiceStartupTrace.beginSession();
+        VoiceStartupTrace.mark("warmupStart");
         final long request = RESIDENCY.incrementAndGet();
         ENGINES.retain(true);
         WORKER.execute(
@@ -123,8 +125,10 @@ public final class VoiceRecognizer {
                     if (!SESSIONS.active(token)) {
                         return;
                     }
+                    VoiceStartupTrace.mark("workerStart");
                     try {
                         prepareEngine(app, config);
+                        VoiceStartupTrace.mark("engineReady");
                         // An Activity arriving during service warmup reaches this same cached
                         // engine.
                         post(
@@ -174,11 +178,13 @@ public final class VoiceRecognizer {
             if (!SESSIONS.active(token)) {
                 return;
             }
+            VoiceStartupTrace.mark("captureStart");
             VoiceRecording.clear(recordingDirectory);
             post(token, () -> listener.details(config.label()));
             VoiceNeuralFilter filter =
                     ENGINES.acquire(() -> new VoiceEngine(context, config.deepFilterDb))
                             .prepareFilter(config.deepFilterDb);
+            VoiceStartupTrace.mark("filterReady");
             try (VoiceModels.Session engine = VoiceModels.open(context)) {
                 if (!SESSIONS.active(token)) {
                     return;
@@ -187,6 +193,7 @@ public final class VoiceRecognizer {
                 if (!SESSIONS.open(token, VoiceMicrophone::new)) {
                     return;
                 }
+                VoiceStartupTrace.mark("microphoneOpen");
                 final String description = config.label();
                 post(token, listener::listening);
                 stage = "обработка звука";

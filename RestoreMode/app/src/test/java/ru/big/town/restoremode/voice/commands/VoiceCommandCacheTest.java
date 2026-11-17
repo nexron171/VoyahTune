@@ -4,6 +4,8 @@ import static org.junit.Assert.*;
 
 import org.junit.Test;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -68,5 +70,44 @@ public class VoiceCommandCacheTest {
         assertEquals(Integer.valueOf(2), cache.load(builds::incrementAndGet));
         cache.invalidate();
         assertEquals(Integer.valueOf(3), cache.load(builds::incrementAndGet));
+    }
+
+    @Test
+    public void expiredValueIsServedWhileOneBackgroundRebuildIsQueued() {
+        AtomicLong time = new AtomicLong();
+        AtomicInteger builds = new AtomicInteger();
+        List<Runnable> queued = new ArrayList<>();
+        VoiceCommandCache<Integer> cache = new VoiceCommandCache<>(100, time::get);
+        assertEquals(Integer.valueOf(1), cache.load(builds::incrementAndGet));
+
+        time.set(150);
+        assertEquals(
+                "an expired value must be served instead of blocking the recording start",
+                Integer.valueOf(1),
+                cache.serveStaleAndRefresh(builds::incrementAndGet, queued::add));
+        cache.serveStaleAndRefresh(builds::incrementAndGet, queued::add);
+        assertEquals("only one rebuild may run", 1, queued.size());
+        assertEquals(1, builds.get());
+
+        queued.get(0).run();
+        assertEquals("the queued rebuild must publish a fresh snapshot", 2, builds.get());
+        time.set(160);
+        assertEquals(Integer.valueOf(2), cache.serveStaleAndRefresh(() -> 99, queued::add));
+        assertEquals("a fresh value must not schedule a rebuild", 1, queued.size());
+    }
+
+    @Test
+    public void nothingIsServedBeforeTheFirstBuildOrAfterInvalidation() {
+        List<Runnable> queued = new ArrayList<>();
+        VoiceCommandCache<Integer> cache = new VoiceCommandCache<>(100, () -> 0L);
+
+        assertNull(cache.serveStaleAndRefresh(() -> 1, queued::add));
+        assertTrue("a caller without a snapshot must rebuild itself", queued.isEmpty());
+
+        assertEquals(Integer.valueOf(1), cache.load(() -> 1));
+        assertEquals(Integer.valueOf(1), cache.serveStaleAndRefresh(() -> 2, queued::add));
+
+        cache.invalidate();
+        assertNull(cache.serveStaleAndRefresh(() -> 2, queued::add));
     }
 }

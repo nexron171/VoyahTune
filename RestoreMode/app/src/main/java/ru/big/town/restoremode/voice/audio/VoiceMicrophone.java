@@ -12,12 +12,15 @@ final class VoiceMicrophone implements VoiceSessionControl.Capture {
 
     @android.annotation.SuppressLint("MissingPermission")
     VoiceMicrophone() throws IOException {
+        long bufferStartedAt = VoiceStartupTrace.now();
         int minimum =
                 AudioRecord.getMinBufferSize(
                         48000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
+        VoiceStartupTrace.took("micBufferSizeQueried", bufferStartedAt);
         if (minimum <= 0) {
             throw new IOException("Unsupported microphone format");
         }
+        long createdAt = VoiceStartupTrace.now();
         recorder =
                 new AudioRecord(
                         MediaRecorder.AudioSource.VOICE_RECOGNITION,
@@ -25,11 +28,14 @@ final class VoiceMicrophone implements VoiceSessionControl.Capture {
                         AudioFormat.CHANNEL_IN_MONO,
                         AudioFormat.ENCODING_PCM_16BIT,
                         Math.max(48000, minimum));
+        VoiceStartupTrace.took("micAllocated", createdAt);
         try {
             if (recorder.getState() != AudioRecord.STATE_INITIALIZED) {
                 throw new IOException("Microphone unavailable");
             }
+            long recordingStartedAt = VoiceStartupTrace.now();
             recorder.startRecording();
+            VoiceStartupTrace.took("micStarted", recordingStartedAt);
             if (recorder.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) {
                 throw new IOException("Recording failed");
             }

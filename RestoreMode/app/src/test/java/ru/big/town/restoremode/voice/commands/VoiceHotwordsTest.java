@@ -35,4 +35,33 @@ public class VoiceHotwordsTest {
         assertFalse(hotwords.contains("70"));
         assertEquals(1, phrases.stream().filter("подогрев руля"::equals).count());
     }
+
+    @Test
+    public void caseSpacingAndYoFoldingMatchTheModelVocabulary() {
+        String tooLong = "повтори" + " слово".repeat(40);
+        List<VoiceCommandCatalog.Command> commands =
+                Arrays.asList(
+                        new VoiceCommandCatalog.Command(
+                                "seat",
+                                "seat",
+                                false,
+                                "  ВКЛЮЧИ   ПОДОГРЕВ—СИДЕНЬЯ!  ",
+                                "включи ёлку",
+                                "   ",
+                                tooLong));
+        List<String> phrases =
+                Arrays.asList(VoiceHotwords.fromCommands(commands).split("/"));
+
+        assertTrue(
+                "case, dashes, punctuation and repeated spaces are folded",
+                phrases.contains("включи подогрев сиденья"));
+        assertTrue(
+                "both spellings of one word reach a single form",
+                phrases.contains("включи елку"));
+        assertTrue(phrases.contains("не включи елку"));
+        assertFalse("a phrase without letters biases nothing", phrases.contains(""));
+        assertFalse(
+                "an unsupported phrase is dropped whole, never truncated to a biasing fragment",
+                phrases.stream().anyMatch(phrase -> phrase.startsWith("повтори ")));
+    }
 }

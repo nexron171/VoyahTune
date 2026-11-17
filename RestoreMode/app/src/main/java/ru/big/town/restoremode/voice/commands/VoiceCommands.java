@@ -13,6 +13,7 @@ import ru.big.town.restoremode.scenarios.ScenarioStore;
 import ru.big.town.restoremode.settings.sections.can.CanCommandExamples;
 import ru.big.town.restoremode.vehicle.steering.SteeringActionStore;
 import ru.big.town.restoremode.vehicle.steering.SteeringCanCommandPolicy;
+import ru.big.town.restoremode.voice.audio.VoiceStartupTrace;
 import ru.big.town.restoremode.widgets.dials.DialWidgetStore;
 
 import java.util.Collections;
@@ -34,7 +35,7 @@ public final class VoiceCommands {
      */
     private static final long TTL_MS = 5 * 60 * 1000L;
 
-    private static final VoiceCommandCache<List<VoiceCommandCatalog.Command>> CACHE =
+    private static final VoiceCommandCache<Catalog> CACHE =
             new VoiceCommandCache<>(TTL_MS, () -> System.nanoTime() / 1_000_000L);
     private static final ExecutorService PRELOADER =
             Executors.newSingleThreadExecutor(
@@ -44,9 +45,42 @@ public final class VoiceCommands {
                         return thread;
                     });
 
+    /** Commands and the hot words derived from them always come from the same phrase list. */
+    private static final class Catalog {
+        private final List<VoiceCommandCatalog.Command> commands;
+        private final String hotwords;
+
+        Catalog(List<VoiceCommandCatalog.Command> commands) {
+            this.commands = commands;
+            this.hotwords = VoiceHotwords.fromCommands(commands);
+        }
+    }
+
     public static List<VoiceCommandCatalog.Command> load(Context context) {
+        return catalog(context).commands;
+    }
+
+    /**
+     * Hot words for the next recording. An expired catalog is served until its background rebuild
+     * finishes: hot words only bias recognition, while command matching uses the fresh
+     * {@link #load}. Before anything was ever built the call still builds inline, which happens
+     * only on a cold start that already pays for the model load.
+     */
+    public static String hotwords(Context context) {
+        Catalog stale = CACHE.serveStaleAndRefresh(() -> catalog(context), PRELOADER::execute);
+        return stale == null ? catalog(context).hotwords : stale.hotwords;
+    }
+
+    private static Catalog catalog(Context context) {
+        final Context app = context.getApplicationContext();
         return CACHE.load(
-                () -> Collections.unmodifiableList(build(context.getApplicationContext())));
+                () -> {
+                    long startedAt = VoiceStartupTrace.now();
+                    Catalog built = new Catalog(Collections.unmodifiableList(build(app)));
+                    VoiceStartupTrace.took("catalogWithHotwordsBuilt", startedAt);
+                    VoiceStartupTrace.mark("catalogWithHotwordsBuilt");
+                    return built;
+                });
     }
 
     /** Warms the shared cache on a background thread so the first visible invocation is fast. */
