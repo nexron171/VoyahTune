@@ -10,7 +10,7 @@ import android.util.Log;
 
 import java.util.Objects;
 
-/** Selects OEM Bluetooth once per connected CarPlay session without opening the player. */
+/** Requests A2DP and OEM Bluetooth once per CarPlay session without issuing play. */
 final class CarPlayBluetoothAudio implements AutoCloseable {
     private static final String TAG = "CarPlayBluetoothAudio";
     private static final ComponentName SERVICE =
@@ -20,7 +20,7 @@ final class CarPlayBluetoothAudio implements AutoCloseable {
     interface Connection {
         void connect();
 
-        void requestFocus();
+        void requestSource();
 
         void disconnect();
     }
@@ -50,11 +50,13 @@ final class CarPlayBluetoothAudio implements AutoCloseable {
         if (Objects.equals(session, next)) {
             return;
         }
+
         finish(null);
         session = next;
         if (next == null) {
             return;
         }
+
         int expectedGeneration = generation;
         try {
             connection =
@@ -66,8 +68,8 @@ final class CarPlayBluetoothAudio implements AutoCloseable {
                                         return;
                                     }
                                     try {
-                                        connection.requestFocus();
-                                        Log.i(TAG, "OEM Bluetooth source requested");
+                                        connection.requestSource();
+                                        Log.i(TAG, "OEM Bluetooth A2DP and source requested");
                                     } catch (RuntimeException error) {
                                         Log.w(TAG, "OEM Bluetooth source unavailable", error);
                                     } finally {
@@ -120,11 +122,11 @@ final class CarPlayBluetoothAudio implements AutoCloseable {
         session = null;
     }
 
-    static void requestFocus(MediaController controller) {
-        // OEM BTPlayer dereferences extras and requests stream 4 without starting playback.
-        controller
-                .getTransportControls()
-                .sendCustomAction("com.qinggan.media.audio_focus", new Bundle());
+    static void requestSource(MediaController controller) {
+        MediaController.TransportControls controls = controller.getTransportControls();
+        // OEM prepare connects A2DP; the custom action requests stream 4 without a play command.
+        controls.prepare();
+        controls.sendCustomAction("com.qinggan.media.audio_focus", new Bundle());
     }
 
     private static final class OemConnection implements Connection {
@@ -142,8 +144,8 @@ final class CarPlayBluetoothAudio implements AutoCloseable {
         }
 
         @Override
-        public void requestFocus() {
-            CarPlayBluetoothAudio.requestFocus(
+        public void requestSource() {
+            CarPlayBluetoothAudio.requestSource(
                     new MediaController(context, browser.getSessionToken()));
         }
 
