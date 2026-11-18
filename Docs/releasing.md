@@ -128,8 +128,12 @@ JDK 21 в `JAVA_HOME` и SDK в `ANDROID_HOME`; `/usr/libexec/java_home` — т�
 Сохраните переменные в конфигурации shell для следующих запусков терминала.
 
 Вместо `ANDROID_HOME` Gradle может читать `sdk.dir=/абсолютный/путь/к/sdk` из
-**обоих** файлов `Native/local.properties` и `RestoreMode/local.properties`.
-Пути с другого компьютера необходимо исправить. Эти файлы игнорируются Git.
+`local.properties` — по одному в каждом из четырёх проектов: `Native`, `RestoreMode`,
+`RunYN`, `Updater`. Свой файл нужен и `RunYN` с `Updater`: без `sdk.dir` и `ANDROID_HOME`
+их `gradlew assembleRelease` падает ещё на конфигурации с «SDK location not found».
+Пустой файл так же бесполезен, как отсутствующий; сборка в контейнере (§2.5) создаёт их
+как цель монтирования и обязана сохранять хостовый путь. Пути с другого компьютера
+необходимо исправить. Эти файлы игнорируются Git.
 
 Проверьте окружение:
 
@@ -143,7 +147,11 @@ test -s Native/app/lib/android.car.jar
 
 В выводе Gradle проверьте используемую JVM. `Native/app/lib/android.car.jar` —
 необходимый входной файл проекта. Runtime собирается через `Packaging/new/build.sh`;
-для него нужен Android NDK с `aarch64-linux-android30-clang`.
+для него нужен Android NDK с `aarch64-linux-android30-clang`. Root-службу Updater
+оркестратор собирает сам вызовом `Updater/build-daemon.py --ndk …`, беря каталог из
+`ANDROID_NDK_HOME`, иначе из `ANDROID_HOME` и закреплённого `ndk/27.0.12077973`. Вне
+контейнера задайте одну из этих переменных: `sdk.dir` в `local.properties` для этого пути
+не читается, и сборка остановится с «Задайте ANDROID_NDK_HOME для сборки updater».
 
 ### 2.3. Дополнительно для payload и GUI macOS
 
