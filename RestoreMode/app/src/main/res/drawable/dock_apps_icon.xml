@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- App grid glyph for a passenger dock slot whose application ships no icon of its own.
+     Framing follows drawable-nodpi/dock_navigation_icon.png: viewport 116x90, glyph inside
+     x 36..80, y 23..67. Geometry is ic_dock_apps.xml scaled by 1.833. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="116dp"
+    android:height="90dp"
+    android:viewportWidth="116"
+    android:viewportHeight="90">
+    <group
+        android:scaleX="1.833"
+        android:scaleY="1.833"
+        android:translateX="36"
+        android:translateY="23">
+        <path
+            android:fillColor="#F2F5FA"
+            android:pathData="M3.7,2.5 H5.9 A1.2,1.2 0 0 1 7.1,3.7 V5.9 A1.2,1.2 0 0 1 5.9,7.1 H3.7 A1.2,1.2 0 0 1 2.5,5.9 V3.7 A1.2,1.2 0 0 1 3.7,2.5 Z M10.9,2.5 H13.1 A1.2,1.2 0 0 1 14.3,3.7 V5.9 A1.2,1.2 0 0 1 13.1,7.1 H10.9 A1.2,1.2 0 0 1 9.7,5.9 V3.7 A1.2,1.2 0 0 1 10.9,2.5 Z M18.1,2.5 H20.3 A1.2,1.2 0 0 1 21.5,3.7 V5.9 A1.2,1.2 0 0 1 20.3,7.1 H18.1 A1.2,1.2 0 0 1 16.9,5.9 V3.7 A1.2,1.2 0 0 1 18.1,2.5 Z" />
+        <path
+            android:fillColor="#F2F5FA"
+            android:pathData="M3.7,9.7 H5.9 A1.2,1.2 0 0 1 7.1,10.9 V13.1 A1.2,1.2 0 0 1 5.9,14.3 H3.7 A1.2,1.2 0 0 1 2.5,13.1 V10.9 A1.2,1.2 0 0 1 3.7,9.7 Z M10.9,9.7 H13.1 A1.2,1.2 0 0 1 14.3,10.9 V13.1 A1.2,1.2 0 0 1 13.1,14.3 H10.9 A1.2,1.2 0 0 1 9.7,13.1 V10.9 A1.2,1.2 0 0 1 10.9,9.7 Z M18.1,9.7 H20.3 A1.2,1.2 0 0 1 21.5,10.9 V13.1 A1.2,1.2 0 0 1 20.3,14.3 H18.1 A1.2,1.2 0 0 1 16.9,13.1 V10.9 A1.2,1.2 0 0 1 18.1,9.7 Z" />
+        <path
+            android:fillColor="#F2F5FA"
+            android:pathData="M3.7,16.9 H5.9 A1.2,1.2 0 0 1 7.1,18.1 V20.3 A1.2,1.2 0 0 1 5.9,21.5 H3.7 A1.2,1.2 0 0 1 2.5,20.3 V18.1 A1.2,1.2 0 0 1 3.7,16.9 Z M10.9,16.9 H13.1 A1.2,1.2 0 0 1 14.3,18.1 V20.3 A1.2,1.2 0 0 1 13.1,21.5 H10.9 A1.2,1.2 0 0 1 9.7,20.3 V18.1 A1.2,1.2 0 0 1 10.9,16.9 Z M18.1,16.9 H20.3 A1.2,1.2 0 0 1 21.5,18.1 V20.3 A1.2,1.2 0 0 1 20.3,21.5 H18.1 A1.2,1.2 0 0 1 16.9,20.3 V18.1 A1.2,1.2 0 0 1 18.1,16.9 Z" />
+    </group>
+</vector>

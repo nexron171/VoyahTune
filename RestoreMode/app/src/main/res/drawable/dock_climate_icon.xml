@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Snowflake glyph for a dock slot that opens climate control. Framing follows the PNG artwork in
+     drawable-nodpi: viewport 116x90 with the glyph inside x 36..80, y 23..67. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="116dp"
+    android:height="90dp"
+    android:viewportWidth="116"
+    android:viewportHeight="90">
+    <group
+        android:scaleX="1.833"
+        android:scaleY="1.833"
+        android:translateX="36"
+        android:translateY="23">
+        <path
+            android:pathData="M12,2.5 L12,21.5 M3.77,7.25 L20.23,16.75 M3.77,16.75 L20.23,7.25"
+            android:strokeColor="#F2F5FA"
+            android:strokeWidth="2"
+            android:strokeLineCap="round" />
+        <path
+            android:pathData="M9.6,4.9 L12,2.5 L14.4,4.9 M9.6,19.1 L12,21.5 L14.4,19.1 M4.3,10.4 L3.77,7.25 L6.9,6.7 M19.7,13.6 L20.23,16.75 L17.1,17.3 M6.9,17.3 L3.77,16.75 L4.3,13.6 M17.1,6.7 L20.23,7.25 L19.7,10.4"
+            android:strokeColor="#F2F5FA"
+            android:strokeWidth="1.7"
+            android:strokeLineCap="round" />
+    </group>
+</vector>

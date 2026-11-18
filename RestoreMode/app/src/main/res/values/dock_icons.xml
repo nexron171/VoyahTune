@@ -5,4 +5,6 @@
     <string name="dock_icon_default">По умолчанию</string>
     <string name="dock_icon_navigation">Навигация</string>
     <string name="dock_icon_music">Музыка</string>
+    <string name="dock_icon_climate">Климат</string>
+    <string name="dock_icon_apps">Приложения</string>
 </resources>

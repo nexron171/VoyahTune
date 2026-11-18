@@ -54,6 +54,25 @@
                 android:singleLine="true"
                 app:cornerRadius="20dp"
                 android:tag="settings.field" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Иконка"
+                android:textSize="15sp"
+                android:textColor="#97a6bc"
+                android:includeFontPadding="false"
+                android:layout_marginTop="18dp"
+                android:layout_marginBottom="8dp" />
+            <Button
+                android:id="@+id/passengerDockStyle1"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:text="@string/dock_icon_default"
+                android:textColor="@color/settings_text"
+                android:textSize="@dimen/settings_caption_size"
+                android:singleLine="true"
+                app:cornerRadius="20dp"
+                android:tag="settings.field" />
             <Button
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
@@ -99,6 +118,25 @@
                 android:layout_width="match_parent"
                 android:layout_height="48dp"
                 android:text="По умолчанию"
+                android:textColor="@color/settings_text"
+                android:textSize="@dimen/settings_caption_size"
+                android:singleLine="true"
+                app:cornerRadius="20dp"
+                android:tag="settings.field" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Иконка"
+                android:textSize="15sp"
+                android:textColor="#97a6bc"
+                android:includeFontPadding="false"
+                android:layout_marginTop="18dp"
+                android:layout_marginBottom="8dp" />
+            <Button
+                android:id="@+id/passengerDockStyle2"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:text="@string/dock_icon_default"
                 android:textColor="@color/settings_text"
                 android:textSize="@dimen/settings_caption_size"
                 android:singleLine="true"

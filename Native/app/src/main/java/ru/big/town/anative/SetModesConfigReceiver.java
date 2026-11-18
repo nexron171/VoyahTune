@@ -83,6 +83,14 @@ public class SetModesConfigReceiver extends BroadcastReceiver {
                             "voyahtune_" + passengerKey,
                             passengerApp.isEmpty() ? "none" : passengerApp);
                 }
+                // A config push from an older RestoreMode carries no style; keep the stored choice.
+                String passengerIconKey = DockIconStyle.passengerKey(slot);
+                if (intent.hasExtra(passengerIconKey)) {
+                    Settings.Global.putString(
+                            context.getContentResolver(),
+                            "voyahtune_" + passengerIconKey,
+                            DockIconStyle.fromValue(intent.getStringExtra(passengerIconKey)).value);
+                }
                 String key = DockIconStyle.configKey(slot);
                 DockIconStyle style = DockIconStyle.fromValue(intent.getStringExtra(key));
                 Settings.Global.putString(

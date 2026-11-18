@@ -50,27 +50,67 @@ public final class AppsSettingsFragment extends SettingsSectionFragment {
     private Button dockSplit1Btn, dockSplit2Btn;
     private Button dockIcon1Button, dockIcon2Button;
 
-    private void bindPassengerDockSlot(int slot, int pickerId, int resetId) {
+    private void bindPassengerDockSlot(int slot, int pickerId, int styleId, int resetId) {
         Button picker = settingView(pickerId);
         if (picker == null) return;
         String key = "passengerDockSlot" + slot;
+        Button style = settingView(styleId);
         Button reset = settingView(resetId);
         String stock = "По умолчанию";
         picker.setText(preferences.getString(key + "Label", stock));
         reset.setEnabled(!preferences.getString(key, "").isEmpty());
+        setPassengerDockIconButton(style, slot);
         picker.setOnClickListener(view -> SettingsAppPicker.show(requireContext(),
                 "Пассажирский док · слот " + slot, true, (packageName, label) -> {
                     preferences.edit().putString(key, packageName).putString(key + "Label", label).apply();
                     picker.setText(label);
                     reset.setEnabled(true);
+                    setPassengerDockIconButton(style, slot);
                     pushDockConfig();
                 }));
+        if (style != null) {
+            style.setOnClickListener(view -> pickPassengerDockIcon(slot, style));
+        }
         reset.setOnClickListener(view -> {
-            preferences.edit().remove(key).remove(key + "Label").apply();
+            preferences.edit().remove(key).remove(key + "Label")
+                    .remove(DockIconStyle.passengerKey(slot)).apply();
             picker.setText(stock);
             reset.setEnabled(false);
+            setPassengerDockIconButton(style, slot);
             pushDockConfig();
         });
+    }
+
+    /** OEM packages often ship the platform placeholder icon, so passenger slots pick their own. */
+    private void pickPassengerDockIcon(int slot, Button button) {
+        DockIconPicker.show(
+                requireContext(),
+                slot,
+                preferences.getString("passengerDockSlot" + slot, ""),
+                DockIconStyle.passengerStyles(),
+                passengerDockStyle(slot),
+                style -> {
+                    preferences
+                            .edit()
+                            .putString(DockIconStyle.passengerKey(slot), style.value)
+                            .apply();
+                    setPassengerDockIconButton(button, slot);
+                    pushDockConfig();
+                });
+    }
+
+    private DockIconStyle passengerDockStyle(int slot) {
+        return DockIconStyle.fromValue(
+                preferences.getString(
+                        DockIconStyle.passengerKey(slot), DockIconStyle.DEFAULT.value));
+    }
+
+    private void setPassengerDockIconButton(Button button, int slot) {
+        if (button == null) {
+            return;
+        }
+        button.setText(DockIconPicker.label(passengerDockStyle(slot)));
+        button.setEnabled(!preferences.getString("passengerDockSlot" + slot, "").isEmpty());
     }
 
     private void initDockOverride() {
@@ -164,6 +204,7 @@ public final class AppsSettingsFragment extends SettingsSectionFragment {
                 requireContext(),
                 slot,
                 preferences.getString("dockOverride" + slot, ""),
+                DockIconStyle.driverStyles(),
                 dockIconStyle(slot),
                 style -> {
                     preferences
@@ -645,8 +686,10 @@ public final class AppsSettingsFragment extends SettingsSectionFragment {
     @Override
     protected void bindSettingsRow() {
         bindClusterNavigation();
-        bindPassengerDockSlot(1, R.id.passengerDockApp1, R.id.passengerDockReset1);
-        bindPassengerDockSlot(2, R.id.passengerDockApp2, R.id.passengerDockReset2);
+        bindPassengerDockSlot(
+                1, R.id.passengerDockApp1, R.id.passengerDockStyle1, R.id.passengerDockReset1);
+        bindPassengerDockSlot(
+                2, R.id.passengerDockApp2, R.id.passengerDockStyle2, R.id.passengerDockReset2);
         if (settingView(R.id.dockOverrideBlock) != null) {
             initDockOverride();
             bindClick(R.id.buttonDockApp1, view -> pickDockApp(1));

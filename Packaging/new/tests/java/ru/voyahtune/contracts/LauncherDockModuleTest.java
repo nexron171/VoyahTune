@@ -205,17 +205,22 @@ public final class LauncherDockModuleTest {
 
     private static void passengerSlotReload(boolean shared) throws Exception {
         java.util.List<String> assignments = new java.util.ArrayList<>();
+        java.util.List<String> iconStyles = new java.util.ArrayList<>();
         try (LauncherDockContractDriver.Harness harness =
                 new LauncherDockContractDriver.Harness(shared) {
                     @Override
                     public void passengerDock(
-                            Object bar, Object source, String first, String second) {
+                            Object bar,
+                            Object source,
+                            java.util.List<String> targets,
+                            java.util.List<String> styles) {
                         require(
                                 bar == passenger && source == driver,
                                 "Passenger settings applied to the wrong bar");
                         assignments.clear();
-                        assignments.add(first);
-                        assignments.add(second);
+                        assignments.addAll(targets);
+                        iconStyles.clear();
+                        iconStyles.addAll(styles);
                     }
                 }) {
             harness.settings.put("dock1", "driver.phone");
@@ -224,14 +229,22 @@ public final class LauncherDockModuleTest {
             require(
                     assignments.equals(java.util.List.of("none", "passenger.music")),
                     "Driver assignment leaked into the passenger dock");
+            require(
+                    iconStyles.equals(java.util.List.of("none", "none")),
+                    "An unconfigured passenger slot must keep the icon of its application");
             harness.settings.remove("passengerDockSlot2");
             harness.settings.put("passengerDockSlot1", "passenger.maps");
+            harness.settings.put("passengerDockSlot1Icon", "navigation");
+            harness.settings.put("passengerDockSlot2Icon", "climate");
             harness.events.reload();
             harness.flush(0);
             harness.flush(350);
             require(
                     assignments.equals(java.util.List.of("passenger.maps", "none")),
                     "Live reload lost the passenger reassignment or reset");
+            require(
+                    iconStyles.equals(java.util.List.of("navigation", "climate")),
+                    "Live reload lost the passenger icon style of its slot");
         }
     }
 

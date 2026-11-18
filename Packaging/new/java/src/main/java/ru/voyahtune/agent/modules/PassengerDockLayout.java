@@ -128,10 +128,11 @@ final class PassengerDockLayout implements AutoCloseable {
         inserted.add(child);
     }
 
-    void update(Object driver, String first, String second) throws Exception {
+    void update(Object driver, List<String> targets, List<String> iconStyles) throws Exception {
         updateNavigation();
-        updateSlot(0, first);
-        updateSlot(1, second);
+        for (int index = 0; index < slots.length; index++) {
+            updateSlot(index, targets.get(index), iconStyles.get(index));
+        }
         updateGeometry();
     }
 
@@ -260,7 +261,7 @@ final class PassengerDockLayout implements AutoCloseable {
         }
     }
 
-    private void updateSlot(int index, String configured) throws Exception {
+    private void updateSlot(int index, String configured, String iconStyle) throws Exception {
         View slot = slots[index];
         String target = platform.available(configured) ? configured : "";
         targets[index] = target;
@@ -272,7 +273,7 @@ final class PassengerDockLayout implements AutoCloseable {
             if (slot instanceof RadioButton) owned.write(slot, "checked", false);
             return;
         }
-        owned.write(slot, "background", platform.icon(target, index + 1, "default"));
+        owned.write(slot, "background", platform.icon(target, index + 1, iconStyle));
         owned.write(slot, "description", platform.label(target));
         LauncherCommand.Kind kind =
                 LauncherCatalog.RESTORE.equals(target)

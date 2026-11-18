@@ -123,9 +123,15 @@ public class DockIconConfigTest {
         try (ActivityController<Activity> controller = Robolectric.buildActivity(Activity.class)) {
             controller.get().setTheme(R.style.Theme_RestoreMode_Settings);
             Activity activity = controller.setup().get();
-            for (DockIconStyle style : DockIconStyle.values()) {
+            for (DockIconStyle style : DockIconStyle.driverStyles()) {
                 AtomicReference<DockIconStyle> selected = new AtomicReference<>();
-                DockIconPicker.show(activity, 1, CarPlayTarget.ID, style, selected::set);
+                DockIconPicker.show(
+                        activity,
+                        1,
+                        CarPlayTarget.ID,
+                        DockIconStyle.driverStyles(),
+                        style,
+                        selected::set);
                 AlertDialog dialog = (AlertDialog) ShadowDialog.getLatestDialog();
                 ListView choices = dialog.getListView();
                 assertEquals(3, choices.getCount());
@@ -137,6 +143,76 @@ public class DockIconConfigTest {
                 assertEquals(style, selected.get());
                 assertFalse(dialog.isShowing());
             }
+        }
+    }
+
+    @Test
+    public void passengerPickerOffersOwnArtworkForAPlaceholderAppIcon() {
+        try (ActivityController<Activity> controller = Robolectric.buildActivity(Activity.class)) {
+            controller.get().setTheme(R.style.Theme_RestoreMode_Settings);
+            Activity activity = controller.setup().get();
+            for (DockIconStyle style : DockIconStyle.passengerStyles()) {
+                AtomicReference<DockIconStyle> selected = new AtomicReference<>();
+                DockIconPicker.show(
+                        activity,
+                        2,
+                        "com.qinggan.app.vehicle",
+                        DockIconStyle.passengerStyles(),
+                        style,
+                        selected::set);
+                AlertDialog dialog = (AlertDialog) ShadowDialog.getLatestDialog();
+                ListView choices = dialog.getListView();
+                assertEquals(5, choices.getCount());
+                int position = DockIconStyle.passengerStyles().indexOf(style);
+                assertEquals(position, choices.getCheckedItemPosition());
+                TextView row = (TextView) choices.getAdapter().getView(position, null, choices);
+                assertNotNull(
+                        "Style " + style + " has no preview",
+                        row.getCompoundDrawablesRelative()[0]);
+                choices.performItemClick(row, position, position);
+                assertEquals(style, selected.get());
+                assertFalse(dialog.isShowing());
+            }
+        }
+    }
+
+    @Test
+    public void passengerIconIsPublishedAndDoesNotMoveTheDriverSlot() throws Exception {
+
+        preferences
+                .edit()
+                .putString("passengerDockSlot2", "com.qinggan.app.vehicle")
+                .putString("passengerDockSlot2Icon", "climate")
+                .putString("dockOverride2Icon", "music")
+                .commit();
+        Intent config = publish();
+        assertEquals("climate", config.getStringExtra("passengerDockSlot2Icon"));
+        assertEquals("music", config.getStringExtra("dock2Icon"));
+        assertEquals("default", config.getStringExtra("passengerDockSlot1Icon"));
+
+        preferences.edit().putString("passengerDockSlot2Icon", "unknown").commit();
+        assertEquals("default", publish().getStringExtra("passengerDockSlot2Icon"));
+    }
+
+    /** The agent looks artwork up by name in this APK, so a mistyped name loses the style. */
+    @Test
+    public void everyStyleArtworkIsReachableByNameOnTheDockCanvas() {
+        for (String name :
+                new String[] {
+                    "dock_navigation_icon",
+                    "dock_music_icon",
+                    "dock_climate_icon",
+                    "dock_apps_icon",
+                    "carplay_dock_logo"
+                }) {
+            int id =
+                    context.getResources()
+                            .getIdentifier(name, "drawable", context.getPackageName());
+            assertTrue("Missing drawable " + name, id != 0);
+            android.graphics.drawable.Drawable artwork = context.getDrawable(id);
+            assertNotNull("Drawable " + name + " did not inflate", artwork);
+            assertEquals(name + " must fill the 116x90 canvas", 116, artwork.getIntrinsicWidth());
+            assertEquals(name + " must fill the 116x90 canvas", 90, artwork.getIntrinsicHeight());
         }
     }
 

@@ -13,6 +13,7 @@ import ru.big.town.common.CarPlayTarget;
 import ru.big.town.common.DockIconStyle;
 import ru.big.town.restoremode.R;
 
+import java.util.List;
 import java.util.function.Consumer;
 
 public final class DockIconPicker {
@@ -24,21 +25,30 @@ public final class DockIconPicker {
                 return R.string.dock_icon_navigation;
             case MUSIC:
                 return R.string.dock_icon_music;
+            case CLIMATE:
+                return R.string.dock_icon_climate;
+            case APPS:
+                return R.string.dock_icon_apps;
             default:
                 return R.string.dock_icon_default;
         }
+    }
+
+    public static String styleLabel(Context context, DockIconStyle style) {
+        return context.getString(label(style));
     }
 
     public static void show(
             Context context,
             int slot,
             String packageName,
+            List<DockIconStyle> styles,
             DockIconStyle selected,
             Consumer<DockIconStyle> onSelected) {
-        DockIconStyle[] styles = DockIconStyle.values();
-        String[] labels = new String[styles.length];
-        for (int index = 0; index < styles.length; index++) {
-            labels[index] = context.getString(label(styles[index]));
+        DockIconStyle[] offered = styles.toArray(new DockIconStyle[0]);
+        String[] labels = new String[offered.length];
+        for (int index = 0; index < offered.length; index++) {
+            labels[index] = context.getString(label(offered[index]));
         }
 
         MaterialAlertDialogBuilder builder =
@@ -50,11 +60,12 @@ public final class DockIconPicker {
                     @Override
                     public View getView(int position, View recycled, ViewGroup parent) {
                         TextView row = (TextView) super.getView(position, recycled, parent);
-                        Drawable icon = icon(dialogContext, styles[position], packageName);
+                        Drawable icon = icon(dialogContext, offered[position], packageName);
                         if (icon != null) {
                             float density = context.getResources().getDisplayMetrics().density;
+                            // Dock artwork uses the 116x90 slot canvas; app icons stay square.
                             boolean dockCanvas =
-                                    styles[position] != DockIconStyle.DEFAULT
+                                    offered[position] != DockIconStyle.DEFAULT
                                             || CarPlayTarget.isCarPlay(packageName);
                             int width = Math.round((dockCanvas ? 93 : 40) * density);
                             int height = Math.round((dockCanvas ? 72 : 40) * density);
@@ -67,9 +78,9 @@ public final class DockIconPicker {
         builder.setTitle(context.getString(R.string.dock_icon_title, slot))
                 .setSingleChoiceItems(
                         adapter,
-                        selected.ordinal(),
+                        Math.max(0, styles.indexOf(selected)),
                         (dialog, position) -> {
-                            onSelected.accept(styles[position]);
+                            onSelected.accept(offered[position]);
                             dialog.dismiss();
                         })
                 .setNegativeButton("Отмена", null)
@@ -77,11 +88,17 @@ public final class DockIconPicker {
     }
 
     private static Drawable icon(Context context, DockIconStyle style, String packageName) {
-        if (style == DockIconStyle.NAVIGATION) {
-            return context.getDrawable(R.drawable.dock_navigation_icon);
-        }
-        if (style == DockIconStyle.MUSIC) {
-            return context.getDrawable(R.drawable.dock_music_icon);
+        switch (style) {
+            case NAVIGATION:
+                return context.getDrawable(R.drawable.dock_navigation_icon);
+            case MUSIC:
+                return context.getDrawable(R.drawable.dock_music_icon);
+            case CLIMATE:
+                return context.getDrawable(R.drawable.dock_climate_icon);
+            case APPS:
+                return context.getDrawable(R.drawable.dock_apps_icon);
+            default:
+                break;
         }
         if (CarPlayTarget.isCarPlay(packageName)) {
             return context.getDrawable(R.drawable.carplay_dock_logo);

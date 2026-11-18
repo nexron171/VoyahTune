@@ -147,6 +147,10 @@ public final class SplitConfigSync {
                     DockIconStyle.fromValue(
                             prefs.getString(DockIconStyle.preferenceKey(slot), "default"));
             i.putExtra(DockIconStyle.configKey(slot), style.value);
+            DockIconStyle passengerStyle =
+                    DockIconStyle.fromValue(
+                            prefs.getString(DockIconStyle.passengerKey(slot), "default"));
+            i.putExtra(DockIconStyle.passengerKey(slot), passengerStyle.value);
         }
 
         i.putExtra(

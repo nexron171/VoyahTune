@@ -585,8 +585,12 @@ public final class LauncherDockModule implements ModuleRuntime.Module {
                     platform.passengerDock(
                             bar,
                             driver,
-                            policy.setting("passengerDockSlot1"),
-                            policy.setting("passengerDockSlot2"));
+                            List.of(
+                                    policy.setting("passengerDockSlot1"),
+                                    policy.setting("passengerDockSlot2")),
+                            List.of(
+                                    policy.setting("passengerDockSlot1Icon"),
+                                    policy.setting("passengerDockSlot2Icon")));
                 } catch (Exception unavailable) {
                     error(unavailable);
                 }

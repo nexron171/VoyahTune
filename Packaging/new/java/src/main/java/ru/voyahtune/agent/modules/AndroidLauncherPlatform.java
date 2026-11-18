@@ -67,6 +67,8 @@ public final class AndroidLauncherPlatform implements LauncherPlatform {
                     "dock2Icon",
                     "passengerDockSlot1",
                     "passengerDockSlot2",
+                    "passengerDockSlot1Icon",
+                    "passengerDockSlot2Icon",
                     "fullscreen_apps",
                     "dockpin",
                     "freeform",
@@ -81,6 +83,15 @@ public final class AndroidLauncherPlatform implements LauncherPlatform {
                     "carplay_hide_system_bars",
                     "dockLaunchGuard0",
                     "dockLaunchGuard1");
+
+    /** Slot styles whose built-in artwork replaces the icon of the bound application. */
+    private static final Map<String, String> SLOT_ARTWORK =
+            Map.of(
+                    "navigation", "dock_navigation_icon",
+                    "music", "dock_music_icon",
+                    "climate", "dock_climate_icon",
+                    "apps", "dock_apps_icon");
+
     private final Context context;
     private final MethodAccess methods;
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -329,14 +340,10 @@ public final class AndroidLauncherPlatform implements LauncherPlatform {
 
     @Override
     public synchronized Object icon(String target, int slot, String style) throws Exception {
-        String resource =
-                style.equals("navigation")
-                        ? "dock_navigation_icon"
-                        : style.equals("music")
-                                ? "dock_music_icon"
-                                : normalize(target).equals(LauncherCatalog.CARPLAY)
-                                        ? "carplay_dock_logo"
-                                        : "";
+        String resource = SLOT_ARTWORK.getOrDefault(style, "");
+        if (resource.isEmpty() && normalize(target).equals(LauncherCatalog.CARPLAY)) {
+            resource = "carplay_dock_logo";
+        }
         if (!resource.isEmpty()) {
             try {
                 Resources resources =
@@ -359,12 +366,14 @@ public final class AndroidLauncherPlatform implements LauncherPlatform {
     }
 
     @Override
-    public void passengerDock(Object bar, Object driver, String first, String second) throws Exception {
+    public void passengerDock(
+            Object bar, Object driver, List<String> targets, List<String> iconStyles)
+            throws Exception {
         if (passengerLayout != null && !passengerLayout.matches(bar)) clearPassengerDock();
         if (passengerLayout == null) passengerLayout = PassengerDockLayout.attach(bar, driver, this, methods);
         if (passengerLayout != null) {
             try {
-                passengerLayout.update(driver, first, second);
+                passengerLayout.update(driver, targets, iconStyles);
             } catch (Exception failure) {
                 clearPassengerDock();
                 throw failure;
