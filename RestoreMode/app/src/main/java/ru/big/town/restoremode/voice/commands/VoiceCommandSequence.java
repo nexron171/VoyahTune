@@ -78,6 +78,37 @@ public final class VoiceCommandSequence {
         return classify(out);
     }
 
+    /** One accepted segment, the row that reports its outcome and the number sent to Native. */
+    public static final class Submission {
+        public final Segment segment;
+        /** Row of the result list, which keeps the position inside the spoken phrase. */
+        public final int displayRow;
+        /** Dense ordinal of a sent command: a rejected segment never consumes a number. */
+        public final int index;
+
+        private Submission(Segment segment, int displayRow, int index) {
+            this.segment = segment;
+            this.displayRow = displayRow;
+            this.index = index;
+        }
+    }
+
+    /**
+     * Commands to submit, in speech order, numbered the way Native's session gate requires. A
+     * skipped segment must not shift the numbers of the following commands, or Native refuses them
+     * all without an answer and the caller only sees its response timeout.
+     */
+    public static List<Submission> submissions(List<Segment> segments) {
+        List<Submission> out = new ArrayList<>();
+        for (int row = 0; row < segments.size(); row++) {
+            Segment segment = segments.get(row);
+            if (segment.accepted()) {
+                out.add(new Submission(segment, row, out.size()));
+            }
+        }
+        return out;
+    }
+
     /** Debug-only sample for the animation preview activity; it never sends a command. */
     public static List<Segment> sample() {
         return parse(

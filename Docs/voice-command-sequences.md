@@ -99,6 +99,10 @@ RestoreMode заранее разрешает ссылки на сплиты, Na
 
 - Op остаётся `execute`; в bundle добавлены `index` и `count` (`VoiceCommandMessage.create`).
   Прежний вызов без этих полей даёт `count = 1`, то есть старое поведение.
+- `VoiceCommandSequence.submissions` строит план отправки: принятые сегменты в порядке произнесения,
+  плотный `index` и строка результата, в которую вернётся итог. Отклонённый сегмент не расходует
+  номер — иначе Native отклонил бы и все последующие команды, а клиент показал бы только таймаут
+  «Сервис не ответил на команду».
 - `VoiceSessionGate` вместо boolean-флага хранит номер следующего сегмента: `submit(token, index)`
   принимает сегменты строго по порядку, повтор и пропуск номера отклоняются. Новая сессия сбрасывает
   счётчик, поэтому поздние ответы прежней сессии не продвигают последовательность.
@@ -129,7 +133,7 @@ RestoreMode заранее разрешает ссылки на сплиты, Na
 ## Реализация
 
 - `RestoreMode/app/src/main/java/ru/big/town/restoremode/voice/commands/VoiceCommandSequence.java` — деление фразы,
-  классификация сегментов, причины отказа, признак навигации, образец для предпросмотра.
+  классификация сегментов, причины отказа, признак навигации, план отправки `submissions`, образец для предпросмотра.
 - `voice/ui/VoiceAssistantActivity.java` — `recognized`, `recognizedSequence`, `stepSequence`, `completeStep`,
   `noteFor`, `finishSequence`, `showRows`/`clearRows`, список строк результата и тайминги.
 - `VoiceCommandMessage.java` — перегрузка `create` с `index`/`count`.

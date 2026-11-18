@@ -54,7 +54,7 @@ public class VoiceAssistantActivity extends AppCompatActivity {
     private TextView status, transcript, details;
     private LinearLayout resultList;
     private final List<TextView> rowNotes = new ArrayList<>();
-    private List<VoiceCommandSequence.Segment> sequence;
+    private final List<VoiceCommandSequence.Submission> sequenceSubmissions = new ArrayList<>();
     private Runnable commandTimeout;
     private int sequenceNext, sequenceAccepted;
     private long sequenceDuration;
@@ -220,7 +220,7 @@ public class VoiceAssistantActivity extends AppCompatActivity {
         ended = false;
         submitted = false;
         interrupted = false;
-        sequence = null;
+        sequenceSubmissions.clear();
         sequenceNext = 0;
         sequenceAccepted = 0;
         sequenceDuration = 0;
@@ -480,7 +480,8 @@ public class VoiceAssistantActivity extends AppCompatActivity {
 
     /** Segments run in speech order; rejected ones are shown in red and never sent. */
     private void recognizedSequence(String text, List<VoiceCommandSequence.Segment> segments) {
-        sequence = segments;
+        sequenceSubmissions.clear();
+        sequenceSubmissions.addAll(VoiceCommandSequence.submissions(segments));
         sequenceNext = 0;
         sequenceAccepted = 0;
         sequenceDuration = 0;
@@ -516,19 +517,19 @@ public class VoiceAssistantActivity extends AppCompatActivity {
         stepSequence();
     }
 
+    /** Sends the accepted segments one at a time, numbered the way Native's gate expects. */
     private void stepSequence() {
-        while (sequenceNext < sequence.size() && !sequence.get(sequenceNext).accepted()) {
-            sequenceNext++;
-        }
-        if (sequenceNext >= sequence.size()) {
+        if (sequenceNext >= sequenceSubmissions.size()) {
             finishSequence();
             return;
         }
         final int at = sequenceNext;
+        final VoiceCommandSequence.Submission submission = sequenceSubmissions.get(at);
+        final TextView note = rowNotes.get(submission.displayRow);
         final String token = session;
-        status.setText("Команда " + (at + 1) + " из " + sequence.size() + "…");
-        rowNotes.get(at).setTextColor(COLOR_NOTE);
-        rowNotes.get(at).setText("Отправляю…");
+        status.setText("Команда " + (at + 1) + " из " + sequenceSubmissions.size() + "…");
+        note.setTextColor(COLOR_NOTE);
+        note.setText("Отправляю…");
         ResultReceiver reply =
                 new ResultReceiver(ui) {
                     @Override
@@ -549,7 +550,13 @@ public class VoiceAssistantActivity extends AppCompatActivity {
                     }
                 };
         commandTimeout = null;
-        submitted = send("execute", sequence.get(at).command.action, reply, at, sequence.size());
+        submitted =
+                send(
+                        "execute",
+                        submission.segment.command.action,
+                        reply,
+                        submission.index,
+                        sequenceSubmissions.size());
         if (!submitted) {
             completeStep(at, "Не удалось отправить команду", null);
             return;
@@ -563,22 +570,25 @@ public class VoiceAssistantActivity extends AppCompatActivity {
                 };
         ui.postDelayed(
                 commandTimeout,
-                CustomVoiceCommandProtocol.responseTimeoutMillis(sequence.get(at).command.action));
+                CustomVoiceCommandProtocol.responseTimeoutMillis(
+                        submission.segment.command.action));
     }
 
-    /** A failing segment is reported in place; the remaining commands still run. */
+    /** A failing command is reported in its own row; the remaining commands still run. */
     private void completeStep(int at, String error, Bundle data) {
+        VoiceCommandSequence.Submission submission = sequenceSubmissions.get(at);
+        VoiceCommandCatalog.Command command = submission.segment.command;
+        TextView note = rowNotes.get(submission.displayRow);
         if (error == null) {
             sequenceAccepted++;
-            rowNotes.get(at).setText(noteFor(sequence.get(at).command, data));
+            note.setText(noteFor(command, data));
             sequenceDuration =
                     Math.max(
                             sequenceDuration,
-                            VoiceResultPresentation.successDurationMs(
-                                    sequence.get(at).command.action));
+                            VoiceResultPresentation.successDurationMs(command.action));
         } else {
-            rowNotes.get(at).setTextColor(COLOR_REJECTED_NOTE);
-            rowNotes.get(at).setText(error);
+            note.setTextColor(COLOR_REJECTED_NOTE);
+            note.setText(error);
         }
         sequenceNext = at + 1;
         stepSequence();

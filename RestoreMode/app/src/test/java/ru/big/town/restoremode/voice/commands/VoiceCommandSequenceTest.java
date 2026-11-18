@@ -100,6 +100,50 @@ public class VoiceCommandSequenceTest {
     }
 
     @Test
+    public void rejectedSegmentDoesNotNumberTheCommandsSentAfterIt() {
+        List<VoiceCommandSequence.Segment> segments =
+                VoiceCommandSequence.parse(
+                        commands, "включи режим топливо затем открой окно потом включи массаж");
+        List<VoiceCommandSequence.Submission> submissions =
+                VoiceCommandSequence.submissions(segments);
+        assertEquals(2, submissions.size());
+        assertEquals("energy:SREV", submissions.get(0).segment.command.action);
+        assertEquals(0, submissions.get(0).index);
+        assertEquals(0, submissions.get(0).displayRow);
+        assertEquals("seat:driver:massage:on", submissions.get(1).segment.command.action);
+        assertEquals("rejected segment consumed a number", 1, submissions.get(1).index);
+        assertEquals("result landed on the rejected row", 2, submissions.get(1).displayRow);
+    }
+
+    @Test
+    public void navigationStaysTheLastSubmissionAfterRejectedSegments() {
+        List<VoiceCommandCatalog.Command> all = new ArrayList<>(commands);
+        VoiceCommandCatalog.add(all, "app:demo", "Открыть приложение: Демо", "открой демо");
+        List<VoiceCommandSequence.Submission> submissions =
+                VoiceCommandSequence.submissions(
+                        VoiceCommandSequence.parse(
+                                all, "открой окно затем включи массаж затем открой демо"));
+        assertEquals(2, submissions.size());
+        assertEquals("seat:driver:massage:on", submissions.get(0).segment.command.action);
+        assertEquals("app:demo", submissions.get(1).segment.command.action);
+        assertEquals(submissions.size() - 1, submissions.get(submissions.size() - 1).index);
+    }
+
+    @Test
+    public void everyAcceptedSegmentIsSubmittedOnceAndRejectedSpeechSendsNothing() {
+        List<VoiceCommandSequence.Submission> single =
+                VoiceCommandSequence.submissions(VoiceCommandSequence.parse(commands, "массаж"));
+        assertEquals(1, single.size());
+        assertEquals(0, single.get(0).index);
+        assertEquals(0, single.get(0).displayRow);
+        assertTrue(
+                VoiceCommandSequence.submissions(
+                                VoiceCommandSequence.parse(
+                                        commands, "абвгдежзий затем не включай спорт"))
+                        .isEmpty());
+    }
+
+    @Test
     public void singlePhraseKeepsThePublishedCommandIncludingItsOwnAnd() {
         List<VoiceCommandSequence.Segment> segments =
                 VoiceCommandSequence.parse(commands, "включи форс и ви");
