@@ -51,6 +51,35 @@ clean_native_configure_state() {
         -exec rm -rf {} + 2>/dev/null || true
 }
 
+# Every project local.properties is the bind-mount target of the container SDK path, and the
+# container never reads the checkout copy. Gradle still reads it on the host, so an anchor
+# created without sdk.dir leaves host builds failing with "SDK location not found".
+prepare_local_properties_anchors() {
+    host_sdk=
+    for project in RestoreMode Native RunYN Updater; do
+        [ -n "$host_sdk" ] ||
+            host_sdk=$(sed -n 's/^sdk\.dir=//p' "$ROOT/$project/local.properties" 2>/dev/null | tail -n 1)
+    done
+    [ -n "$host_sdk" ] || host_sdk=${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}
+    if [ -z "$host_sdk" ]; then
+        message "Не найден SDK хоста: задайте ANDROID_HOME или sdk.dir в local.properties любого проекта."
+        message "local.properties проектов служат целью монтирования контейнера и должны оставаться"
+        message "пригодными для сборки вне контейнера."
+        return 1
+    fi
+
+    for project in Native RestoreMode RunYN Updater; do
+        properties="$ROOT/$project/local.properties"
+        [ -e "$properties" ] || : > "$properties"
+        if ! grep -q '^sdk\.dir=' "$properties"; then
+            if [ -s "$properties" ] && [ -n "$(tail -c 1 "$properties")" ]; then
+                printf '\n' >> "$properties"
+            fi
+            printf 'sdk.dir=%s\n' "$host_sdk" >> "$properties"
+        fi
+    done
+}
+
 mode=build
 rebuild=false
 while [ "$#" -gt 0 ]; do
@@ -83,9 +112,7 @@ fi
 
 mkdir -p "$CACHE/gradle" "$CACHE/cargo-registry"
 printf 'sdk.dir=%s\n' "$ANDROID_SDK" > "$CACHE/local.properties"
-for project in Native RestoreMode RunYN Updater; do
-    [ -e "$ROOT/$project/local.properties" ] || : > "$ROOT/$project/local.properties"
-done
+prepare_local_properties_anchors
 
 # release.py keeps this directory for the whole build; a killed build leaves it behind.
 release_lock="$ROOT/Releases/build/.release.lock"

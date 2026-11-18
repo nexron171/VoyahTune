@@ -236,7 +236,13 @@ Gradle-проектов с NDK в образе и останавливается
 в `Releases/cache/container/` и `Packaging/new/cache/`. Действующий
 `~/.android/debug.keystore` монтируется в контейнер; без него скрипт останавливается,
 чтобы не выпустить APK с другой подписью. Путь к SDK передаётся отдельным
-`local.properties`, сохранённые в checkout пути в контейнере не действуют.
+`local.properties`, сохранённые в checkout пути в контейнере не действуют. Он монтируется
+поверх `Native`, `RestoreMode`, `RunYN` и `Updater`, поэтому эти файлы создаются, если их нет,
+и должны сохранять хостовый `sdk.dir`: Gradle читает их и вне контейнера, а пустой
+`local.properties` означает для него «SDK location not found». Скрипт дополняет отсутствующий
+`sdk.dir` из уже настроенного проекта либо из `ANDROID_HOME` и останавливается, если путь
+найти не удалось.
+
 Ключи CarPlay release-сборка RestoreMode берёт из `Credentials/CarPlayKeys` в checkout;
 каталог попадает в контейнер вместе с остальными файлами, `DIPLAY_AUTH_ASSETS_DIR`
 в контейнер не передаётся.
