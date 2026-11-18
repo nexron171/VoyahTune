@@ -40,6 +40,17 @@ dockerfile_digest() {
     fi
 }
 
+# AGP stores the absolute ndk-build/cmake path of the environment that generated it in the
+# native configure model (.cxx/<build>/<hash>), and the model fingerprint and <hash> folder
+# omit the SDK location. The image SDK is /opt/android-sdk while the host SDK is wherever
+# local.properties points, so a leftover model makes the other environment exec a toolchain
+# path that does not exist there: "A problem occurred starting process .../ndk-build".
+clean_native_configure_state() {
+    find "$ROOT/Native" "$ROOT/RestoreMode" "$ROOT/RunYN" "$ROOT/Updater" \
+        -type d \( -name .cxx -o -path '*/build/intermediates/cxx' \) -prune \
+        -exec rm -rf {} + 2>/dev/null || true
+}
+
 mode=build
 rebuild=false
 while [ "$#" -gt 0 ]; do
@@ -134,8 +145,12 @@ if [ -t 0 ] && [ -t 1 ]; then
 fi
 
 # The checkout keeps its host path: Gradle, CMake and Rust caches store absolute paths,
-# and a different mount point invalidates them or breaks incremental dexing.
-exec "$DOCKER" run --rm --init ${terminal} \
+# and a different mount point invalidates them or breaks incremental dexing. The native
+# configure state is the one cache that also stores the SDK location of its environment,
+# so it is dropped on both sides of the container run instead of being shared.
+clean_native_configure_state
+trap clean_native_configure_state EXIT
+"$DOCKER" run --rm --init ${terminal} \
     --platform "$PLATFORM" \
     --user "$(id -u):$(id -g)" \
     --workdir "$ROOT" \
