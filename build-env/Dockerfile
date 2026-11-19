@@ -106,4 +106,14 @@ RUN mkdir --parents /opt/voyahtune-test \
         --output "${VOYAHTUNE_TEST_GSON_JAR}" \
     && echo "${GSON_SHA256}  ${VOYAHTUNE_TEST_GSON_JAR}" | sha256sum --check --status
 
+# The base image describes UID 1000 as "ubuntu" with its own home, and the JVM resolves user.home
+# through getpwuid instead of ENV HOME. Gradle takes the default debug keystore from user.home, so
+# a home that misses the mount target lets AGP sign with a key it generates inside the container
+# while the acting key stays unread in the mounted /home/builder/.android.
+RUN usermod --home /home/builder ubuntu \
+    && rm --recursive --force /home/ubuntu \
+    && home=$(setpriv --reuid 1000 --regid 1000 --clear-groups \
+        java -XshowSettings:properties -version 2>&1 | sed -n 's/^[[:space:]]*user.home = //p') \
+    && test "$home" = /home/builder
+
 WORKDIR /work

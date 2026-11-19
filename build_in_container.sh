@@ -109,6 +109,71 @@ clean_damaged_gradle_cache_state() {
         done
 }
 
+# Gradle takes the location of the default debug keystore from the JVM user.home, which the
+# passwd entry of the build UID decides, not $HOME. When the image stops resolving it to the
+# mount target, AGP silently signs with a key it generates in the container layer, so the
+# invariant is checked before the payload build rather than after the APKs are signed.
+verify_container_signing_key() {
+    if ! "$DOCKER" run --rm --user "$(id -u):$(id -g)" \
+        --volume "$signing_key_dir:/home/builder/.android" \
+        "$tag" sh -eu -c '
+            home=$(java -XshowSettings:properties -version 2>&1 |
+                sed -n "s/^[[:space:]]*user.home = //p")
+            if [ "$home" != /home/builder ]; then
+                printf "JVM образа резолвит user.home=%s, а ключ сборки смонтирован в /home/builder/.android.\n" "$home" >&2
+                printf "AGP берёт дефолтный debug-ключ из %s/.android/debug.keystore.\n" "$home" >&2
+                exit 1
+            fi
+            if [ ! -f /home/builder/.android/debug.keystore ]; then
+                printf "В контейнере не виден /home/builder/.android/debug.keystore.\n" >&2
+                exit 1
+            fi
+        '; then
+        message "Контейнер не видит действующий ключ подписи — сборка остановлена."
+        exit 1
+    fi
+    message "Ключ подписи виден контейнеру: user.home=/home/builder."
+}
+
+# A payload signed with another key than the acting one makes the installer remove the app
+# together with its data, and every rebuild would produce yet another certificate, so the
+# signer of the built APKs is compared with the certificate of the mounted key.
+verify_container_payload_signatures() {
+    if ! "$DOCKER" run --rm --user "$(id -u):$(id -g)" \
+        --volume "$signing_key_dir:/home/builder/.android" \
+        --volume "$ROOT:$ROOT" \
+        "$tag" sh -eu -c '
+            apksigner=$(ls -d /opt/android-sdk/build-tools/*/apksigner | sort -V | tail -n 1)
+            expected=$(keytool -list -v -keystore /home/builder/.android/debug.keystore \
+                -storepass android 2>/dev/null |
+                sed -n "s/^[[:space:]]*SHA256: //p" | tr "A-Z" "a-z" | tr -d ":" | head -n 1)
+            if [ -z "$expected" ]; then
+                printf "Не получен отпечаток сертификата /home/builder/.android/debug.keystore.\n" >&2
+                exit 1
+            fi
+            failed=0
+            for project in RunYN Updater Native RestoreMode; do
+                apk="$1/$project/app/build/outputs/apk/release/app-release.apk"
+                if [ ! -f "$apk" ]; then
+                    printf "Нет собранного APK: %s\n" "$apk" >&2
+                    failed=1
+                    continue
+                fi
+                actual=$("$apksigner" verify --print-certs "$apk" |
+                    sed -n "s/^Signer #1 certificate SHA-256 digest: //p" | tr -d "[:space:]")
+                if [ "$actual" != "$expected" ]; then
+                    printf "APK %s подписан ключом %s, ожидался %s\n" "$project" "$actual" "$expected" >&2
+                    failed=1
+                fi
+            done
+            exit "$failed"
+        ' sh "$ROOT"; then
+        message "Подпись собранных APK не совпадает с действующим ключом — сборка остановлена."
+        exit 1
+    fi
+    message "Подпись собранных APK совпадает с сертификатом ключа сборки."
+}
+
 mode=build
 rebuild=false
 while [ "$#" -gt 0 ]; do
@@ -131,7 +196,8 @@ if ! command -v "$DOCKER" > /dev/null 2>&1; then
     exit 1
 fi
 
-signing_key="$HOME/.android/debug.keystore"
+signing_key_dir="$HOME/.android"
+signing_key="$signing_key_dir/debug.keystore"
 if [ ! -f "$signing_key" ]; then
     message "Нет ключа подписи: $signing_key"
     message "APK Native/RestoreMode собираются с debug-подписью, поэтому действующий ключ"
@@ -189,6 +255,10 @@ if [ "$skip_ndk_check" = false ]; then
     done
 fi
 
+if [ "$mode" = build ]; then
+    verify_container_signing_key
+fi
+
 if [ "$mode" = shell ]; then
     set -- bash
 else
@@ -214,10 +284,14 @@ trap clean_native_configure_state EXIT
     --volume "$ROOT:$ROOT" \
     --volume "$CACHE:/cache" \
     --volume "$CACHE/cargo-registry:/opt/cargo/registry" \
-    --volume "$HOME/.android:/home/builder/.android" \
+    --volume "$signing_key_dir:/home/builder/.android" \
     --volume "$CACHE/local.properties:$ROOT/Native/local.properties:ro" \
     --volume "$CACHE/local.properties:$ROOT/RestoreMode/local.properties:ro" \
     --volume "$CACHE/local.properties:$ROOT/RunYN/local.properties:ro" \
     --volume "$CACHE/local.properties:$ROOT/Updater/local.properties:ro" \
     --env GRADLE_USER_HOME=/cache/gradle \
     "$tag" "$@"
+
+if [ "$mode" = build ]; then
+    verify_container_payload_signatures
+fi
