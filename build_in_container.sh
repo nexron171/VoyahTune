@@ -80,6 +80,35 @@ prepare_local_properties_anchors() {
     done
 }
 
+# An unclean shutdown journals the length of a Gradle lock file and loses its data pages, so the
+# lock state becomes all zeros. Gradle never recovers from such a state itself: every later build
+# stops with "Unexpected lock protocol found in lock file. Expected 3, found 0". The unreadable
+# states and the immutable workspaces whose metadata was never written are dropped instead, and
+# Gradle regenerates both. Only the container Gradle home is scanned: no other process keeps
+# locks there while the wrapper runs, unlike the .gradle directories of the projects.
+clean_damaged_gradle_cache_state() {
+    gradle_home="$1"
+    [ -d "$gradle_home" ] || return 0
+
+    # A live lock file is never empty and a valid one starts with its protocol byte, so a zero
+    # leading byte identifies the lost state without touching Cargo.lock and friends.
+    find "$gradle_home" -type f -name '*.lock' -size -64c |
+        while IFS= read -r lock; do
+            if [ "$(od -An -tu1 -N1 "$lock" | tr -d '[:space:]')" = 0 ]; then
+                rm -f "$lock"
+                message "Сброшено повреждённое состояние блокировки Gradle: $lock"
+            fi
+        done
+
+    [ -d "$gradle_home/caches" ] || return 0
+    find "$gradle_home/caches" -path '*/transforms/*/metadata.bin' -empty |
+        while IFS= read -r metadata; do
+            workspace=$(dirname "$metadata")
+            rm -rf "$workspace"
+            message "Сброшен незавершённый кэш артефакт-транформов: $workspace"
+        done
+}
+
 mode=build
 rebuild=false
 while [ "$#" -gt 0 ]; do
@@ -113,6 +142,7 @@ fi
 mkdir -p "$CACHE/gradle" "$CACHE/cargo-registry"
 printf 'sdk.dir=%s\n' "$ANDROID_SDK" > "$CACHE/local.properties"
 prepare_local_properties_anchors
+clean_damaged_gradle_cache_state "$CACHE/gradle"
 
 # release.py keeps this directory for the whole build; a killed build leaves it behind.
 release_lock="$ROOT/Releases/build/.release.lock"
