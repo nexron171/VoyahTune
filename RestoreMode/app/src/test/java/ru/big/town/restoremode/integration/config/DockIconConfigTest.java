@@ -31,6 +31,7 @@ import ru.big.town.common.DockIconStyle;
 import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.settings.ui.dialogs.DockIconPicker;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -162,13 +163,24 @@ public class DockIconConfigTest {
                         selected::set);
                 AlertDialog dialog = (AlertDialog) ShadowDialog.getLatestDialog();
                 ListView choices = dialog.getListView();
-                assertEquals(5, choices.getCount());
+                assertEquals(6, choices.getCount());
                 int position = DockIconStyle.passengerStyles().indexOf(style);
                 assertEquals(position, choices.getCheckedItemPosition());
                 TextView row = (TextView) choices.getAdapter().getView(position, null, choices);
-                assertNotNull(
-                        "Style " + style + " has no preview",
-                        row.getCompoundDrawablesRelative()[0]);
+                android.graphics.drawable.Drawable preview =
+                        row.getCompoundDrawablesRelative()[0];
+                assertNotNull("Style " + style + " has no preview", preview);
+                if (style != DockIconStyle.DEFAULT) {
+                    // A style that lost its artwork would silently fall back to the app icon.
+                    assertEquals(
+                            "Style " + style + " previews the 116x90 dock canvas",
+                            116,
+                            preview.getIntrinsicWidth());
+                    assertEquals(
+                            "Style " + style + " previews the 116x90 dock canvas",
+                            90,
+                            preview.getIntrinsicHeight());
+                }
                 choices.performItemClick(row, position, position);
                 assertEquals(style, selected.get());
                 assertFalse(dialog.isShowing());
@@ -176,19 +188,53 @@ public class DockIconConfigTest {
         }
     }
 
+    /** The dialog order is what the user reads: car sits between music and climate. */
+    @Test
+    public void passengerPickerListsCarBetweenMusicAndClimate() {
+        try (ActivityController<Activity> controller = Robolectric.buildActivity(Activity.class)) {
+            controller.get().setTheme(R.style.Theme_RestoreMode_Settings);
+            Activity activity = controller.setup().get();
+            DockIconPicker.show(
+                    activity,
+                    1,
+                    "com.qinggan.app.vehicle",
+                    DockIconStyle.passengerStyles(),
+                    DockIconStyle.DEFAULT,
+                    style -> {});
+            ListView choices = ((AlertDialog) ShadowDialog.getLatestDialog()).getListView();
+            List<String> labels = new ArrayList<>();
+            for (int position = 0; position < choices.getCount(); position++) {
+                labels.add(choices.getAdapter().getItem(position).toString());
+            }
+            assertEquals(
+                    List.of(
+                            activity.getString(R.string.dock_icon_default),
+                            activity.getString(R.string.dock_icon_navigation),
+                            activity.getString(R.string.dock_icon_music),
+                            activity.getString(R.string.dock_icon_car),
+                            activity.getString(R.string.dock_icon_climate),
+                            activity.getString(R.string.dock_icon_apps)),
+                    labels);
+        }
+    }
+
     @Test
     public void passengerIconIsPublishedAndDoesNotMoveTheDriverSlot() throws Exception {
+
+        assertEquals("default", publish().getStringExtra("passengerDockSlot1Icon"));
 
         preferences
                 .edit()
                 .putString("passengerDockSlot2", "com.qinggan.app.vehicle")
                 .putString("passengerDockSlot2Icon", "climate")
+                .putString("passengerDockSlot1Icon", "car")
                 .putString("dockOverride2Icon", "music")
                 .commit();
         Intent config = publish();
         assertEquals("climate", config.getStringExtra("passengerDockSlot2Icon"));
+        assertEquals("car", config.getStringExtra("passengerDockSlot1Icon"));
         assertEquals("music", config.getStringExtra("dock2Icon"));
-        assertEquals("default", config.getStringExtra("passengerDockSlot1Icon"));
+        assertEquals("none", config.getStringExtra("passengerDockSlot1"));
 
         preferences.edit().putString("passengerDockSlot2Icon", "unknown").commit();
         assertEquals("default", publish().getStringExtra("passengerDockSlot2Icon"));
@@ -201,6 +247,7 @@ public class DockIconConfigTest {
                 new String[] {
                     "dock_navigation_icon",
                     "dock_music_icon",
+                    "dock_car_icon",
                     "dock_climate_icon",
                     "dock_apps_icon",
                     "carplay_dock_logo"

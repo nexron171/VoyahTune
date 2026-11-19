@@ -7,6 +7,7 @@ public enum DockIconStyle {
     DEFAULT("default"),
     NAVIGATION("navigation"),
     MUSIC("music"),
+    CAR("car"),
     CLIMATE("climate"),
     APPS("apps");
 
@@ -35,7 +36,7 @@ public enum DockIconStyle {
      * instead of their own, so they get the whole artwork set.
      */
     public static List<DockIconStyle> passengerStyles() {
-        return Arrays.asList(DEFAULT, NAVIGATION, MUSIC, CLIMATE, APPS);
+        return Arrays.asList(DEFAULT, NAVIGATION, MUSIC, CAR, CLIMATE, APPS);
     }
 
     public static String preferenceKey(int slot) {

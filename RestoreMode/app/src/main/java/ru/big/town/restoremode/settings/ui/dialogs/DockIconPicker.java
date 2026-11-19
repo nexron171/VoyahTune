@@ -25,6 +25,8 @@ public final class DockIconPicker {
                 return R.string.dock_icon_navigation;
             case MUSIC:
                 return R.string.dock_icon_music;
+            case CAR:
+                return R.string.dock_icon_car;
             case CLIMATE:
                 return R.string.dock_icon_climate;
             case APPS:
@@ -93,6 +95,8 @@ public final class DockIconPicker {
                 return context.getDrawable(R.drawable.dock_navigation_icon);
             case MUSIC:
                 return context.getDrawable(R.drawable.dock_music_icon);
+            case CAR:
+                return context.getDrawable(R.drawable.dock_car_icon);
             case CLIMATE:
                 return context.getDrawable(R.drawable.dock_climate_icon);
             case APPS:

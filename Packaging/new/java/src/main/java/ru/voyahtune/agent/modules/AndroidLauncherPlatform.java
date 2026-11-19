@@ -89,6 +89,7 @@ public final class AndroidLauncherPlatform implements LauncherPlatform {
             Map.of(
                     "navigation", "dock_navigation_icon",
                     "music", "dock_music_icon",
+                    "car", "dock_car_icon",
                     "climate", "dock_climate_icon",
                     "apps", "dock_apps_icon");
 
