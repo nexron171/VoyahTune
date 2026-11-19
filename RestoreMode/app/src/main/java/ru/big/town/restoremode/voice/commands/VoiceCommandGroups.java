@@ -30,8 +30,8 @@ public final class VoiceCommandGroups {
             groups.add(Group.WINDOWS);
         } else if (action.startsWith("wheel_heat:")
                 || action.equals("battery_heat")
-                || action.equals("can:65080000c1c020000000")
-                || action.equals("can:65080000c1c010000000")) {
+                || action.equals("can:65080000c0c020000000")
+                || action.equals("can:65080000c0c010000000")) {
             groups.add(Group.HEATING);
         } else if (action.startsWith("climate:")
                 || action.startsWith("fragrance:")

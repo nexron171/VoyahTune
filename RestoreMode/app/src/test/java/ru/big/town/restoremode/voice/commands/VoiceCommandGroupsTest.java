@@ -38,8 +38,8 @@ public class VoiceCommandGroupsTest {
 
     @Test
     public void knownCanExamplesAreCategorizedButArbitraryCommandsStayInOther() {
-        assertEquals(EnumSet.of(HEATING), VoiceCommandGroups.forAction("can:65080000c1c020000000"));
-        assertEquals(EnumSet.of(HEATING), VoiceCommandGroups.forAction("can:65080000c1c010000000"));
+        assertEquals(EnumSet.of(HEATING), VoiceCommandGroups.forAction("can:65080000c0c020000000"));
+        assertEquals(EnumSet.of(HEATING), VoiceCommandGroups.forAction("can:65080000c0c010000000"));
         assertEquals(EnumSet.of(CAR), VoiceCommandGroups.forAction("can:7a080000000001000000"));
         assertEquals(EnumSet.of(CAR), VoiceCommandGroups.forAction("can:7a080000000002000000"));
         for (String action :
