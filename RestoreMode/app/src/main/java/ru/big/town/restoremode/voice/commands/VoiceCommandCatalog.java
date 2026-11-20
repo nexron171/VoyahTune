@@ -456,7 +456,8 @@ public final class VoiceCommandCatalog {
 
     /**
      * Навигация на приборной панели: Native перезапускает приложение из глобального свойства
-     * «voyahtune_cluster_navi_component» на дисплее кластера либо закрывает карточку.
+     * «voyahtune_cluster_navi_component» на дисплее кластера, закрывает карточку либо освобождает
+     * карточку и возвращает приложение на экран головного устройства.
      */
     private static void clusterNavigator(List<Command> all) {
         addVehicle(
@@ -469,6 +470,15 @@ public final class VoiceCommandCatalog {
                 "cluster_navi:stop",
                 "Навигация на экране водителя: закрыть",
                 clusterNaviPhrases("закрой", "заверши", "выключи"));
+        // Short form without «на экране водителя»: the navigator goes back to its own screen.
+        addVehicle(
+                all,
+                "cluster_navi:main_screen",
+                "Навигатор на экране головного устройства",
+                "запусти навигатор",
+                "запусти навигацию",
+                "открой навигатор",
+                "открой навигацию");
     }
 
     private static String[] clusterNaviPhrases(String... verbs) {

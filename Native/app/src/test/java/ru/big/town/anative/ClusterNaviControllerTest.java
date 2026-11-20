@@ -46,6 +46,11 @@ public class ClusterNaviControllerTest {
         public void sendStateBroadcast(int enabled) {
             calls.add("broadcast:" + enabled);
         }
+
+        @Override
+        public void launchApplication(String packageName) {
+            calls.add("launch:" + packageName);
+        }
     }
 
     @Test
@@ -69,6 +74,19 @@ public class ClusterNaviControllerTest {
                         "canStop:" + NAVI_PACKAGE,
                         "stop:" + NAVI_PACKAGE,
                         "broadcast:" + ClusterNaviController.STATE_DISABLED),
+                backend.calls);
+    }
+
+    @Test
+    public void mainScreenFreesTheClusterCardBeforeLaunchingTheApplication() {
+        FakeBackend backend = new FakeBackend();
+        assertEquals("", ClusterNaviController.execute(backend, "cluster_navi:main_screen"));
+        assertEquals(
+                List.of(
+                        "canStop:" + NAVI_PACKAGE,
+                        "stop:" + NAVI_PACKAGE,
+                        "broadcast:" + ClusterNaviController.STATE_DISABLED,
+                        "launch:" + NAVI_PACKAGE),
                 backend.calls);
     }
 
@@ -99,6 +117,15 @@ public class ClusterNaviControllerTest {
         FakeBackend backend = new FakeBackend();
         backend.stoppable = false;
         assertFalse(ClusterNaviController.execute(backend, "cluster_navi:start").isEmpty());
+        assertEquals(List.of("canStop:" + NAVI_PACKAGE), backend.calls);
+    }
+
+    /** Launching while the card is still owned by the cluster would move the app right back. */
+    @Test
+    public void unstoppablePackageIsNeverLaunchedOnItsOwnScreen() {
+        FakeBackend backend = new FakeBackend();
+        backend.stoppable = false;
+        assertFalse(ClusterNaviController.execute(backend, "cluster_navi:main_screen").isEmpty());
         assertEquals(List.of("canStop:" + NAVI_PACKAGE), backend.calls);
     }
 

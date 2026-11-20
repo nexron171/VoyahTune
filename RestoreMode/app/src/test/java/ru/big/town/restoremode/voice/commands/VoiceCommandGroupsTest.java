@@ -67,7 +67,8 @@ public class VoiceCommandGroupsTest {
                     "suspension_maintenance:on",
                     "suspension_maintenance:off",
                     "cluster_navi:start",
-                    "cluster_navi:stop"
+                    "cluster_navi:stop",
+                    "cluster_navi:main_screen"
                 }) {
             assertEquals(action, EnumSet.of(CAR), VoiceCommandGroups.forAction(action));
         }

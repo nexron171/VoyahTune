@@ -570,7 +570,7 @@ public class VoiceCommandCatalogTest {
         for (String phrase :
                 new String[] {
                     "выключи навигатор",
-                    "запусти навигатор",
+                    "закрой навигатор",
                     "открой приложение",
                     "запусти приложение на экране пассажира",
                     "не включай навигатор на экране водителя",
@@ -579,5 +579,40 @@ public class VoiceCommandCatalogTest {
             assertNull(phrase, VoiceCommandCatalog.match(commands, phrase));
         }
         assertAction("close_all", "закрой все приложения");
+    }
+
+    @Test
+    public void shortNavigatorPhraseReturnsTheApplicationToTheHeadUnitScreen() {
+        assertAction(
+                "cluster_navi:main_screen",
+                "запусти навигатор",
+                "запусти навигацию",
+                "открой навигатор",
+                "открой навигацию",
+                "навигатор запусти");
+        assertNull(VoiceCommandCatalog.match(commands, "не запускай навигатор"));
+        assertNull(VoiceCommandCatalog.match(commands, "не открывай навигацию"));
+    }
+
+    /**
+     * «Навигатор» is also the launcher label of Yandex Navi, so the short phrase collides with the
+     * app-launch template. The catalog never guesses an action for a shared phrase, and the cluster
+     * card keeps its explicit wording either way.
+     */
+    @Test
+    public void anAppLabelledNavigatorMakesOnlyTheShortPhraseAmbiguous() {
+        List<VoiceCommandCatalog.Command> all = new ArrayList<>(commands);
+        VoiceCommandCatalog.add(
+                all,
+                "app:ru.yandex.yandexnavi",
+                "Навигатор",
+                "запусти Навигатор",
+                "открой Навигатор");
+        assertNull(VoiceCommandCatalog.match(all, "запусти навигатор"));
+        assertNull(VoiceCommandCatalog.match(all, "открой навигатор"));
+        // Only the shared wording is lost: the card commands keep their own phrases.
+        assertEquals(
+                "cluster_navi:start",
+                VoiceCommandCatalog.match(all, "открой навигатор на экране водителя").action);
     }
 }
