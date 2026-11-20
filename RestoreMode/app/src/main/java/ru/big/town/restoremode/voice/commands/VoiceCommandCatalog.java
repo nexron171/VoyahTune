@@ -411,6 +411,7 @@ public final class VoiceCommandCatalog {
                 "прогрей батарею",
                 "прогрев батареи",
                 "включи подогрев батареи");
+        clusterNavigator(all);
         add(
                 all,
                 "apply",
@@ -451,6 +452,37 @@ public final class VoiceCommandCatalog {
                     phrases, name, "открой " + name, "открыть " + name, "откройте " + name);
         }
         addVehicle(all, action, title, phrases.toArray(new String[0]));
+    }
+
+    /**
+     * Навигация на приборной панели: Native перезапускает приложение из глобального свойства
+     * «voyahtune_cluster_navi_component» на дисплее кластера либо закрывает карточку.
+     */
+    private static void clusterNavigator(List<Command> all) {
+        addVehicle(
+                all,
+                "cluster_navi:start",
+                "Навигация на экране водителя: запустить",
+                clusterNaviPhrases("запусти", "открой"));
+        addVehicle(
+                all,
+                "cluster_navi:stop",
+                "Навигация на экране водителя: закрыть",
+                clusterNaviPhrases("закрой", "заверши", "выключи"));
+    }
+
+    private static String[] clusterNaviPhrases(String... verbs) {
+        String[] objects = {"навигатор", "приложение"};
+        String[] surfaces = {"экране", "панели"};
+        List<String> phrases = new ArrayList<>();
+        for (String verb : verbs) {
+            for (String object : objects) {
+                for (String surface : surfaces) {
+                    phrases.add(verb + " " + object + " на " + surface + " водителя");
+                }
+            }
+        }
+        return phrases.toArray(new String[0]);
     }
 
     private static void mode(List<Command> all, String action, String title, String... names) {

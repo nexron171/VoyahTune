@@ -51,6 +51,7 @@ public final class VoiceCommandGroups {
                 || action.equals("power_hold")
                 || action.equals("wash")
                 || action.equals("apply")
+                || action.startsWith("cluster_navi:")
                 || action.equals("can:7a080000000001000000")
                 || action.equals("can:7a080000000002000000")) {
             groups.add(Group.CAR);

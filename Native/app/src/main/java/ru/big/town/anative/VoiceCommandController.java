@@ -91,6 +91,19 @@ final class VoiceCommandController {
                     });
             return;
         }
+        if (action.startsWith("cluster_navi:")) {
+            // Stopping a package and broadcasting the card state are both side effects with no
+            // feedback channel, so the reply only reports that the chain accepted the command.
+            String[] error = {"Не удалось переключить навигацию на экране водителя"};
+            ApplyEngine.postIndependentUserCommand(
+                    "voice " + action,
+                    () -> error[0] = ClusterNaviController.execute(service, action),
+                    () -> {
+                        if (!gate.active(token)) return;
+                        respond(reply, error[0].isEmpty(), error[0].isEmpty() ? null : error[0]);
+                    });
+            return;
+        }
         if (SeatCommand.handles(action) || WindowCommand.handles(action)) {
             // Submission commits this one-shot action. Closing/replacing the voice UI must not
             // cancel a queued write, roll it back or cause a retry; only its reply is

@@ -65,7 +65,9 @@ public class VoiceCommandGroupsTest {
                     "fuel_charge:80",
                     "drive:OUTING",
                     "suspension_maintenance:on",
-                    "suspension_maintenance:off"
+                    "suspension_maintenance:off",
+                    "cluster_navi:start",
+                    "cluster_navi:stop"
                 }) {
             assertEquals(action, EnumSet.of(CAR), VoiceCommandGroups.forAction(action));
         }

@@ -542,4 +542,42 @@ public class VoiceCommandCatalogTest {
         assertNull(VoiceCommandCatalog.match(commands, "светлая тема"));
         assertNull(VoiceCommandCatalog.match(commands, "включи плавающие кнопки"));
     }
+
+    @Test
+    public void clusterNavigatorCoversEveryVerbObjectAndSurfacePair() {
+        for (String verb : new String[] {"запусти", "открой"}) {
+            for (String object : new String[] {"навигатор", "приложение"}) {
+                for (String surface : new String[] {"экране", "панели"}) {
+                    assertAction(
+                            "cluster_navi:start",
+                            verb + " " + object + " на " + surface + " водителя");
+                }
+            }
+        }
+        for (String verb : new String[] {"закрой", "заверши", "выключи"}) {
+            for (String object : new String[] {"навигатор", "приложение"}) {
+                for (String surface : new String[] {"экране", "панели"}) {
+                    assertAction(
+                            "cluster_navi:stop",
+                            verb + " " + object + " на " + surface + " водителя");
+                }
+            }
+        }
+    }
+
+    @Test
+    public void clusterNavigatorNeedsTheDriverDisplayAndIsNotAnAppOrCloseAll() {
+        for (String phrase :
+                new String[] {
+                    "выключи навигатор",
+                    "запусти навигатор",
+                    "открой приложение",
+                    "запусти приложение на экране пассажира",
+                    "не включай навигатор на экране водителя",
+                    "закрой навигатор на экране водителя или пассажира",
+                }) {
+            assertNull(phrase, VoiceCommandCatalog.match(commands, phrase));
+        }
+        assertAction("close_all", "закрой все приложения");
+    }
 }
