@@ -566,15 +566,28 @@ public class VoiceCommandCatalogTest {
     }
 
     @Test
-    public void clusterNavigatorNeedsTheDriverDisplayAndIsNotAnAppOrCloseAll() {
+    public void shortNavigatorPhrasesStopTheApplicationAndHideTheCard() {
+        assertAction(
+                "cluster_navi:stop",
+                "закрой навигатор",
+                "закрой навигацию",
+                "заверши навигатор",
+                "заверши навигацию",
+                "выключи навигатор",
+                "выключи навигацию",
+                "навигатор закрой");
+    }
+
+    @Test
+    public void navigatorPhrasesNeverSelectAnAppAndRejectNegationAndAlternatives() {
         for (String phrase :
                 new String[] {
-                    "выключи навигатор",
-                    "закрой навигатор",
                     "открой приложение",
                     "запусти приложение на экране пассажира",
                     "не включай навигатор на экране водителя",
                     "закрой навигатор на экране водителя или пассажира",
+                    "не закрывай навигатор",
+                    "не выключай навигацию",
                 }) {
             assertNull(phrase, VoiceCommandCatalog.match(commands, phrase));
         }
@@ -595,9 +608,10 @@ public class VoiceCommandCatalogTest {
     }
 
     /**
-     * «Навигатор» is also the launcher label of Yandex Navi, so the short phrase collides with the
-     * app-launch template. The catalog never guesses an action for a shared phrase, and the cluster
-     * card keeps its explicit wording either way.
+     * «Навигатор» is also the launcher label of Yandex Navi, so the short launch phrase collides with
+     * the app template. The catalog never guesses an action for a shared phrase, and the cluster
+     * card keeps its explicit wording either way. Closing verbs are absent from that template, so
+     * the short stop phrases keep working on such a head unit.
      */
     @Test
     public void anAppLabelledNavigatorMakesOnlyTheShortPhraseAmbiguous() {
@@ -614,5 +628,7 @@ public class VoiceCommandCatalogTest {
         assertEquals(
                 "cluster_navi:start",
                 VoiceCommandCatalog.match(all, "открой навигатор на экране водителя").action);
+        assertEquals("cluster_navi:stop", VoiceCommandCatalog.match(all, "закрой навигатор").action);
+        assertEquals("cluster_navi:stop", VoiceCommandCatalog.match(all, "выключи навигацию").action);
     }
 }

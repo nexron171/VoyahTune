@@ -464,24 +464,26 @@ public final class VoiceCommandCatalog {
                 all,
                 "cluster_navi:start",
                 "Навигация на экране водителя: запустить",
-                clusterNaviPhrases("запусти", "открой"));
+                clusterNaviCardPhrases("запусти", "открой"));
+        // A short closing phrase means "the navigator is gone everywhere": same stop and card off,
+        // never a relaunch.
+        List<String> stop =
+                new ArrayList<>(Arrays.asList(clusterNaviCardPhrases("закрой", "заверши", "выключи")));
+        Collections.addAll(stop, clusterNaviShortPhrases("закрой", "заверши", "выключи"));
         addVehicle(
                 all,
                 "cluster_navi:stop",
                 "Навигация на экране водителя: закрыть",
-                clusterNaviPhrases("закрой", "заверши", "выключи"));
+                stop.toArray(new String[0]));
         // Short form without «на экране водителя»: the navigator goes back to its own screen.
         addVehicle(
                 all,
                 "cluster_navi:main_screen",
                 "Навигатор на экране головного устройства",
-                "запусти навигатор",
-                "запусти навигацию",
-                "открой навигатор",
-                "открой навигацию");
+                clusterNaviShortPhrases("запусти", "открой"));
     }
 
-    private static String[] clusterNaviPhrases(String... verbs) {
+    private static String[] clusterNaviCardPhrases(String... verbs) {
         String[] objects = {"навигатор", "приложение"};
         String[] surfaces = {"экране", "панели"};
         List<String> phrases = new ArrayList<>();
@@ -490,6 +492,17 @@ public final class VoiceCommandCatalog {
                 for (String surface : surfaces) {
                     phrases.add(verb + " " + object + " на " + surface + " водителя");
                 }
+            }
+        }
+        return phrases.toArray(new String[0]);
+    }
+
+    private static String[] clusterNaviShortPhrases(String... verbs) {
+        String[] objects = {"навигатор", "навигацию"};
+        List<String> phrases = new ArrayList<>();
+        for (String verb : verbs) {
+            for (String object : objects) {
+                phrases.add(verb + " " + object);
             }
         }
         return phrases.toArray(new String[0]);
