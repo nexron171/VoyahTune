@@ -18,6 +18,7 @@ import android.media.session.PlaybackState;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
+import android.os.ParcelFileDescriptor;
 import android.os.PowerManager;
 import android.os.Process;
 import android.system.Os;
@@ -26,6 +27,7 @@ import android.util.Log;
 import androidx.core.app.NotificationCompat;
 
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -90,7 +92,7 @@ public class NowPlayingService extends Service {
     private static final AtomicLong ROUTE_REVISION = new AtomicLong();
     private static final AtomicLong BROADCAST_REVISION = new AtomicLong();
     private static final Object INSTANCE_CALLBACK_LOCK = new Object();
-    private static final Object SNAPSHOT_COMMIT_LOCK = new Object();
+    static final Object SNAPSHOT_COMMIT_LOCK = new Object();
     private static final Object ART_COMMIT_LOCK = new Object();
     private static final ThreadPoolExecutor ROUTE_EXECUTOR = newDeliveryExecutor("MediaRoute");
     private static final ThreadPoolExecutor BROADCAST_EXECUTOR =
@@ -161,13 +163,24 @@ public class NowPlayingService extends Service {
     static volatile int sState = PlaybackState.STATE_NONE;
     static volatile long sPosition = 0L;
     static volatile long sDuration = 0L;
-    static volatile boolean sHasArt = false;
-    static volatile long sArtRevision = System.currentTimeMillis();
+    // The PNG can be replaced before its metadata is published. Zero denotes a snapshot without art.
+    static volatile long snapshotArtRevision;
+    private static volatile long artFileRevision = System.currentTimeMillis();
     static volatile long sUpdatedAt = 0L;
 
     /** Файл обложки (приватный для Native; наружу отдаётся через NowPlayingProvider.openFile). */
     static File artFile(Context ctx) {
         return new File(ctx.getFilesDir(), ART_FILE_NAME);
+    }
+
+    static ParcelFileDescriptor openArt(Context context, String expectedRevision)
+            throws FileNotFoundException {
+        synchronized (ART_COMMIT_LOCK) {
+            if (expectedRevision != null && !Long.toString(artFileRevision).equals(expectedRevision)) {
+                throw new FileNotFoundException("Artwork revision has changed");
+            }
+            return ParcelFileDescriptor.open(artFile(context), ParcelFileDescriptor.MODE_READ_ONLY);
+        }
     }
 
     private volatile Handler handler;
@@ -656,12 +669,12 @@ public class NowPlayingService extends Service {
                 sState = state;
                 sPosition = position;
                 sDuration = duration;
-                sHasArt = hasArt;
+                snapshotArtRevision = hasArt ? artFileRevision : 0L;
                 sUpdatedAt = System.currentTimeMillis();
 
                 LastMediaSessionStore.remember(this, pkg, state);
                 OemMediaBrowserService.publish(this, pkg, appLabel, title, artist, album, state, position, duration,
-                        hasArt, sArtRevision);
+                        hasArt, snapshotArtRevision);
             }
             enqueueSnapshotBroadcast(buildSnapshotIntent());
 
@@ -717,10 +730,10 @@ public class NowPlayingService extends Service {
             sState = PlaybackState.STATE_NONE;
             sPosition = 0L;
             sDuration = 0L;
-            sHasArt = false;
+            snapshotArtRevision = 0L;
             sUpdatedAt = System.currentTimeMillis();
             OemMediaBrowserService.publish(this, "", "", "", "", "", PlaybackState.STATE_NONE,
-                    0, 0, false, sArtRevision);
+                    0, 0, false, snapshotArtRevision);
         }
     }
 
@@ -736,7 +749,8 @@ public class NowPlayingService extends Service {
             intent.putExtra("state", sState);
             intent.putExtra("position", sPosition);
             intent.putExtra("duration", sDuration);
-            intent.putExtra("hasArt", sHasArt);
+            intent.putExtra("hasArt", snapshotArtRevision != 0L);
+            intent.putExtra(NowPlayingProvider.ART_REVISION, snapshotArtRevision);
             intent.putExtra("updatedAt", sUpdatedAt);
             return intent;
         }
@@ -793,7 +807,7 @@ public class NowPlayingService extends Service {
                 }
                 Os.rename(pending.getAbsolutePath(), f.getAbsolutePath());
                 lastWrittenArt = bmp;
-                sArtRevision++;
+                artFileRevision++;
                 return true;
             }
         } catch (Exception e) {

@@ -39,6 +39,7 @@ public final class NowPlayingClient {
 
     private static final String METHOD_MEDIA_CONTROL = "media_control";
     private static final String EXTRA_HANDLED = "handled";
+    private static final String ART_REVISION = "artRevision";
     private static final String AUTHORITY = "ru.big.town.anative.nowplaying";
     public static final Uri CONTENT_URI = Uri.parse("content://" + AUTHORITY);
     public static final Uri ART_URI = Uri.parse("content://" + AUTHORITY + "/art");
@@ -56,6 +57,7 @@ public final class NowPlayingClient {
         public long position = 0L;
         public long duration = 0L;
         public boolean hasArt = false;
+        public long artRevision = 0L;
         public long updatedAt = 0L;
 
         public boolean isPlaying() {
@@ -85,6 +87,7 @@ public final class NowPlayingClient {
                 np.position = longOf(c, "position");
                 np.duration = longOf(c, "duration");
                 np.hasArt = intOf(c, "hasArt", 0) == 1;
+                np.artRevision = longOf(c, ART_REVISION);
                 np.updatedAt = longOf(c, "updatedAt");
             }
         } catch (Exception ignored) {
@@ -111,25 +114,23 @@ public final class NowPlayingClient {
         np.position = i.getLongExtra("position", 0L);
         np.duration = i.getLongExtra("duration", 0L);
         np.hasArt = i.getBooleanExtra("hasArt", false);
+        np.artRevision = i.getLongExtra(ART_REVISION, 0L);
         np.updatedAt = i.getLongExtra("updatedAt", 0L);
         return np;
     }
 
     /** Подгружает обложку из провайдера Native. null, если обложки нет. */
     public static Bitmap loadArt(Context ctx) {
-        InputStream is = null;
-        try {
-            is = ctx.getContentResolver().openInputStream(ART_URI);
-            return (is != null) ? BitmapFactory.decodeStream(is) : null;
-        } catch (Exception e) {
+        return loadArt(ctx, 0L);
+    }
+
+    public static Bitmap loadArt(Context context, long revision) {
+        Uri uri = revision == 0L ? ART_URI
+                : ART_URI.buildUpon().appendQueryParameter(ART_REVISION, Long.toString(revision)).build();
+        try (InputStream stream = context.getContentResolver().openInputStream(uri)) {
+            return stream == null ? null : BitmapFactory.decodeStream(stream);
+        } catch (Exception ignored) {
             return null;
-        } finally {
-            if (is != null) {
-                try {
-                    is.close();
-                } catch (Exception ignored) {
-                }
-            }
         }
     }
 

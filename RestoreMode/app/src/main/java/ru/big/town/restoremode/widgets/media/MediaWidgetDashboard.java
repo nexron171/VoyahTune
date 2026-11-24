@@ -135,22 +135,25 @@ public final class MediaWidgetDashboard {
             if (artKey.isEmpty()) {
                 art = null;
             } else {
-                loadArt(artKey);
+                loadArt(artKey, snapshot.artRevision);
             }
         }
         loadSourceIcon();
         redraw();
     }
 
-    private void loadArt(String key) {
+    private void loadArt(String key, long revision) {
         try {
             artExecutor.execute(
                     () -> {
-                        Bitmap loaded = NowPlayingClient.loadArt(context);
+                        Bitmap loaded = NowPlayingClient.loadArt(context, revision);
                         handler.post(
                                 () -> {
                                     if (destroyed || !key.equals(requestedArtKey)) {
                                         return;
+                                    }
+                                    if (loaded == null) {
+                                        requestedArtKey = "";
                                     }
                                     art = loaded;
                                     redraw();
@@ -322,13 +325,10 @@ public final class MediaWidgetDashboard {
         if (value == null || !value.hasArt) {
             return "";
         }
-        return value.packageName
-                + '|'
-                + value.title
-                + '|'
-                + value.artist
-                + '|'
-                + value.album;
+        if (value.artRevision != 0L) {
+            return Long.toString(value.artRevision);
+        }
+        return value.packageName + '|' + value.title + '|' + value.artist + '|' + value.album;
     }
 
     public void close() {

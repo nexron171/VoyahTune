@@ -12,7 +12,6 @@ import android.os.ParcelFileDescriptor;
 import android.os.Process;
 import android.util.Log;
 
-import java.io.File;
 import java.io.FileNotFoundException;
 
 /**
@@ -23,8 +22,7 @@ import java.io.FileNotFoundException;
  *       (см. колонки в {@link #COLUMNS}); данные берутся из статиков {@link NowPlayingService}
  *       (тот же процесс), поэтому провайдер не держит своего состояния.</li>
  *   <li>{@code openFile(content://ru.big.town.anative.nowplaying/art)} → PNG обложки (FD на приватный
- *       файл Native; кросс-процессно отдаётся через ParcelFileDescriptor). {@code hasArt}/{@code updatedAt}
- *       из query позволяют UI понять, есть ли обложка и обновилась ли она (cache-busting).</li>
+ *       файл Native; кросс-процессно отдаётся через ParcelFileDescriptor).</li>
  * </ul>
  *
  * Exported=true (читает RestoreMode, отдельный /data-процесс). Данные не чувствительны (метаданные трека).
@@ -47,19 +45,17 @@ public class NowPlayingProvider extends ContentProvider {
     public static final String AUTHORITY = "ru.big.town.anative.nowplaying";
     public static final Uri CONTENT_URI = Uri.parse("content://" + AUTHORITY);
     public static final Uri ART_URI = Uri.parse("content://" + AUTHORITY + "/art");
+    static final String ART_REVISION = "artRevision";
 
-    public static final String[] COLUMNS = {
-            "title",     // 0
-            "artist",    // 1
-            "album",     // 2
-            "package",   // 3
-            "appLabel",  // 4
-            "state",     // 5  PlaybackState.STATE_*
-            "position",  // 6  мс
-            "duration",  // 7  мс
-            "hasArt",    // 8  0/1
-            "updatedAt", // 9  epoch ms последнего обновления снимка
-    };
+    public static final String[] COLUMNS = snapshotColumns(ART_REVISION);
+    private static final String[] OEM_COLUMNS = snapshotColumns("rememberedSource");
+
+    private static String[] snapshotColumns(String lastColumn) {
+        return new String[] {
+                "title", "artist", "album", "package", "appLabel",
+                "state", "position", "duration", "hasArt", "updatedAt", lastColumn
+        };
+    }
 
     @Override
     public boolean onCreate() {
@@ -71,9 +67,7 @@ public class NowPlayingProvider extends ContentProvider {
             String[] selectionArgs, String sortOrder) {
         if (uri != null && "oem".equals(uri.getLastPathSegment())) {
             OemMediaBrowserService.Snapshot snapshot = OemMediaBrowserService.snapshot();
-            String[] columns = java.util.Arrays.copyOf(COLUMNS, COLUMNS.length + 1);
-            columns[COLUMNS.length] = "rememberedSource";
-            MatrixCursor cursor = new MatrixCursor(columns);
+            MatrixCursor cursor = new MatrixCursor(OEM_COLUMNS);
             cursor.addRow(new Object[] {
                     snapshot.title, snapshot.artist, snapshot.album, snapshot.packageName,
                     snapshot.appLabel, snapshot.state, snapshot.position, snapshot.duration,
@@ -82,28 +76,24 @@ public class NowPlayingProvider extends ContentProvider {
             });
             return cursor;
         }
-        MatrixCursor c = new MatrixCursor(COLUMNS);
-        c.addRow(new Object[]{
-                NowPlayingService.sTitle,
-                NowPlayingService.sArtist,
-                NowPlayingService.sAlbum,
-                NowPlayingService.sPackage,
-                NowPlayingService.sAppLabel,
-                NowPlayingService.sState,
-                NowPlayingService.sPosition,
-                NowPlayingService.sDuration,
-                NowPlayingService.sHasArt ? 1 : 0,
-                NowPlayingService.sUpdatedAt,
-        });
-        return c;
+        MatrixCursor cursor = new MatrixCursor(COLUMNS);
+        synchronized (NowPlayingService.SNAPSHOT_COMMIT_LOCK) {
+            long artRevision = NowPlayingService.snapshotArtRevision;
+            cursor.addRow(new Object[] {
+                    NowPlayingService.sTitle, NowPlayingService.sArtist, NowPlayingService.sAlbum,
+                    NowPlayingService.sPackage, NowPlayingService.sAppLabel, NowPlayingService.sState,
+                    NowPlayingService.sPosition, NowPlayingService.sDuration,
+                    artRevision != 0L ? 1 : 0, NowPlayingService.sUpdatedAt, artRevision
+            });
+        }
+        return cursor;
     }
 
     @Override
     public ParcelFileDescriptor openFile(Uri uri, String mode) throws FileNotFoundException {
         if (getContext() == null) throw new FileNotFoundException("no context");
-        File f = NowPlayingService.artFile(getContext());
-        if (!f.exists()) throw new FileNotFoundException("no album art");
-        return ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY);
+        String expectedRevision = uri == null ? null : uri.getQueryParameter(ART_REVISION);
+        return NowPlayingService.openArt(getContext(), expectedRevision);
     }
 
     @Override
