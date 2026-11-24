@@ -61,6 +61,19 @@ public class MediaWidgetArtCornerTest {
     }
 
     @Test
+    public void threeByTwoArtFillsTheHeightInsideTheTileFrame() {
+        Bitmap card = render(439, 270);
+
+        assertArt(card, 120, 1);
+        assertArt(card, 120, 268);
+        assertArt(card, 1, 135);
+        assertBackground(card, 120, 0);
+        assertBackground(card, 120, 269);
+        assertBackground(card, 2, 2);
+        assertBackground(card, 2, 267);
+    }
+
+    @Test
     public void compactArtRoundsAllFourCorners() {
         Bitmap card = render(140, 124);
 

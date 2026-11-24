@@ -239,8 +239,11 @@ public final class MediaWidgetView extends View {
     }
 
     private boolean sideFits() {
-        float artSize = Math.min(heightDp - borderDp * 2f, widthDp * .55f);
-        return widthDp - borderDp - artSize - 14f - TEXT_PADDING >= MIN_SIDE_TEXT_DP;
+        return widthDp - borderDp - sideArtWidth() - 14f - TEXT_PADDING >= MIN_SIDE_TEXT_DP;
+    }
+
+    private float sideArtWidth() {
+        return Math.min(heightDp - borderDp * 2f, widthDp * .55f);
     }
 
     private static float titleSizeFor(float width) {
@@ -295,9 +298,7 @@ public final class MediaWidgetView extends View {
     }
 
     private void layoutSide() {
-        float artSize = Math.min(heightDp - borderDp * 2f, widthDp * .55f);
-        float artTop = (heightDp - artSize) / 2f;
-        artRect.set(borderDp, artTop, borderDp + artSize, artTop + artSize);
+        artRect.set(borderDp, borderDp, borderDp + sideArtWidth(), heightDp - borderDp);
         setArtRadii();
 
         textLeft = artRect.right + 14f;
