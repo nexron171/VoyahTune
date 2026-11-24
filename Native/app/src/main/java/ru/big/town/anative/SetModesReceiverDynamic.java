@@ -623,23 +623,14 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
         List<String> actions = SteeringActionSequence.decode(configured);
         if (actions.isEmpty()) return;
         Log.i(TAG, "STEER_ACTION sequence start, count=" + actions.size());
-        List<ActionResult> results = new java.util.ArrayList<>();
-        OrderedActionSequence.run(
+        runConfiguredActions(
+                ctx,
                 actions,
-                (action, terminal) ->
-                        executeSteerAction(
-                                ctx,
-                                action,
-                                result -> {
-                                    if (!"voice_assistant".equals(action)
-                                            && !"carplay_siri".equals(action)) results.add(result);
-                                    terminal.run();
-                                }),
-                task -> STEER_SEQUENCE_HANDLER.post(task),
-                accepted -> {
-                    if (!accepted)
-                        results.add(
-                                ActionResult.failed("", "Не удалось выполнить действие кнопки"));
+                results -> {
+                    results.removeIf(
+                            result ->
+                                    "voice_assistant".equals(result.action)
+                                            || "carplay_siri".equals(result.action));
                     if (results.isEmpty()) return;
                     OemToastNotifier.show(
                             ctx,
@@ -651,20 +642,28 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
     static void runConfiguredActions(
             Context context,
             List<String> actions,
-            java.util.function.Consumer<Boolean> completion) {
+            java.util.function.Consumer<List<ActionResult>> completion) {
         Context application = context.getApplicationContext();
+        List<ActionResult> results = new java.util.ArrayList<>();
         OrderedActionSequence.run(
                 actions,
-                (action, terminal) -> handleSteerAction(application, action, terminal),
+                (action, terminal) ->
+                        executeSteerAction(
+                                application,
+                                action,
+                                result -> {
+                                    results.add(result);
+                                    terminal.run();
+                                }),
                 task -> STEER_SEQUENCE_HANDLER.post(task),
-                accepted -> {
-                    Log.i(
-                            TAG,
-                            "Configured sequence complete, count="
-                                    + actions.size()
-                                    + " accepted="
-                                    + accepted);
-                    completion.accept(accepted);
+                finished -> {
+                    if (!finished) {
+                        results.add(
+                                ActionResult.failed(
+                                        "", "Не удалось выполнить последовательность действий"));
+                    }
+                    Log.i(TAG, "Configured sequence complete, count=" + results.size());
+                    completion.accept(results);
                 });
     }
 

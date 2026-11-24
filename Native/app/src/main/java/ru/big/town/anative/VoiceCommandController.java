@@ -63,12 +63,15 @@ final class VoiceCommandController {
             SetModesReceiverDynamic.runConfiguredActions(
                     service,
                     actions,
-                    accepted -> {
-                        if (gate.active(token))
-                            respond(
-                                    reply,
-                                    accepted,
-                                    accepted ? null : "Не удалось выполнить собственную команду");
+                    results -> {
+                        if (!gate.active(token)) return;
+                        for (ActionResult result : results) {
+                            if (!result.accepted) {
+                                respond(reply, false, result.error);
+                                return;
+                            }
+                        }
+                        respond(reply, true, null);
                     });
             return;
         }
