@@ -59,7 +59,7 @@ public final class MediaWidgetView extends View {
 
     private static final int ACCENT = 0xff79b5f1;
     private static final int CONTROL_BACKGROUND = 0x332f4c6a;
-    private static final int PLACEHOLDER = 0xff263646;
+    private static final int ARTWORK_BACKGROUND = 0xff263646;
     private static final int BADGE_BACKGROUND = 0xcc1b1f25;
     private static final int BADGE_BACKGROUND_ACTIVE = 0xcc2f4c6a;
     private static final int CHOOSER_SCRIM = 0xe60d1014;
@@ -445,10 +445,12 @@ public final class MediaWidgetView extends View {
         path.addRoundRect(artRect, artRadii, Path.Direction.CW);
         canvas.save();
         canvas.clipPath(path);
-        if (art == null) {
-            paint.setStyle(Paint.Style.FILL);
-            paint.setColor(PLACEHOLDER);
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(ARTWORK_BACKGROUND);
+        if (art == null || art.hasAlpha()) {
             canvas.drawRect(artRect, paint);
+        }
+        if (art == null) {
             drawPlaceholder(canvas, artRect, .27f);
         } else {
             drawCropped(canvas, art, artRect);

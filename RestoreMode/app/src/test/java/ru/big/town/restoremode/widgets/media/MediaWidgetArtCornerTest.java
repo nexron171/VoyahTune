@@ -5,6 +5,7 @@ import static org.junit.Assert.assertEquals;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Paint;
 import android.media.session.PlaybackState;
 import android.view.View;
 
@@ -74,6 +75,29 @@ public class MediaWidgetArtCornerTest {
     }
 
     @Test
+    public void redrawingAnOpaqueCoverKeepsItsOriginalColorOnATransparentTile() {
+        MediaWidgetView view = createView(439, 270, Color.TRANSPARENT, solidArt());
+        draw(view).recycle();
+
+        Bitmap secondFrame = draw(view);
+        assertArt(secondFrame, 120, 80);
+        assertEquals(Color.TRANSPARENT, secondFrame.getPixel(400, 26));
+    }
+
+    @Test
+    public void transparentCoverPixelsHaveAnOpaqueBackingOnlyInsideTheArt() {
+        Bitmap artwork = Bitmap.createBitmap(256, 256, Bitmap.Config.ARGB_8888);
+        Paint red = new Paint();
+        red.setColor(Color.RED);
+        new Canvas(artwork).drawRect(0, 0, 128, 256, red);
+        Bitmap card = draw(createView(439, 270, Color.TRANSPARENT, artwork));
+
+        assertArt(card, 60, 90);
+        assertEquals(255, Color.alpha(card.getPixel(180, 90)));
+        assertEquals(Color.TRANSPARENT, card.getPixel(400, 26));
+    }
+
+    @Test
     public void compactArtRoundsAllFourCorners() {
         Bitmap card = render(140, 124);
 
@@ -84,20 +108,26 @@ public class MediaWidgetArtCornerTest {
     }
 
     private Bitmap render(int width, int height) {
+        return draw(createView(width, height, BACKGROUND, solidArt()));
+    }
+
+    private MediaWidgetView createView(int width, int height, int background, Bitmap artwork) {
         MediaWidgetView view = new MediaWidgetView(RuntimeEnvironment.getApplication(), listener);
-        view.setBackgroundColor(BACKGROUND);
+        view.setBackgroundColor(background);
         view.setSources(
                 Collections.singletonList(
                         new MediaSource("com.example.player", "Player", null)));
-        view.update(playing(), solidArt());
+        view.update(playing(), artwork);
         view.measure(
                 View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY));
         view.layout(0, 0, width, height);
-        Bitmap card = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
-        Canvas canvas = new Canvas(card);
-        canvas.drawColor(BACKGROUND);
-        view.draw(canvas);
+        return view;
+    }
+
+    private static Bitmap draw(View view) {
+        Bitmap card = Bitmap.createBitmap(view.getWidth(), view.getHeight(), Bitmap.Config.ARGB_8888);
+        view.draw(new Canvas(card));
         return card;
     }
 
