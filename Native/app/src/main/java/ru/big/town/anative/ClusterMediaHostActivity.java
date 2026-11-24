@@ -42,16 +42,17 @@ public final class ClusterMediaHostActivity extends Activity
     private Surface surface;
     private boolean closing;
 
-    static void launch(Context context, String pkg) {
-        if (pkg == null || pkg.isEmpty() || "none".equals(pkg)) return;
+    static boolean launch(Context context, String pkg) {
+        if (pkg == null || pkg.isEmpty() || "none".equals(pkg)) return false;
         Context app = context.getApplicationContext();
         int mediaId = findMediaDisplayId(app);
         if (mediaId < 0 || app.getPackageManager().getLaunchIntentForPackage(pkg) == null) {
             showError(app, "Медиакарточка или приложение недоступны");
-            return;
+            return false;
         }
         ClusterMediaHostActivity previous = active.get();
-        if (previous != null && previous.isCurrent() && pkg.equals(previous.packageName)) return;
+        if (previous != null && previous.isCurrent() && pkg.equals(previous.packageName))
+            return true;
         long token = SESSION.begin(pkg);
         if (previous != null) previous.close();
         AppDisplayLauncher.cancel(pkg);
@@ -66,10 +67,12 @@ public final class ClusterMediaHostActivity extends Activity
             ActivityOptions options = ActivityOptions.makeBasic();
             options.setLaunchDisplayId(mediaId);
             app.startActivity(intent, options.toBundle());
+            return true;
         } catch (Exception e) {
             SESSION.end(token);
             Log.e(TAG, "Cannot open media host", e);
             showError(app, "Не удалось открыть медиакарточку");
+            return false;
         }
     }
 

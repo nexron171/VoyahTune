@@ -92,8 +92,7 @@ final class VoiceCommandController {
             return;
         }
         if (action.startsWith("cluster_navi:")) {
-            // Stopping a package and broadcasting the card state are both side effects with no
-            // feedback channel, so the reply only reports that the chain accepted the command.
+            // Acceptance does not confirm that the cluster has drawn the application.
             String[] error = {"Не удалось переключить навигацию на экране водителя"};
             ApplyEngine.postIndependentUserCommand(
                     "voice " + action,
