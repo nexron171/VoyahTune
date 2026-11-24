@@ -2215,7 +2215,7 @@ public class SetModesService extends Service {
         if (serviceDestroyed) return;
         Log.i(TAG, "Power state changed: " + state + " (" + powerStateName(state) + ")");
         if (isWakeState(state)) {
-            ScenarioTriggerPersistence.wake(this);
+            ScenarioTriggerPersistence.wake(this, state);
             requestWashModeCleanup("power state " + powerStateName(state));
             ApplyEngine.activateWake("power state " + powerStateName(state));
             boolean screenReady =
@@ -2231,7 +2231,7 @@ public class SetModesService extends Service {
             return;
         }
         if (isSleepOrShutdownState(state)) {
-            ScenarioTriggerPersistence.sleep(this);
+            ScenarioTriggerPersistence.sleep(this, state);
             screenOffObserved = true;
             physicalWakeActions.onSleep();
             cancelAncillaryWakeTasks();
