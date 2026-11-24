@@ -70,6 +70,10 @@ public final class MediaWidgetView extends View {
     private static final float TEXT_PADDING = 12f;
     private static final float BADGE_MARGIN = 8f;
     private static final float PROGRESS_HEIGHT = 3f;
+    private static final float ARTIST_PROGRESS_GAP = 10f;
+    private static final float PROGRESS_CONTROLS_GAP = 8f;
+    private static final float STACKED_BOTTOM_PADDING = 10f;
+    private static final float TIMING_TEXT_SIZE = 13f;
     private static final float COMPACT_WIDTH_DP = 160f;
     private static final float MIN_SIDE_TEXT_DP = 90f;
     private static final float DEFAULT_BORDER_DP = 1f;
@@ -235,7 +239,13 @@ public final class MediaWidgetView extends View {
         float title = titleSizeFor(widthDp);
         float subtitle = subtitleSizeFor(title);
         float radius = controlRadiusFor(widthDp);
-        return 40f + title * .8f + subtitle * 1.3f + radius * 2f;
+        return 6f + title * .8f + subtitle * 1.3f + artistBaselineToProgressTop(subtitle)
+                + PROGRESS_HEIGHT + PROGRESS_CONTROLS_GAP + radius * 2f + STACKED_BOTTOM_PADDING;
+    }
+
+    private float artistBaselineToProgressTop(float size) {
+        setTextFont(size);
+        return paint.descent() + ARTIST_PROGRESS_GAP;
     }
 
     private boolean sideFits() {
@@ -284,11 +294,11 @@ public final class MediaWidgetView extends View {
         textLeft = TEXT_PADDING;
         textRight = widthDp - TEXT_PADDING;
 
-        float controlsCenterY = heightDp - 10f - radius;
-        progressY = controlsCenterY - radius - 12f;
+        float controlsCenterY = heightDp - STACKED_BOTTOM_PADDING - radius;
+        progressY = controlsCenterY - radius - PROGRESS_CONTROLS_GAP - PROGRESS_HEIGHT / 2f;
         progressLeft = textLeft;
         progressRight = textRight;
-        subtitleBaseline = progressY - 10f;
+        subtitleBaseline = progressY - PROGRESS_HEIGHT / 2f - artistBaselineToProgressTop(subtitleSize);
         titleBaseline = subtitleBaseline - subtitleSize * 1.3f;
         showTiming = heightDp >= 200f;
 
@@ -308,15 +318,16 @@ public final class MediaWidgetView extends View {
         titleSize = clamp(Math.min(availableWidth * .12f, heightDp * .22f), 14f, 26f);
         subtitleSize = clamp(titleSize * .75f, 12f, 18f);
 
-        float blockHeight =
-                titleSize * .8f + subtitleSize * 1.3f + 19f + radius * 2f;
+        float artistToBar = artistBaselineToProgressTop(subtitleSize);
+        float blockHeight = titleSize * .8f + subtitleSize * 1.3f + artistToBar
+                + PROGRESS_HEIGHT + PROGRESS_CONTROLS_GAP + radius * 2f;
         float blockTop = Math.max(6f, (heightDp - blockHeight) / 2f);
         titleBaseline = blockTop + titleSize * .8f;
         subtitleBaseline = titleBaseline + subtitleSize * 1.3f;
-        progressY = subtitleBaseline + 7f;
+        progressY = subtitleBaseline + artistToBar + PROGRESS_HEIGHT / 2f;
         progressLeft = textLeft;
         progressRight = textRight;
-        float controlsCenterY = progressY + 9f + radius;
+        float controlsCenterY = progressY + PROGRESS_HEIGHT / 2f + PROGRESS_CONTROLS_GAP + radius;
         showTiming = false;
 
         layoutControls(controlsCenterY, radius);
@@ -428,8 +439,9 @@ public final class MediaWidgetView extends View {
                 drawCompactProgress(canvas);
                 drawControls(canvas);
             } else {
-                drawTrackText(canvas);
-                drawProgress(canvas);
+                long position = currentPosition();
+                drawTrackText(canvas, position);
+                drawProgress(canvas, position);
                 drawControls(canvas);
                 if (chooserOpen) {
                     drawSourceChooser(canvas, true);
@@ -491,19 +503,27 @@ public final class MediaWidgetView extends View {
         paint.setFilterBitmap(false);
     }
 
-    private void drawTrackText(Canvas canvas) {
+    private void drawTrackText(Canvas canvas, long position) {
         String subtitle = !nowPlaying.artist.isEmpty() ? nowPlaying.artist : nowPlaying.appLabel;
         if (subtitle.isEmpty()) {
             subtitle = nowPlaying.packageName;
         }
         String title = fitText(nowPlaying.title, textRight - textLeft, titleSize);
-        subtitle = fitText(subtitle, textRight - textLeft, subtitleSize);
         text(canvas, title, textLeft, titleBaseline, titleSize, EnergyWidgetStyle.WHITE);
+
+        float subtitleRight = textRight;
+        if (showTiming && nowPlaying.duration > 0L) {
+            String timing = MediaProgress.format(position) + " / " + MediaProgress.format(nowPlaying.duration);
+            setTextFont(TIMING_TEXT_SIZE);
+            float timingLeft = textRight - paint.measureText(timing);
+            text(canvas, timing, timingLeft, subtitleBaseline, TIMING_TEXT_SIZE, MUTED_TEXT);
+            subtitleRight = timingLeft - TEXT_PADDING;
+        }
+        subtitle = fitText(subtitle, subtitleRight - textLeft, subtitleSize);
         text(canvas, subtitle, textLeft, subtitleBaseline, subtitleSize, MUTED_TEXT);
     }
 
-    private void drawProgress(Canvas canvas) {
-        long position = currentPosition();
+    private void drawProgress(Canvas canvas, long position) {
         float fraction = MediaProgress.fraction(position, nowPlaying.duration);
         paint.setStyle(Paint.Style.FILL);
         paint.setColor(EnergyWidgetStyle.BORDER);
@@ -525,18 +545,6 @@ public final class MediaWidgetView extends View {
                     PROGRESS_HEIGHT / 2f,
                     PROGRESS_HEIGHT / 2f,
                     paint);
-        }
-        if (showTiming && nowPlaying.duration > 0L) {
-            paint.setStyle(Paint.Style.FILL);
-            paint.setColor(MUTED_TEXT);
-            paint.setTextAlign(Paint.Align.RIGHT);
-            paint.setTextSize(13f * fontScale);
-            paint.setTypeface(Typeface.SANS_SERIF);
-            String timing =
-                    MediaProgress.format(position)
-                            + " / "
-                            + MediaProgress.format(nowPlaying.duration);
-            canvas.drawText(timing, progressRight, progressY - 8f, paint);
         }
     }
 
@@ -730,18 +738,21 @@ public final class MediaWidgetView extends View {
     private void text(Canvas canvas, String value, float x, float baseline, float size, int color) {
         paint.setStyle(Paint.Style.FILL);
         paint.setColor(color);
-        paint.setTextSize(size * fontScale);
+        setTextFont(size);
         paint.setTextAlign(Paint.Align.LEFT);
-        paint.setTypeface(Typeface.SANS_SERIF);
         canvas.drawText(value, x, baseline, paint);
+    }
+
+    private void setTextFont(float size) {
+        paint.setTextSize(size * fontScale);
+        paint.setTypeface(Typeface.SANS_SERIF);
     }
 
     private String fitText(String value, float maxWidth, float size) {
         if (value == null || value.isEmpty()) {
             return "";
         }
-        paint.setTextSize(size * fontScale);
-        paint.setTypeface(Typeface.SANS_SERIF);
+        setTextFont(size);
         if (paint.measureText(value) <= maxWidth) {
             return value;
         }
