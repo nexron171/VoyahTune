@@ -27,6 +27,10 @@ public class ActionNoticeTextTest {
 
     @Test
     public void applicationAndSplitUseDisplayNames() {
+        assertEquals(
+                "Открытие «Карты» на приборной панели",
+                ActionNoticeText.action(
+                        "cluster_app:media:com.example.maps", packageName -> "Карты"));
         assertEquals("Открытие «Карты»", ActionNoticeText.action("app:maps", value -> "Карты"));
         assertEquals(
                 "Открытие сплита: Карты + Музыка",

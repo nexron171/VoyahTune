@@ -1,5 +1,7 @@
 package ru.big.town.restoremode.vehicle.steering;
 
+import ru.big.town.common.ClusterAppAction;
+
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -25,11 +27,19 @@ public final class SteeringActions {
                             new Action("wheel_heat:off", "Обогрев руля: выключить"),
                             new Action("wheel_heat:toggle", "Обогрев руля: вкл/выкл"),
                             new Action("seat:driver:heat:on", "Обогрев сиденья водителя: включить"),
-                            new Action("seat:driver:heat:off", "Обогрев сиденья водителя: выключить"),
-                            new Action("seat:driver:heat:toggle", "Обогрев сиденья водителя: вкл/выкл"),
-                            new Action("seat:driver:vent:on", "Вентиляция сиденья водителя: включить"),
-                            new Action("seat:driver:vent:off", "Вентиляция сиденья водителя: выключить"),
-                            new Action("seat:driver:vent:toggle", "Вентиляция сиденья водителя: вкл/выкл"),
+                            new Action(
+                                    "seat:driver:heat:off", "Обогрев сиденья водителя: выключить"),
+                            new Action(
+                                    "seat:driver:heat:toggle",
+                                    "Обогрев сиденья водителя: вкл/выкл"),
+                            new Action(
+                                    "seat:driver:vent:on", "Вентиляция сиденья водителя: включить"),
+                            new Action(
+                                    "seat:driver:vent:off",
+                                    "Вентиляция сиденья водителя: выключить"),
+                            new Action(
+                                    "seat:driver:vent:toggle",
+                                    "Вентиляция сиденья водителя: вкл/выкл"),
                             new Action("seat:driver:massage:on", "Массаж водителя: включить"),
                             new Action("seat:driver:massage:off", "Массаж водителя: выключить"),
                             new Action("seat:driver:massage:toggle", "Массаж водителя: вкл/выкл"),
@@ -106,6 +116,6 @@ public final class SteeringActions {
         if (id.startsWith("can:")) {
             return SteeringCanCommandPolicy.isValid(id.substring(4));
         }
-        return false;
+        return ClusterAppAction.parse(id) != null;
     }
 }

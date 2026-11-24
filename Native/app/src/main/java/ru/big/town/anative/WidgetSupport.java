@@ -13,6 +13,8 @@ import android.graphics.Canvas;
 import android.graphics.drawable.Drawable;
 import android.util.Log;
 
+import ru.big.town.common.ExternalAppPolicy;
+
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -24,10 +26,13 @@ import java.util.Set;
 final class WidgetSupport {
     private static final String TAG = "NativeWidgets";
     // Ключ SharedPreferences для сохранения пакета вручную запущенного приложения.
-    // Используется для автозапуска при повторном открытии MainActivity (когда у плитки отключён автозапуск).
+    // Используется для автозапуска при повторном открытии MainActivity (когда у плитки отключён
+    // автозапуск).
     static final String PREF_LAST_MANUAL_APP = "lastManualApp";
+
     /** CSV зафиксированных приложений: их не закрывает «Закрыть все» (диспетчер и «Дополнительно»). */
     static final String PREF_PINNED_APPS = "pinnedApps";
+
     private static final String PREF_FILE = "NativePrefs";
     static final String EXTRA_PACKAGE = "package";
     static final String ACTION_OPEN_APP = "ru.big.town.anative.WIDGET_OPEN_APP";
@@ -44,24 +49,8 @@ final class WidgetSupport {
 
     private WidgetSupport() {}
 
-    static String homePackage(Context context) {
-        ResolveInfo home = context.getPackageManager().resolveActivity(
-                new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), 0);
-        return home == null || home.activityInfo == null ? null : home.activityInfo.packageName;
-    }
-
     static boolean isExternal(Context context, String packageName) {
-        if (packageName == null || packageName.equals(context.getPackageName())
-                || packageName.equals("ru.big.town.restoremode")
-                || packageName.equals(homePackage(context))) return false;
-        if (packageName.equals("com.android.contacts") || packageName.equals("com.android.car.dialer")) return true;
-        if (packageName.startsWith("com.qinggan") || packageName.startsWith("com.android.car")) return false;
-        try {
-            ApplicationInfo info = context.getPackageManager().getApplicationInfo(packageName, 0);
-            return (info.flags & ApplicationInfo.FLAG_SYSTEM) == 0;
-        } catch (PackageManager.NameNotFoundException ignored) {
-            return false;
-        }
+        return new ExternalAppPolicy(context).canStop(packageName);
     }
 
     /**
@@ -70,19 +59,27 @@ final class WidgetSupport {
      * поэтому она попадает сюда наравне с задачами физических экранов.
      */
     static List<RunningApp> runningApps(Context context, Set<Integer> widgetDisplays) {
-        ActivityManager manager = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+        ActivityManager manager =
+                (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
         if (manager == null) return new ArrayList<>();
         List<TaskListPolicy.TaskCandidate> candidates = new ArrayList<>();
         for (ActivityManager.RunningTaskInfo task : manager.getRunningTasks(100)) {
-            ComponentName component = task.topActivity != null ? task.topActivity : task.baseActivity;
+            ComponentName component =
+                    task.topActivity != null ? task.topActivity : task.baseActivity;
             if (component == null || !isExternal(context, component.getPackageName())) continue;
-            candidates.add(new TaskListPolicy.TaskCandidate(
-                    component.getPackageName(), task.id, displayIdOf(task)));
+            candidates.add(
+                    new TaskListPolicy.TaskCandidate(
+                            component.getPackageName(), task.id, displayIdOf(task)));
         }
         List<RunningApp> apps = new ArrayList<>();
-        for (TaskListPolicy.SelectedApp selected : TaskListPolicy.select(candidates, widgetDisplays)) {
-            apps.add(new RunningApp(selected.packageName, labelOf(context, selected.packageName),
-                    selected.taskId, selected.widget));
+        for (TaskListPolicy.SelectedApp selected :
+                TaskListPolicy.select(candidates, widgetDisplays)) {
+            apps.add(
+                    new RunningApp(
+                            selected.packageName,
+                            labelOf(context, selected.packageName),
+                            selected.taskId,
+                            selected.widget));
         }
         return apps;
     }
@@ -90,8 +87,10 @@ final class WidgetSupport {
     /** Подпись приложения; если пакет не устанавливается — его имя как есть. */
     static String labelOf(Context context, String packageName) {
         try {
-            return context.getPackageManager().getApplicationLabel(
-                    context.getPackageManager().getApplicationInfo(packageName, 0)).toString();
+            return context.getPackageManager()
+                    .getApplicationLabel(
+                            context.getPackageManager().getApplicationInfo(packageName, 0))
+                    .toString();
         } catch (PackageManager.NameNotFoundException e) {
             return packageName;
         }
@@ -102,9 +101,13 @@ final class WidgetSupport {
      * нет, но пакет числится в реестре виджетов Native. Переключать такое приложение через
      * {@code moveTaskToFront} бессмысленно — задача поднимется на самом VirtualDisplay.
      */
-    static boolean isWidgetOnly(Context context, String packageName, Set<Integer> widgetDisplays,
-                               boolean inWidgetRegistry) {
-        ActivityManager manager = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+    static boolean isWidgetOnly(
+            Context context,
+            String packageName,
+            Set<Integer> widgetDisplays,
+            boolean inWidgetRegistry) {
+        ActivityManager manager =
+                (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
         if (manager == null) return inWidgetRegistry;
         List<ActivityManager.RunningTaskInfo> running;
         try {
@@ -115,10 +118,12 @@ final class WidgetSupport {
         }
         List<TaskListPolicy.TaskCandidate> tasks = new ArrayList<>();
         for (ActivityManager.RunningTaskInfo task : running) {
-            ComponentName component = task.topActivity != null ? task.topActivity : task.baseActivity;
+            ComponentName component =
+                    task.topActivity != null ? task.topActivity : task.baseActivity;
             if (component == null) continue;
-            tasks.add(new TaskListPolicy.TaskCandidate(
-                    component.getPackageName(), task.id, displayIdOf(task)));
+            tasks.add(
+                    new TaskListPolicy.TaskCandidate(
+                            component.getPackageName(), task.id, displayIdOf(task)));
         }
         return TaskListPolicy.widgetOnly(tasks, packageName, widgetDisplays, inWidgetRegistry);
     }
@@ -148,29 +153,39 @@ final class WidgetSupport {
         for (ResolveInfo info : pm.queryIntentActivities(query, 0)) {
             String packageName = info.activityInfo.packageName;
             if (!isExternal(context, packageName) || result.containsKey(packageName)) continue;
-            result.put(packageName, new LaunchableApp(packageName,
-                    info.loadLabel(pm).toString(), info.loadIcon(pm)));
+            result.put(
+                    packageName,
+                    new LaunchableApp(
+                            packageName, info.loadLabel(pm).toString(), info.loadIcon(pm)));
         }
         return new ArrayList<>(result.values());
     }
 
-    static PendingIntent appPendingIntent(Context context, String action, String packageName, int requestCode) {
-        Intent intent = new Intent(context, WidgetActionReceiver.class)
-                .setAction(action).putExtra(EXTRA_PACKAGE, packageName);
-        return PendingIntent.getBroadcast(context, requestCode, intent,
+    static PendingIntent appPendingIntent(
+            Context context, String action, String packageName, int requestCode) {
+        Intent intent =
+                new Intent(context, WidgetActionReceiver.class)
+                        .setAction(action)
+                        .putExtra(EXTRA_PACKAGE, packageName);
+        return PendingIntent.getBroadcast(
+                context,
+                requestCode,
+                intent,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
     static void openApp(Context context, String packageName) {
         if (isExternal(context, packageName)) {
-            SetModesReceiverDynamic.openFreeformApp(context.getApplicationContext(), packageName, 0);
+            SetModesReceiverDynamic.openFreeformApp(
+                    context.getApplicationContext(), packageName, 0);
         }
     }
 
     /** Обычный запуск приложения (simpleLaunch) — без VirtualDisplay, просто обычная задача. */
     static void simpleLaunch(Context context, String packageName) {
         if (isExternal(context, packageName)) {
-            SetModesReceiverDynamic.openFreeformApp(context.getApplicationContext(), packageName, 0);
+            SetModesReceiverDynamic.openFreeformApp(
+                    context.getApplicationContext(), packageName, 0);
         }
     }
 
@@ -184,7 +199,8 @@ final class WidgetSupport {
     static void stopApp(Context context, String packageName) {
         if (!isExternal(context, packageName)) return;
         try {
-            ActivityManager manager = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+            ActivityManager manager =
+                    (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
             Method forceStop = ActivityManager.class.getMethod("forceStopPackage", String.class);
             forceStop.invoke(manager, packageName);
         } catch (Exception e) {
@@ -197,12 +213,15 @@ final class WidgetSupport {
      * Задача остаётся на своём физическом дисплее (все видимые задачи у нас на display 0).
      */
     static boolean moveToFront(Context context, String packageName) {
-        if (packageName == null || packageName.isEmpty() || !isExternal(context, packageName)) return false;
-        ActivityManager manager = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+        if (packageName == null || packageName.isEmpty() || !isExternal(context, packageName))
+            return false;
+        ActivityManager manager =
+                (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
         if (manager == null) return false;
         try {
             for (ActivityManager.RunningTaskInfo task : manager.getRunningTasks(100)) {
-                ComponentName component = task.topActivity != null ? task.topActivity : task.baseActivity;
+                ComponentName component =
+                        task.topActivity != null ? task.topActivity : task.baseActivity;
                 if (component != null && packageName.equals(component.getPackageName())) {
                     manager.moveTaskToFront(task.id, ActivityManager.MOVE_TASK_NO_USER_ACTION);
                     Log.i(TAG, "moveToFront " + packageName + " task=" + task.id);
@@ -218,7 +237,8 @@ final class WidgetSupport {
 
     static void stopAllApps(Context context) {
         for (ApplicationInfo info : context.getPackageManager().getInstalledApplications(0)) {
-            if ((info.flags & ApplicationInfo.FLAG_SYSTEM) == 0 && !isPinned(context, info.packageName)) {
+            if ((info.flags & ApplicationInfo.FLAG_SYSTEM) == 0
+                    && !isPinned(context, info.packageName)) {
                 stopApp(context, info.packageName);
             }
         }
@@ -227,9 +247,9 @@ final class WidgetSupport {
     /** Зафиксированные приложения (CSV) — их не закрывает «Закрыть все». */
     static String pinnedAppsCsv(Context context) {
         try {
-            return PinnedAppsPolicy.normalizeCsv(context
-                    .getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE)
-                    .getString(PREF_PINNED_APPS, ""));
+            return PinnedAppsPolicy.normalizeCsv(
+                    context.getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE)
+                            .getString(PREF_PINNED_APPS, ""));
         } catch (Exception e) {
             Log.w(TAG, "pinnedAppsCsv: " + e.getMessage());
             return "";
@@ -245,7 +265,9 @@ final class WidgetSupport {
         String next = PinnedAppsPolicy.setPinned(pinnedAppsCsv(context), packageName, pinned);
         try {
             context.getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE)
-                    .edit().putString(PREF_PINNED_APPS, next).apply();
+                    .edit()
+                    .putString(PREF_PINNED_APPS, next)
+                    .apply();
             Log.i(TAG, "setPinned " + packageName + " pinned=" + pinned);
         } catch (Exception e) {
             Log.w(TAG, "setPinned: " + e.getMessage());
@@ -257,7 +279,9 @@ final class WidgetSupport {
         if (packageName == null || packageName.isEmpty()) return;
         try {
             context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE)
-                    .edit().putString(PREF_LAST_MANUAL_APP, packageName).apply();
+                    .edit()
+                    .putString(PREF_LAST_MANUAL_APP, packageName)
+                    .apply();
             Log.i(TAG, "saveLastManualApp: " + packageName);
         } catch (Exception e) {
             Log.w(TAG, "saveLastManualApp: " + e.getMessage());
@@ -279,7 +303,9 @@ final class WidgetSupport {
     static void clearLastManualApp(Context context) {
         try {
             context.getSharedPreferences("NativePrefs", Context.MODE_PRIVATE)
-                    .edit().remove(PREF_LAST_MANUAL_APP).apply();
+                    .edit()
+                    .remove(PREF_LAST_MANUAL_APP)
+                    .apply();
             Log.i(TAG, "clearLastManualApp");
         } catch (Exception e) {
             Log.w(TAG, "clearLastManualApp: " + e.getMessage());
@@ -297,10 +323,13 @@ final class WidgetSupport {
     static final class RunningApp {
         final String packageName;
         final String label;
+
         /** id задачи (RunningTaskInfo.id) — диспетчер задач переключается по нему. */
         final int taskId;
+
         /** Задача живёт на дисплее виджета: на физическом экране задачи нет. */
         final boolean widget;
+
         RunningApp(String packageName, String label, int taskId, boolean widget) {
             this.packageName = packageName;
             this.label = label;
@@ -313,8 +342,11 @@ final class WidgetSupport {
         final String packageName;
         final String label;
         final Drawable icon;
+
         LaunchableApp(String packageName, String label, Drawable icon) {
-            this.packageName = packageName; this.label = label; this.icon = icon;
+            this.packageName = packageName;
+            this.label = label;
+            this.icon = icon;
         }
     }
 }

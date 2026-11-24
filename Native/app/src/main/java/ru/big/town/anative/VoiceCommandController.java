@@ -95,14 +95,12 @@ final class VoiceCommandController {
             return;
         }
         if (action.startsWith("cluster_navi:")) {
-            // Acceptance does not confirm that the cluster has drawn the application.
-            String[] error = {"Не удалось переключить навигацию на экране водителя"};
-            ApplyEngine.postIndependentUserCommand(
-                    "voice " + action,
-                    () -> error[0] = ClusterNaviController.execute(service, action),
-                    () -> {
-                        if (!gate.active(token)) return;
-                        respond(reply, error[0].isEmpty(), error[0].isEmpty() ? null : error[0]);
+            ClusterNaviController.submit(
+                    service,
+                    action,
+                    result -> {
+                        if (gate.active(token))
+                            respond(reply, result.accepted, result.accepted ? null : result.error);
                     });
             return;
         }

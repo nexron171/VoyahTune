@@ -39,6 +39,42 @@ public class VoiceCustomCommandStoreTest {
     }
 
     @Test
+    public void customPhrasesRetainIndependentApplicationAndClusterCardAssignments() {
+        VoiceCustomCommandStore.Entry maps =
+                entry("покажи карту", "cluster_app:media:com.example.maps");
+        VoiceCustomCommandStore.Entry music =
+                entry("покажи плеер", "cluster_app:center:com.example.music");
+        for (VoiceCustomCommandStore.Entry selection : Arrays.asList(maps, music)) {
+            assertNull(
+                    VoiceCustomCommandStore.validate(
+                            selection,
+                            VoiceCustomCommandStore.load(preferences),
+                            VoiceCommands.load(context)));
+            VoiceCustomCommandStore.save(preferences, selection);
+        }
+        for (VoiceCustomCommandStore.Entry selection : Arrays.asList(maps, music)) {
+            VoiceCommandCatalog.Command command =
+                    VoiceCommandCatalog.match(VoiceCommands.load(context), selection.phrase);
+            assertNotNull(command);
+            assertEquals(
+                    selection.actions,
+                    SteeringActionStore.decode(
+                            CustomVoiceCommandProtocol.configuration(command.action)));
+        }
+        for (String invalid :
+                Arrays.asList(
+                        "cluster_app:center:",
+                        "cluster_app:dash:com.example.maps",
+                        "cluster_app:media:com.example/.Main")) {
+            assertNotNull(
+                    VoiceCustomCommandStore.validate(
+                            entry("покажи экран", invalid),
+                            Collections.emptyList(),
+                            VoiceCommands.load(context)));
+        }
+    }
+
+    @Test
     public void saveEditDisableAndRemoveUpdateTheNextRecognitionVocabulary() {
         assertNull(VoiceCommandCatalog.match(VoiceCommands.load(context), "едем домой"));
         VoiceCustomCommandStore.Entry entry =

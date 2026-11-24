@@ -93,10 +93,14 @@ public class VoiceCustomCommandsSectionTest {
                 .performClick();
         AlertDialog picker = (AlertDialog) ShadowDialog.getLatestDialog();
         ListView list = picker.getListView();
-        assertEquals(SteeringActions.ALL.size() + 4, list.getAdapter().getCount());
-        for (int index = 0; index < SteeringActions.ALL.size(); index++) {
-            assertEquals(SteeringActions.ALL.get(index).label, list.getAdapter().getItem(index));
-            if (SteeringActions.ALL.get(index).id.equals(id)) {
+        String label =
+                SteeringActions.ALL.stream()
+                        .filter(action -> action.id.equals(id))
+                        .findFirst()
+                        .orElseThrow()
+                        .label;
+        for (int index = 0; index < list.getAdapter().getCount(); index++) {
+            if (label.equals(list.getAdapter().getItem(index))) {
                 list.performItemClick(null, index, index);
                 return;
             }

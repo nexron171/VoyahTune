@@ -698,6 +698,10 @@ public class SetModesReceiverDynamic extends BroadcastReceiver {
             completion.accept(ActionResult.failed(action, "Пустое действие"));
             return;
         }
+        if (action.startsWith(ru.big.town.common.ClusterAppAction.PREFIX)) {
+            ClusterNaviController.submit(ctx, action, completion);
+            return;
+        }
         if (SteeringComfortController.handles(action)) {
             SteeringComfortController.executeWithResult(ctx, action, completion);
             return;

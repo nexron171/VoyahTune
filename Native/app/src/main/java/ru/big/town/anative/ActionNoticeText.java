@@ -1,11 +1,19 @@
 package ru.big.town.anative;
 
+import ru.big.town.common.ClusterAppAction;
+
 import java.util.List;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 final class ActionNoticeText {
     static String action(String action, Function<String, String> applicationName) {
+        ClusterAppAction cluster = ClusterAppAction.parse(action);
+        if (cluster != null) {
+            return "Открытие «"
+                    + applicationName.apply(cluster.packageName)
+                    + "» на приборной панели";
+        }
         String[] parts = action.split(":");
         String value = parts[parts.length - 1];
         String operation = "on".equals(value) ? "включение" : "выключение";

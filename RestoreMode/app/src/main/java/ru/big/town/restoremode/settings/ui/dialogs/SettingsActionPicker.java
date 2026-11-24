@@ -14,6 +14,8 @@ import android.widget.TextView;
 
 import androidx.appcompat.app.AlertDialog;
 
+import ru.big.town.common.ClusterAppAction;
+import ru.big.town.common.VehiclePlatform;
 import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.apps.split.SplitStore;
 import ru.big.town.restoremode.vehicle.steering.SteeringActions;
@@ -54,14 +56,15 @@ public final class SettingsActionPicker {
             actions.removeIf(action -> "open_carplay".equals(action.id));
         }
         final int staticCount = actions.size();
-        final CharSequence[] labels = new CharSequence[staticCount + 4];
+        final CharSequence[] labels = new CharSequence[staticCount + 5];
         for (int i = 0; i < staticCount; i++) {
             labels[i] = actions.get(i).label;
         }
         labels[staticCount] = "Открыть сплит…";
         labels[staticCount + 1] = "Открыть приложение…";
-        labels[staticCount + 2] = "Набрать номер…";
-        labels[staticCount + 3] = "Своя CAN-команда…";
+        labels[staticCount + 2] = "Открыть приложение на приборной панели…";
+        labels[staticCount + 3] = "Набрать номер…";
+        labels[staticCount + 4] = "Своя CAN-команда…";
         new com.google.android.material.dialog.MaterialAlertDialogBuilder(
                         context, R.style.SettingsDialog)
                 .setTitle("Добавить действие")
@@ -71,7 +74,8 @@ public final class SettingsActionPicker {
                             if (which < staticCount) {
                                 String action = actions.get(which).id;
                                 if ("open_carplay".equals(action)
-                                        && !ru.big.town.restoremode.carplay.CarPlayFeature.isEnabled(context)) {
+                                        && !ru.big.town.restoremode.carplay.CarPlayFeature
+                                                .isEnabled(context)) {
                                     return;
                                 }
                                 onPicked.accept(action);
@@ -80,10 +84,45 @@ public final class SettingsActionPicker {
                             } else if (which == staticCount + 1) {
                                 pickApp();
                             } else if (which == staticCount + 2) {
+                                SettingsAppPicker.showExternal(
+                                        context,
+                                        "Приложение на приборной панели",
+                                        (packageName, label) ->
+                                                pickClusterPlacement(
+                                                        context,
+                                                        VehiclePlatform.current(),
+                                                        packageName,
+                                                        onPicked));
+                            } else if (which == staticCount + 3) {
                                 pickDial();
                             } else {
                                 pickCanCommand();
                             }
+                        })
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
+    static void pickClusterPlacement(
+            Context context,
+            VehiclePlatform platform,
+            String packageName,
+            Consumer<String> onPicked) {
+        if (platform.isH97XY()) {
+            onPicked.accept(ClusterAppAction.Placement.MEDIA.actionFor(packageName));
+            return;
+        }
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(
+                        context, R.style.SettingsDialog)
+                .setTitle("Где открыть приложение?")
+                .setItems(
+                        new String[] {"В левой медиакарточке", "В центре приборной панели"},
+                        (dialog, which) -> {
+                            ClusterAppAction.Placement placement =
+                                    which == 0
+                                            ? ClusterAppAction.Placement.MEDIA
+                                            : ClusterAppAction.Placement.CENTER;
+                            onPicked.accept(placement.actionFor(packageName));
                         })
                 .setNegativeButton("Отмена", null)
                 .show();
@@ -262,18 +301,17 @@ public final class SettingsActionPicker {
             }
             return "Сплит (не найден)";
         }
+        ClusterAppAction cluster = ClusterAppAction.parse(id);
+        if (cluster != null) {
+            String card =
+                    cluster.placementFor(VehiclePlatform.current())
+                                    == ClusterAppAction.Placement.MEDIA
+                            ? "левая медиакарточка"
+                            : "центр приборной панели";
+            return applicationLabel(context, cluster.packageName) + " — " + card;
+        }
         if (id.startsWith("app:")) {
-            String packageName = id.substring("app:".length());
-            try {
-                android.content.pm.PackageManager packageManager = context.getPackageManager();
-                return "Приложение: "
-                        + packageManager
-                                .getApplicationLabel(
-                                        packageManager.getApplicationInfo(packageName, 0))
-                                .toString();
-            } catch (Exception e) {
-                return "Приложение: " + packageName;
-            }
+            return "Приложение: " + applicationLabel(context, id.substring("app:".length()));
         }
         if (id.startsWith("call:")) {
             return "Набрать номер: " + id.substring("call:".length());
@@ -285,5 +323,15 @@ public final class SettingsActionPicker {
                     : "Своя команда (неверный формат)";
         }
         return "Неизвестное действие: " + id;
+    }
+
+    private static String applicationLabel(Context context, String packageName) {
+        android.content.pm.PackageManager manager = context.getPackageManager();
+        try {
+            return manager.getApplicationLabel(manager.getApplicationInfo(packageName, 0))
+                    .toString();
+        } catch (android.content.pm.PackageManager.NameNotFoundException missing) {
+            return packageName;
+        }
     }
 }

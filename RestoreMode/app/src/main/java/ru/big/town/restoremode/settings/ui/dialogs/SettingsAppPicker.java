@@ -4,7 +4,10 @@ import android.content.Context;
 import android.content.Intent;
 
 import ru.big.town.common.CarPlayTarget;
+import ru.big.town.common.ExternalAppPolicy;
 import ru.big.town.restoremode.R;
+
+import java.util.function.Predicate;
 
 public final class SettingsAppPicker {
     private SettingsAppPicker() {}
@@ -17,7 +20,21 @@ public final class SettingsAppPicker {
         show(context, title, false, callback);
     }
 
-    public static void show(Context context, String title, boolean includeCarPlay, AppPicked callback) {
+    public static void show(
+            Context context, String title, boolean includeCarPlay, AppPicked callback) {
+        show(context, title, includeCarPlay, packageName -> true, callback);
+    }
+
+    static void showExternal(Context context, String title, AppPicked callback) {
+        show(context, title, false, new ExternalAppPolicy(context)::canStop, callback);
+    }
+
+    private static void show(
+            Context context,
+            String title,
+            boolean includeCarPlay,
+            Predicate<String> selectable,
+            AppPicked callback) {
         android.content.pm.PackageManager packageManager = context.getPackageManager();
         Intent launcher = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
         java.util.List<android.content.pm.ResolveInfo> apps =
@@ -30,7 +47,7 @@ public final class SettingsAppPicker {
                 continue;
             }
             String packageName = activity.activityInfo.packageName;
-            if (!labels.containsKey(packageName)) {
+            if (!labels.containsKey(packageName) && selectable.test(packageName)) {
                 labels.put(packageName, activity.loadLabel(packageManager).toString());
             }
         }
@@ -62,21 +79,27 @@ public final class SettingsAppPicker {
             items[i] = labels.get(packages.get(i)) + "  ·  " + packages.get(i);
         }
 
-        new com.google.android.material.dialog.MaterialAlertDialogBuilder(
-                        context, R.style.SettingsDialog)
-                .setTitle(title)
-                .setItems(
-                        items,
-                        (dialog, which) -> {
-                            String packageName = packages.get(which);
-                            if (CarPlayTarget.isCarPlay(packageName)
-                                    && !ru.big.town.restoremode.carplay.CarPlayFeature.isEnabled(context)) {
-                                return;
-                            }
-                            callback.onPicked(packageName, labels.get(packageName));
-                        })
-                .setNegativeButton("Отмена", null)
-                .show();
+        com.google.android.material.dialog.MaterialAlertDialogBuilder dialogBuilder =
+                new com.google.android.material.dialog.MaterialAlertDialogBuilder(
+                                context, R.style.SettingsDialog)
+                        .setTitle(title)
+                        .setNegativeButton("Отмена", null);
+        if (items.length == 0) {
+            dialogBuilder.setMessage("Нет доступных приложений");
+        } else {
+            dialogBuilder.setItems(
+                    items,
+                    (dialog, which) -> {
+                        String packageName = packages.get(which);
+                        if (CarPlayTarget.isCarPlay(packageName)
+                                && !ru.big.town.restoremode.carplay.CarPlayFeature.isEnabled(
+                                        context)) {
+                            return;
+                        }
+                        callback.onPicked(packageName, labels.get(packageName));
+                    });
+        }
+        dialogBuilder.show();
     }
 
     private static boolean isSystemApp(String packageName) {

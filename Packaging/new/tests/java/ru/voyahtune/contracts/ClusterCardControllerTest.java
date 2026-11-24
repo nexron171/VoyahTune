@@ -1,26 +1,42 @@
 package ru.voyahtune.contracts;
 
-import java.util.ArrayList;
-import java.util.List;
 import ru.voyahtune.agent.policy.ClusterCardController;
 
+import java.util.ArrayList;
+import java.util.List;
+
 public final class ClusterCardControllerTest {
-    public static void main(String[] arguments) throws Exception { verify(); System.out.println("ClusterCardControllerTest: passed"); }
+    public static void main(String[] arguments) throws Exception {
+        verify();
+        System.out.println("ClusterCardControllerTest: passed");
+    }
 
     static void verify() throws Exception {
+        assignedApplicationsDoNotReplaceTheRunYnSelection();
         Fixture fixture = new Fixture();
         ClusterCardController controller = new ClusterCardController(fixture);
         controller.configure();
         fixture.scheduler.advance(4000);
-        require(fixture.launches == 0 && fixture.themes == 1 && fixture.cards.isEmpty(), "Disabled startup launched navigator or failed to restore theme");
+        require(
+                fixture.launches == 0 && fixture.themes == 1 && fixture.cards.isEmpty(),
+                "Disabled startup launched navigator or failed to restore theme");
         controller.broadcast(null, "DAY", null, true);
-        require(!fixture.enabled && fixture.theme.equals("day") && fixture.launches == 0, "Theme-only broadcast toggled navigation");
+        require(
+                !fixture.enabled && fixture.theme.equals("day") && fixture.launches == 0,
+                "Theme-only broadcast toggled navigation");
         controller.broadcast("maps/.Main", null, 1, true);
-        require(fixture.enabled && fixture.launches == 1 && fixture.displayLaunched == 7 && fixture.cards.isEmpty(), "Explicit enable did not launch before presenting card");
+        require(
+                fixture.enabled
+                        && fixture.launches == 1
+                        && fixture.displayLaunched == 7
+                        && fixture.cards.isEmpty(),
+                "Explicit enable did not launch before presenting card");
         fixture.scheduler.advance(1499);
         require(fixture.cards.isEmpty(), "Card was announced before draw delay");
         fixture.scheduler.advance(1);
-        require(fixture.cards.equals(List.of(ClusterCardController.NAVI_FULL)), "NAVI_FULL not selected after first frame delay");
+        require(
+                fixture.cards.equals(List.of(ClusterCardController.NAVI_FULL)),
+                "NAVI_FULL not selected after first frame delay");
         controller.presentation(ClusterCardController.NAVI_FULL, 1);
         fixture.scheduler.advance(0);
         require(fixture.launches == 1, "MCU echo restarted navigator inside cooldown");
@@ -28,16 +44,23 @@ public final class ClusterCardControllerTest {
         controller.presentation(ClusterCardController.NAVI, 1);
         fixture.scheduler.advance(0);
         fixture.scheduler.advance(1500);
-        require(fixture.cards.get(fixture.cards.size() - 1).equals(ClusterCardController.NAVI_FULL) && fixture.launches == 1,
+        require(
+                fixture.cards.get(fixture.cards.size() - 1).equals(ClusterCardController.NAVI_FULL)
+                        && fixture.launches == 1,
                 "Plain NAVI reached unsupported category or running navigator was relaunched");
         fixture.display = 9;
         controller.displayRecreated();
         fixture.scheduler.advance(2500);
-        require(fixture.launches == 2 && fixture.displayLaunched == 9, "New virtual display was not rearmed");
+        require(
+                fixture.launches == 2 && fixture.displayLaunched == 9,
+                "New virtual display was not rearmed");
         controller.broadcast(null, null, 0, true);
         int cards = fixture.cards.size();
         fixture.scheduler.advance(1500);
-        require(fixture.cards.size() == cards && fixture.cards.get(cards - 1).equals(ClusterCardController.MEDIA_SMALL), "Queued show revived disabled navigation");
+        require(
+                fixture.cards.size() == cards
+                        && fixture.cards.get(cards - 1).equals(ClusterCardController.MEDIA_SMALL),
+                "Queued show revived disabled navigation");
         controller.close();
         fixture.scheduler.advance(10000);
         require(fixture.launches == 2, "Closed card controller retained launch timer");
@@ -63,10 +86,39 @@ public final class ClusterCardControllerTest {
         revision.scheduler.advance(999);
         require(revision.cards.isEmpty(), "Revision moved pending card deadline earlier");
         revision.scheduler.advance(1);
-        require(revision.cards.size() == 1 && revision.launches == 1, "Revision lost or duplicated pending card command");
+        require(
+                revision.cards.size() == 1 && revision.launches == 1,
+                "Revision lost or duplicated pending card command");
         revisionController.close();
-        require(revision.announcements.get(revision.announcements.size() - 1) == 0 && revision.cards.get(revision.cards.size() - 1).equals(ClusterCardController.MEDIA_SMALL),
+        require(
+                revision.announcements.get(revision.announcements.size() - 1) == 0
+                        && revision.cards
+                                .get(revision.cards.size() - 1)
+                                .equals(ClusterCardController.MEDIA_SMALL),
                 "Cleanup did not release owned MCU/local card state");
+    }
+
+    private static void assignedApplicationsDoNotReplaceTheRunYnSelection() throws Exception {
+        Fixture fixture = new Fixture();
+        ClusterCardController card = new ClusterCardController(fixture);
+        card.broadcast("default/.Home", null, 1, true);
+        card.openApplication("maps/.First");
+        card.openApplication("music/.Second");
+        require(
+                "music/.Second".equals(fixture.launchedAssignment) && fixture.launches == 3,
+                "Rapid assignments did not open their own components");
+        card.broadcast(null, "day", null, true);
+        card.displayRecreated();
+        fixture.scheduler.advance(2500);
+        require(
+                "music/.Second".equals(fixture.launchedAssignment) && fixture.launches == 4,
+                "Display recreation lost the assigned app");
+        require("default/.Home".equals(fixture.component), "Assignment replaced RunYN selection");
+        card.broadcast(null, null, 1, false);
+        require(
+                fixture.launchedAssignment == null && fixture.launches == 5,
+                "Built-in start did not return to configured component");
+        card.close();
     }
 
     static final class Fixture implements ClusterCardController.IO {
@@ -77,23 +129,93 @@ public final class ClusterCardControllerTest {
         boolean running;
         String theme = "night";
         String component;
+        String assigned;
+        String launchedAssignment;
         int display = 7;
         int displayLaunched = -1;
         int launches;
         int themes;
-        @Override public long now() { return scheduler.now(); }
-        @Override public boolean enabled() { return enabled; }
-        @Override public void enabled(boolean value) { enabled = value; }
-        @Override public void component(String value) { component = value; }
-        @Override public void theme(String value) { theme = value; }
-        @Override public int display() { return display; }
-        @Override public boolean navigatorRunning() { return running; }
-        @Override public void launch(int display, boolean restart) { displayLaunched = display; launches++; running = true; }
-        @Override public void announce(int state) { announcements.add(state); }
-        @Override public void switchCard(String category) { cards.add(category); }
-        @Override public void applyTheme() { themes++; }
-        @Override public void schedule(long delay, Runnable task) { scheduler.schedule(delay, task); }
-        @Override public void error(Exception failure) { throw new AssertionError(failure); }
+
+        @Override
+        public long now() {
+            return scheduler.now();
+        }
+
+        @Override
+        public boolean enabled() {
+            return enabled;
+        }
+
+        @Override
+        public void enabled(boolean value) {
+            enabled = value;
+        }
+
+        @Override
+        public void component(String value) {
+            component = value;
+        }
+
+        @Override
+        public String assignedComponent() {
+            return assigned;
+        }
+
+        @Override
+        public void setAssignedComponent(String value) {
+            assigned = value;
+        }
+
+        @Override
+        public void theme(String value) {
+            theme = value;
+        }
+
+        @Override
+        public int display() {
+            return display;
+        }
+
+        @Override
+        public boolean navigatorRunning(String assignedComponent) {
+            return running;
+        }
+
+        @Override
+        public void launch(int display, boolean restart, String assignedComponent) {
+            displayLaunched = display;
+            launchedAssignment = assignedComponent;
+            launches++;
+            running = true;
+        }
+
+        @Override
+        public void announce(int state) {
+            announcements.add(state);
+        }
+
+        @Override
+        public void switchCard(String category) {
+            cards.add(category);
+        }
+
+        @Override
+        public void applyTheme() {
+            themes++;
+        }
+
+        @Override
+        public void schedule(long delay, Runnable task) {
+            scheduler.schedule(delay, task);
+        }
+
+        @Override
+        public void error(Exception failure) {
+            throw new AssertionError(failure);
+        }
     }
-    private static void require(boolean condition, String message) { if (!condition) throw new AssertionError(message); }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
 }
