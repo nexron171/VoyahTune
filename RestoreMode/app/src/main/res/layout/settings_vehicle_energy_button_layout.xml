@@ -48,7 +48,7 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="Умный Save режим"
+                    android:text="@string/smart_save_title"
                     android:textSize="24sp"
                     android:textColor="#f3f5fa"
                     android:includeFontPadding="false" />
@@ -63,7 +63,7 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Умный режим позволяет глушить двигатель на маленькой скорости и при остановках, если заряд батареи не менее -5% от целевого уровня, если заряд опустился ниже 5% от целевого, то двигатель будет работать постоянно, пока не наберет целевой уровень"
+                android:text="@string/smart_save_description"
                 android:textSize="18sp"
                 android:textColor="#a9b3c5"
                 android:includeFontPadding="false" />
