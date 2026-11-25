@@ -8,6 +8,13 @@ import static org.junit.Assert.assertTrue;
 import org.junit.Test;
 
 public final class ColdWiperStateTest {
+    private static final int PARK = 0;
+    private static final int REVERSE = 1;
+    private static final int NEUTRAL = 2;
+    private static final int DRIVE = 3;
+    private static final int BATTERY = 4;
+    private static final int[] NON_PARK_GEARS = {REVERSE, NEUTRAL, DRIVE, BATTERY};
+
     @Test
     public void initialOpenDoorAndEnablingOnAnAlreadyOpenDoorRequestParkingPosition() {
         ColdWiperState initial = new ColdWiperState(false, false);
@@ -29,33 +36,46 @@ public final class ColdWiperStateTest {
         state.onDoor(0);
         state.reconcile(true, state.positionUncertain());
         assertNull(state.nextTarget());
-        for (int gear : new int[] {-1, 0, 1, 2, 4, 99}) {
+        for (int gear : new int[] {-1, PARK, 5}) {
             state.onGear(gear);
             state.reconcile(true, state.positionUncertain());
             assertNull(state.nextTarget());
         }
-        state.onGear(3);
+        state.onGear(REVERSE);
         assertEquals(Boolean.FALSE, state.nextTarget());
     }
 
     @Test
-    public void cachedDriveCannotReleaseTheLatchButAFreshDriveConfirmationCan() {
-        ColdWiperState state = new ColdWiperState(true, false);
-        state.setEnabled(true);
-        state.onGear(3, false);
-        state.reconcile(true, state.positionUncertain());
-        assertNull(state.nextTarget());
-        state.onGear(3, true);
-        assertEquals(Boolean.FALSE, state.nextTarget());
+    public void eachConfirmedGearOutsideParkReleasesTheWipersOnce() {
+        for (int gear : NON_PARK_GEARS) {
+            ColdWiperState state = new ColdWiperState(true, false);
+            state.setEnabled(true);
+            state.onGear(PARK);
+            state.onGear(gear, false);
+            state.reconcile(true, state.positionUncertain());
+            assertNull(state.nextTarget());
+
+            state.onGear(gear, true);
+            assertEquals("gear " + gear, Boolean.FALSE, state.nextTarget());
+            assertTrue(state.canSend(false));
+            state.onSent(false);
+            state.onGear(gear, true);
+            assertNull(state.nextTarget());
+            state.onGear(DRIVE, true);
+            assertNull(state.nextTarget());
+            assertFalse(state.canSend(false));
+        }
     }
 
     @Test
-    public void driveCancelsQueuedRaiseAndStillLowersIfRaiseAlreadyCrossedTheSendBoundary() {
+    public void reverseCancelsQueuedRaiseAndStillLowersIfRaiseAlreadyCrossedTheSendBoundary() {
         ColdWiperState state = new ColdWiperState(false, false);
         state.setEnabled(true);
+        state.onGear(PARK);
         state.onDoor(1);
         assertTrue(state.canSend(true));
-        state.onGear(3);
+        state.onRequested(true);
+        state.onGear(REVERSE);
         assertFalse(state.canSend(true));
         assertNull(state.nextTarget());
         state.onSent(true);
@@ -64,27 +84,29 @@ public final class ColdWiperStateTest {
     }
 
     @Test
-    public void aConfirmedDriveRemainsTheReleaseCauseUntilAnInFlightRaiseCompletes() {
-        for (int followingGear : new int[] {0, 1, 2, 4}) {
+    public void returningToParkKeepsTheReleaseRequestedDuringAnInFlightRaise() {
+        for (int gear : NON_PARK_GEARS) {
             ColdWiperState state = new ColdWiperState(false, false);
             state.setEnabled(true);
+            state.onGear(PARK);
             state.onDoor(1);
             state.onRequested(true);
-            state.onGear(3);
-            state.onGear(followingGear);
+            state.onFrameAttempted();
+            state.onGear(gear);
+            state.onGear(PARK);
             state.onSent(true);
-            assertEquals(Boolean.FALSE, state.nextTarget());
+            assertEquals("gear " + gear, Boolean.FALSE, state.nextTarget());
         }
     }
 
     @Test
-    public void driveReleaseWaitsForDoorCloseBeforeAnotherParkedActivation() {
+    public void reverseReleaseWaitsForDoorCloseBeforeAnotherParkedActivation() {
         ColdWiperState state = new ColdWiperState(true, false);
         state.setEnabled(true);
         state.onDoor(1);
-        state.onGear(3);
+        state.onGear(REVERSE);
         state.onSent(false);
-        state.onGear(0);
+        state.onGear(PARK);
         state.reconcile(false, state.positionUncertain());
         state.onDoor(1);
         assertTrue(state.waitForDoorClose());
@@ -108,12 +130,12 @@ public final class ColdWiperStateTest {
         state.onSent(true);
         state.reconcile(true, state.positionUncertain());
         assertNull(state.nextTarget());
-        state.onGear(3);
+        state.onGear(DRIVE);
         assertEquals(Boolean.FALSE, state.nextTarget());
     }
 
     @Test
-    public void attemptedFailureStaysBlockedWithoutFreshDriveAndSurvivesRestart() {
+    public void attemptedFailureStaysBlockedInParkAndOnCachedGearsAcrossRestart() {
         ColdWiperState state = new ColdWiperState(false, false);
         state.setEnabled(true);
         state.onDoor(1);
@@ -121,9 +143,11 @@ public final class ColdWiperStateTest {
         state.onFrameAttempted();
         state.onFailed();
         assertTrue(state.positionUncertain());
-        for (int gear : new int[] {0, 1, 2, 4, 3}) {
+        state.onGear(PARK, true);
+        assertTrue(state.positionUncertain());
+        for (int gear : NON_PARK_GEARS) {
             state.reconcile(false, state.positionUncertain());
-            state.onGear(gear, gear != 3);
+            state.onGear(gear, false);
             state.onDoor(0);
             state.onDoor(1);
             state.setEnabled(false);
@@ -140,7 +164,7 @@ public final class ColdWiperStateTest {
                 false, state.waitForDoorClose(), state.positionUncertain());
         restarted.setEnabled(true);
         restarted.onDoor(1);
-        restarted.onGear(3, false);
+        restarted.onGear(REVERSE, false);
         restarted.reconcile(false, restarted.positionUncertain());
         assertNull(restarted.nextTarget());
         assertFalse(restarted.canSend(true));
@@ -152,12 +176,12 @@ public final class ColdWiperStateTest {
         ColdWiperState state = new ColdWiperState(false, false, true);
         state.setEnabled(true);
         state.onDoor(0);
-        state.onGear(0, true);
+        state.onGear(PARK, true);
         assertNull(state.nextTarget());
 
-        state.onGear(3, false);
+        state.onGear(DRIVE, false);
         assertTrue(state.positionUncertain());
-        state.onGear(3, true);
+        state.onGear(DRIVE, true);
         assertFalse(state.positionUncertain());
         assertNull(state.nextTarget());
 
@@ -165,23 +189,23 @@ public final class ColdWiperStateTest {
                 false, state.waitForDoorClose(), state.positionUncertain());
         restarted.setEnabled(true);
         restarted.onDoor(0);
-        restarted.onGear(0, true);
+        restarted.onGear(PARK, true);
         restarted.onDoor(1);
         assertEquals(Boolean.TRUE, restarted.nextTarget());
         assertTrue(restarted.canSend(true));
     }
 
     @Test
-    public void freshDriveClearsUncertaintyForAnActivePositionAndWaitsForDoorClose() {
+    public void freshNeutralClearsUncertaintyForAnActivePositionAndWaitsForDoorClose() {
         ColdWiperState state = new ColdWiperState(true, false, true);
         state.setEnabled(true);
         state.onDoor(1);
-        state.onGear(3, true);
+        state.onGear(NEUTRAL, true);
         assertFalse(state.positionUncertain());
         assertEquals(Boolean.FALSE, state.nextTarget());
         assertTrue(state.canSend(false));
         state.onSent(false);
-        state.onGear(0, true);
+        state.onGear(PARK, true);
         assertNull(state.nextTarget());
         state.onDoor(0);
         state.onDoor(1);
@@ -195,12 +219,12 @@ public final class ColdWiperStateTest {
         state.onDoor(1);
         state.onRequested(true);
         state.onFrameAttempted();
-        state.onGear(3, true);
+        state.onGear(DRIVE, true);
         assertTrue(state.positionUncertain());
         assertNull(state.nextTarget());
         state.onFailed();
         assertTrue(state.positionUncertain());
-        state.onGear(3, true);
+        state.onGear(DRIVE, true);
         assertFalse(state.positionUncertain());
     }
 
@@ -219,7 +243,7 @@ public final class ColdWiperStateTest {
         assertNull(state.nextTarget());
         state.onSent(true);
         assertFalse(state.positionUncertain());
-        state.onGear(3, true);
+        state.onGear(DRIVE, true);
         assertEquals(Boolean.FALSE, state.nextTarget());
         state.onRequested(false);
         state.onFrameAttempted();
@@ -237,7 +261,7 @@ public final class ColdWiperStateTest {
         oldOwner.onFrameAttempted();
         ColdWiperState recreated = new ColdWiperState(false, false, oldOwner.positionUncertain());
         recreated.setEnabled(true);
-        recreated.onGear(3, true);
+        recreated.onGear(DRIVE, true);
         assertNull(recreated.nextTarget());
         oldOwner.onSent(true);
         recreated.reconcile(true, oldOwner.positionUncertain());
@@ -255,7 +279,7 @@ public final class ColdWiperStateTest {
         oldOwner.onFrameAttempted();
         ColdWiperState recreated = new ColdWiperState(false, false, oldOwner.positionUncertain());
         recreated.setEnabled(true);
-        recreated.onGear(3, true);
+        recreated.onGear(DRIVE, true);
         oldOwner.onFailed();
         recreated.reconcile(false, oldOwner.positionUncertain());
         assertTrue(recreated.positionUncertain());
@@ -268,7 +292,7 @@ public final class ColdWiperStateTest {
     public void recreatedOwnerCanRetryAfterReceiptWasClearedWithoutAFrameAttempt() {
         ColdWiperState recreated = new ColdWiperState(false, false, true);
         recreated.setEnabled(true);
-        recreated.onGear(0, true);
+        recreated.onGear(PARK, true);
         recreated.onDoor(1);
         assertNull(recreated.nextTarget());
         recreated.reconcile(false, false);
@@ -279,7 +303,7 @@ public final class ColdWiperStateTest {
 
     @Test
     public void freshRaiseRequiresParkOrUnknownGearAndFailuresDoNotClaimSuccess() {
-        for (int gear : new int[] {1, 2, 3, 4}) {
+        for (int gear : NON_PARK_GEARS) {
             ColdWiperState state = new ColdWiperState(false, false);
             state.setEnabled(true);
             state.onGear(gear);
@@ -288,7 +312,7 @@ public final class ColdWiperStateTest {
         }
         ColdWiperState state = new ColdWiperState(false, false);
         state.setEnabled(true);
-        state.onGear(0);
+        state.onGear(PARK);
         state.onDoor(1);
         assertEquals(Boolean.TRUE, state.nextTarget());
         state.reconcile(false, state.positionUncertain());

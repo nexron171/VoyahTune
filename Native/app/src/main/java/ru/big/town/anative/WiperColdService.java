@@ -27,7 +27,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/** Door-triggered parking position; a confirmed Drive is the only automatic release. */
+/** Raises the wipers on door opening and releases them on a confirmed gear outside Park. */
 public class WiperColdService extends Service {
 
     private static final String TAG = "$$$ WiperColdService $$$";
@@ -187,10 +187,11 @@ public class WiperColdService extends Service {
         if (destroyed) return;
         boolean wasUncertain = wiperState.positionUncertain();
         wiperState.onGear(state.value, state.isFresh());
-        if (wasUncertain && !wiperState.positionUncertain() && !hasPendingWiperToggle()) {
-            if (clearWiperPositionUncertainty()) {
-                Log.i(TAG, "Fresh D cleared saved wiper position uncertainty");
-            }
+        if (wasUncertain
+                && !wiperState.positionUncertain()
+                && !hasPendingWiperToggle()
+                && clearWiperPositionUncertainty()) {
+            Log.i(TAG, "Fresh gear " + state.value + " cleared saved wiper position uncertainty");
         }
         persistDoorCloseGuard();
         evaluate("gear " + state.value + " " + state.source);

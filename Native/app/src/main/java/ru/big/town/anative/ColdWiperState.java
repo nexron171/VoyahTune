@@ -1,21 +1,21 @@
 package ru.big.town.anative;
 
-/** Desired service position; wake and unknown telemetry never release the parking latch. */
+/** Tracks the requested and last accepted wiper positions across asynchronous sends. */
 final class ColdWiperState {
     private static final int DOOR_OPEN = 1;
     private static final int DOOR_CLOSED = 0;
     private static final int PARK = 0;
-    private static final int DRIVE = 3;
+    private static final int BATTERY = 4;
 
     private boolean active;
     private boolean desiredActive;
     private boolean enabled;
-    private boolean releaseForDrive;
+    private boolean releaseRequested;
     private boolean waitForDoorClose;
     private boolean positionUncertain;
     private Boolean pendingTarget;
     private int door = -1;
-    private int gear = -1;
+    private boolean gearOutsidePark;
 
     ColdWiperState(boolean active, boolean waitForDoorClose) {
         this(active, waitForDoorClose, false);
@@ -34,9 +34,13 @@ final class ColdWiperState {
     }
 
     synchronized void onDoor(int door) {
-        if (door != DOOR_CLOSED && door != DOOR_OPEN) return;
+        if (door != DOOR_CLOSED && door != DOOR_OPEN) {
+            return;
+        }
         this.door = door;
-        if (door == DOOR_CLOSED) waitForDoorClose = false;
+        if (door == DOOR_CLOSED) {
+            waitForDoorClose = false;
+        }
         evaluateDoor();
     }
 
@@ -45,23 +49,30 @@ final class ColdWiperState {
     }
 
     synchronized void onGear(int gear, boolean confirmed) {
-        if (gear < PARK || gear > 4) return;
-        this.gear = gear;
-        if (gear == DRIVE && confirmed) {
+        if (gear < PARK || gear > BATTERY) {
+            return;
+        }
+
+        gearOutsidePark = gear != PARK;
+        if (gearOutsidePark && confirmed) {
             // An in-flight send owns its uncertainty receipt until completion.
-            if (pendingTarget == null) positionUncertain = false;
-            releaseForDrive = true;
+            if (pendingTarget == null) {
+                positionUncertain = false;
+            }
+            releaseRequested = true;
             desiredActive = false;
             waitForDoorClose = door != DOOR_CLOSED;
-        } else if (gear != DRIVE && !active && !Boolean.TRUE.equals(pendingTarget)) {
-            releaseForDrive = false;
+        } else if (!gearOutsidePark && !active && !Boolean.TRUE.equals(pendingTarget)) {
+            releaseRequested = false;
         }
         evaluateDoor();
     }
 
     synchronized void reconcile(boolean persistedActive, boolean persistedUncertain) {
         positionUncertain = persistedUncertain;
-        if (active != persistedActive) updateAcceptedPosition(persistedActive);
+        if (active != persistedActive) {
+            updateAcceptedPosition(persistedActive);
+        }
         evaluateDoor();
     }
 
@@ -87,7 +98,9 @@ final class ColdWiperState {
 
     synchronized void onFailed() {
         pendingTarget = null;
-        if (!active && gear != DRIVE) releaseForDrive = false;
+        if (!active && !gearOutsidePark) {
+            releaseRequested = false;
+        }
         evaluateDoor();
     }
 
@@ -99,8 +112,10 @@ final class ColdWiperState {
     private void updateAcceptedPosition(boolean target) {
         pendingTarget = null;
         active = target;
-        desiredActive = target && !releaseForDrive;
-        if (!target) releaseForDrive = false;
+        desiredActive = target && !releaseRequested;
+        if (!target) {
+            releaseRequested = false;
+        }
     }
 
     synchronized boolean waitForDoorClose() {
@@ -108,11 +123,13 @@ final class ColdWiperState {
     }
 
     private void evaluateDoor() {
-        if (active) return;
+        if (active) {
+            return;
+        }
         desiredActive = enabled
                 && door == DOOR_OPEN
                 && !waitForDoorClose
-                && !releaseForDrive
-                && (gear < 0 || gear == PARK);
+                && !releaseRequested
+                && !gearOutsidePark;
     }
 }
