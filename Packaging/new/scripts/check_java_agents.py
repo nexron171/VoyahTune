@@ -41,7 +41,7 @@ def check_candidate(stage, configured_gson=None):
     runtime_classes.mkdir()
     test_classes.mkdir()
     sources = sorted((ROOT / "java/src/main/java").rglob("*.java"))
-    for name in ("NavigationAudioSettings", "NavigationAudioRouting"):
+    for name in ("NavigationAudioSettings", "NavigationAudioRouting", "SmartSaveSettings"):
         sources.append(ROOT.parents[1] / f"SharedAndroid/src/main/java/ru/big/town/common/{name}.java")
     subprocess.run([
         str(java / "bin/javac"), "--release", "11", "-classpath", str(android),

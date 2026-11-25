@@ -1,51 +1,29 @@
 package ru.big.town.anative;
 
 /** Keeps startup readiness separate from invalid or expired measurements. */
-final class SmartSaveSession {
-    static final int WAIT_FOR_DATA = -1;
+final class SmartSaveSession extends EnergyModeSession {
     static final long STARTUP_TIMEOUT_MS = 5_000;
-    static final long MAX_CHARGE_AGE_MS = 90_000;
 
     private final SmartSavePolicy policy;
     private final long startedAt;
     private boolean startupFinished;
-    private boolean chargeReceived;
-    private boolean targetReceived;
-    private boolean speedReceived;
-    private String reason = "waiting for initial data";
-
-    private float charge = Float.NaN;
-    private long chargeTime = -1;
-    private int target = -1;
-    private int speed = -1;
 
     SmartSaveSession(SmartSavePolicy policy, long startedAt) {
         this.policy = policy;
         this.startedAt = startedAt;
     }
 
-    void recordCharge(float value, long sampledAt) {
-        chargeReceived = true;
-        charge = value;
-        chargeTime = sampledAt;
-    }
-
-    void recordTarget(int value) {
-        targetReceived = true;
-        target = value;
-    }
-
+    @Override
     void recordSpeed(int value) {
-        speedReceived = true;
-        speed = value;
+        super.recordSpeed(value);
         policy.onSpeedChanged(value);
     }
 
+    @Override
     int desiredMode(long now, int currentMode) {
-        long age = now - chargeTime;
-        boolean chargeValid = Float.isFinite(charge) && charge >= 0 && charge <= 100;
-        boolean targetValid = target >= 25 && target <= 80 && target % 5 == 0;
-        boolean chargeFresh = chargeTime >= 0 && age >= 0 && age <= MAX_CHARGE_AGE_MS;
+        boolean chargeValid = validCharge();
+        boolean targetValid = VehicleRestorePolicy.validSaveTarget(target);
+        boolean chargeFresh = freshCharge(now);
         int desired =
                 policy.desiredMode(chargeFresh ? charge : Float.NaN, target, speed, currentMode);
 
@@ -81,6 +59,7 @@ final class SmartSaveSession {
         return desired;
     }
 
+    @Override
     long nextEvaluationAt(long now) {
         long deadline = Long.MAX_VALUE;
         if (!startupFinished && startedAt + STARTUP_TIMEOUT_MS > now) {
@@ -93,14 +72,5 @@ final class SmartSaveSession {
             }
         }
         return deadline == Long.MAX_VALUE ? -1 : deadline;
-    }
-
-    String reason() {
-        return reason;
-    }
-
-    String measurements(long now) {
-        return "soc=" + charge + " age=" + (chargeTime < 0 ? -1 : now - chargeTime)
-                + " target=" + target + " speed=" + speed;
     }
 }

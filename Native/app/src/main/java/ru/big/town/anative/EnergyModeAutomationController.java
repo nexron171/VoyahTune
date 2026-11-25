@@ -15,16 +15,17 @@ import android.util.Log;
 import androidx.core.content.ContextCompat;
 
 import ru.big.town.common.SmartSaveSettings;
+import ru.big.town.common.SmartSaveSettings.Automation;
 
 import java.util.Arrays;
 import java.util.Map;
-import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.BooleanSupplier;
 
 /** Energy control with bounded startup readiness and event-driven speed updates. */
-final class SmartSaveController implements AutoCloseable {
-    private static final String TAG = "SmartSave";
+final class EnergyModeAutomationController implements AutoCloseable {
+    private static final String TAG = "EnergyModeAutomation";
     private static final long CHARGE_INTERVAL_MS = 60_000;
     private static final Uri SETTINGS_URI =
             Uri.parse("content://ru.big.town.restoremode.restoremodecontentprovider/");
@@ -37,7 +38,7 @@ final class SmartSaveController implements AutoCloseable {
                     VehicleRestorePolicy.SAVE_CHARGE_LEVEL_ID);
 
     private final Context context;
-    private final HandlerThread thread = new HandlerThread("SmartSave");
+    private final HandlerThread thread = new HandlerThread(TAG);
     private final Handler handler;
     private final CanBusEventHub hub;
     private final SharedPreferences preferences;
@@ -56,9 +57,13 @@ final class SmartSaveController implements AutoCloseable {
 
     private CanBusEventHub.Subscription subscription;
     private Bundle configuration;
-    private SmartSaveSession session;
+    private Automation automation;
+    private EnergyModeSession session;
     private boolean connected;
     private boolean temporaryElectric;
+    private int temporaryFuelTarget;
+    private int confirmedFuelTarget = EnergyModeSession.NO_FUEL_TARGET;
+    private int requestedFuelTarget = EnergyModeSession.NO_FUEL_TARGET;
     private boolean stateQueryPending;
     private boolean requestSubmitted;
     private long measurementGeneration;
@@ -70,11 +75,13 @@ final class SmartSaveController implements AutoCloseable {
     private volatile long commandGeneration;
     private volatile boolean closed;
 
-    SmartSaveController(Context context) {
+    EnergyModeAutomationController(Context context) {
         this.context = context.getApplicationContext();
         preferences = context.getSharedPreferences("SmartSave", Context.MODE_PRIVATE);
         policy = new SmartSavePolicy(preferences.getBoolean("chargingLocked", false));
         temporaryElectric = preferences.getBoolean("temporaryElectric", false);
+        temporaryFuelTarget =
+                preferences.getInt("temporaryFuelTarget", EnergyModeSession.NO_FUEL_TARGET);
         if (preferences.getBoolean("manualSaveHeld", false)) {
             policy.holdManualSave();
         }
@@ -106,10 +113,11 @@ final class SmartSaveController implements AutoCloseable {
         }
     }
 
-    private boolean saveSelected(Bundle settings) {
-        return settings != null
-                && "SREV".equals(settings.getString("energy"))
-                && !settings.getBoolean("forcedEv", false);
+    private static Automation selectedAutomation(Bundle settings) {
+        return settings == null
+                ? null
+                : Automation.selected(
+                        settings.getString("energy"), settings.getBoolean("forcedEv", false));
     }
 
     private void refreshConfiguration() {
@@ -122,55 +130,53 @@ final class SmartSaveController implements AutoCloseable {
             return false;
         }
         Bundle next = readConfiguration();
-        boolean newCycle =
-                configuration != null
-                        && next != null
-                        && configuration.getLong("cycle", -1) != next.getLong("cycle", -1);
+        Automation nextAutomation = selectedAutomation(next);
         if (!sameConfiguration(configuration, next)) {
             commandGeneration++;
             requestedMode = -1;
+            requestedFuelTarget = EnergyModeSession.NO_FUEL_TARGET;
             requestSubmitted = false;
         }
+        if (next == null) {
+            stopWatching();
+            configuration = null;
+            automation = null;
+            handler.postDelayed(retryConfiguration, CHARGE_INTERVAL_MS);
+            return false;
+        }
+        boolean newCycle = preferences.getLong("energyCycle", -1) != next.getLong("cycle", -1);
+        boolean newSelection =
+                preferences.getLong("energySelectionRevision", 0)
+                        != next.getLong("energySelectionRevision", 0);
+        if (newCycle
+                || nextAutomation != automation
+                || (newSelection && nextAutomation == Automation.HYBRID)) {
+            stopWatching();
+        }
         configuration = next;
-        if (newCycle) {
-            stopWatching();
+        automation = nextAutomation;
+        if (automation != Automation.HYBRID || newSelection || newCycle) {
+            temporaryFuelTarget = EnergyModeSession.NO_FUEL_TARGET;
         }
-        if (configuration != null) {
-            long selection = configuration.getLong("energySelectionRevision", 0);
-            long previousSelection = preferences.getLong("energySelectionRevision", 0);
-            if (selection != previousSelection) {
-                if (saveSelected(configuration)) {
-                    policy.holdManualSave();
-                }
-                preferences
-                        .edit()
-                        .putLong("energySelectionRevision", selection)
-                        .putBoolean("manualSaveHeld", policy.isManualSaveHeld())
-                        .apply();
-            }
+        if (automation != Automation.SMART_SAVE) {
+            temporaryElectric = false;
+        } else if (newSelection) {
+            policy.holdManualSave();
         }
-        if (!saveSelected(configuration)) {
+        persistState();
+        if (automation == null || configuration.getInt("acc", -1) != 2) {
             stopWatching();
-            if (configuration != null) {
-                temporaryElectric = false;
-                persistState();
-            } else {
-                handler.postDelayed(retryConfiguration, CHARGE_INTERVAL_MS);
-            }
             return false;
         }
-        if (!configuration.getBoolean(SmartSaveSettings.ENABLED, false)) {
+        if (!configuration.getBoolean(automation.option, false)) {
             stopWatching();
-            persistState();
-            if (temporaryElectric
-                    && configuration.getInt("acc", -1) == 2
-                    && requestedMode != VehicleRestorePolicy.SOC_SREV) {
-                requestMode(VehicleRestorePolicy.SOC_SREV, "option disabled");
+            if ((temporaryElectric || temporaryFuelTarget != EnergyModeSession.NO_FUEL_TARGET)
+                    && requestedMode != automation.selectedMode) {
+                requestMode(
+                        automation.selectedMode,
+                        EnergyModeSession.NO_FUEL_TARGET,
+                        "option disabled");
             }
-            return false;
-        }
-        if (configuration.getInt("acc", -1) != 2) {
-            stopWatching();
             return false;
         }
         if (subscription == null) {
@@ -193,13 +199,14 @@ final class SmartSaveController implements AutoCloseable {
         if (previous == null || next == null) {
             return previous == next;
         }
-        return previous.getLong("revision", -1) == next.getLong("revision", -1)
+        Automation selected = selectedAutomation(next);
+        return selectedAutomation(previous) == selected
+                && previous.getLong("revision", -1) == next.getLong("revision", -1)
                 && previous.getLong("cycle", -1) == next.getLong("cycle", -1)
                 && previous.getInt("acc", -1) == next.getInt("acc", -1)
-                && previous.getBoolean(SmartSaveSettings.ENABLED, false)
-                        == next.getBoolean(SmartSaveSettings.ENABLED, false)
-                && previous.getBoolean("forcedEv", false) == next.getBoolean("forcedEv", false)
-                && Objects.equals(previous.getString("energy"), next.getString("energy"));
+                && (selected == null
+                        || previous.getBoolean(selected.option, false)
+                                == next.getBoolean(selected.option, false));
     }
 
     private void onEvent(CanBusEvent event) {
@@ -210,7 +217,10 @@ final class SmartSaveController implements AutoCloseable {
             case CONNECTION:
                 clearMeasurements();
                 connected = true;
-                session = new SmartSaveSession(policy, SystemClock.elapsedRealtime());
+                session =
+                        automation == Automation.HYBRID
+                                ? new HybridEngineSession(temporaryFuelTarget)
+                                : new SmartSaveSession(policy, SystemClock.elapsedRealtime());
                 hub.requestSpeedSnapshot();
                 refreshCharge();
                 return;
@@ -233,7 +243,7 @@ final class SmartSaveController implements AutoCloseable {
                 if (session == null) return;
                 if (event.first == TARGET.stableId) {
                     targetRevision++;
-                    session.recordTarget(targetPercent(event.second));
+                    session.recordTarget(VehicleRestorePolicy.saveTargetPercent(event.second));
                 } else if (event.first == MODE.stableId) {
                     modeRevision++;
                     observeMode(event.second);
@@ -282,13 +292,14 @@ final class SmartSaveController implements AutoCloseable {
                                     session.recordTarget(
                                             states == null
                                                     ? -1
-                                                    : targetPercent(states.get(TARGET)));
+                                                    : VehicleRestorePolicy.saveTargetPercent(
+                                                            states.get(TARGET)));
                                 }
-                                if (modeRevision == modeBeforeQuery) {
-                                    if (states != null
-                                            && requestSubmitted
-                                            && commandBeforeQuery == commandGeneration) {
+                                if (modeRevision == modeBeforeQuery
+                                        && commandBeforeQuery == commandGeneration) {
+                                    if (states != null && requestSubmitted) {
                                         requestedMode = -1;
+                                        requestedFuelTarget = EnergyModeSession.NO_FUEL_TARGET;
                                         requestSubmitted = false;
                                     }
                                     observeMode(states == null ? -1 : states.get(MODE));
@@ -312,7 +323,7 @@ final class SmartSaveController implements AutoCloseable {
             Log.i(TAG, "Observed energy mode=" + mode);
         }
         observedMode = mode;
-        if (observedMode == requestedMode) {
+        if (observedMode == requestedMode && requestedFuelTarget < 0) {
             requestedMode = -1;
             requestSubmitted = false;
         }
@@ -320,10 +331,6 @@ final class SmartSaveController implements AutoCloseable {
                 && requestedMode != VehicleRestorePolicy.SOC_EV) {
             temporaryElectric = false;
         }
-    }
-
-    private int targetPercent(int level) {
-        return level >= 0 && level <= 11 ? 25 + level * 5 : -1;
     }
 
     private void evaluate() {
@@ -334,6 +341,13 @@ final class SmartSaveController implements AutoCloseable {
         long now = SystemClock.elapsedRealtime();
         int currentMode = requestedMode >= 0 ? requestedMode : observedMode;
         int desiredMode = session.desiredMode(now, currentMode);
+        int fuelTarget = session.fuelTargetPercent();
+        if (desiredMode == VehicleRestorePolicy.SOC_REV) {
+            confirmedFuelTarget = EnergyModeSession.NO_FUEL_TARGET;
+            if (observedMode == desiredMode && requestedMode < 0) {
+                temporaryFuelTarget = EnergyModeSession.NO_FUEL_TARGET;
+            }
+        }
         persistState();
         String decision = desiredMode + ":" + session.reason();
         if (!decision.equals(lastDecision)) {
@@ -344,11 +358,13 @@ final class SmartSaveController implements AutoCloseable {
         if (deadline >= 0) {
             handler.postDelayed(measurementDeadline, Math.max(1, deadline - now));
         }
-        if (desiredMode == SmartSaveSession.WAIT_FOR_DATA) return;
-        if (desiredMode == requestedMode || (requestedMode < 0 && desiredMode == observedMode)) {
+        if (desiredMode == EnergyModeSession.WAIT_FOR_DATA) return;
+        boolean needsTarget = fuelTarget >= 0 && fuelTarget != confirmedFuelTarget;
+        if (desiredMode == requestedMode
+                || (requestedMode < 0 && desiredMode == observedMode && !needsTarget)) {
             return;
         }
-        requestMode(desiredMode, session.reason());
+        requestMode(desiredMode, fuelTarget, session.reason());
     }
 
     private void logDecision(String action, int mode, String reason) {
@@ -379,66 +395,100 @@ final class SmartSaveController implements AutoCloseable {
                         + observedMode);
     }
 
-    private void requestMode(int mode, String reason) {
+    private void requestMode(int mode, int fuelTarget, String reason) {
         final long generation = ++commandGeneration;
+        final Automation owner = automation;
         requestedMode = mode;
+        requestedFuelTarget = fuelTarget;
         requestSubmitted = false;
         final long selectionRevision = configuration.getLong("revision", -1);
         final long cycle = configuration.getLong("cycle", -1);
+        final long modeBeforeRequest = modeRevision;
         logDecision("request", mode, reason);
         if (mode == VehicleRestorePolicy.SOC_EV) {
             // Record ownership before enqueueing so disabling can cancel a pending EV as well.
             temporaryElectric = true;
             persistState();
+        } else if (fuelTarget >= 0) {
+            temporaryFuelTarget = fuelTarget;
+            persistState();
+        } else if (owner == Automation.HYBRID
+                && temporaryFuelTarget != EnergyModeSession.NO_FUEL_TARGET) {
+            temporaryFuelTarget = HybridEngineSession.RETURN_PENDING;
+            persistState();
         }
+        BooleanSupplier active = () -> !closed && generation == commandGeneration;
+        BooleanSupplier allowed =
+                () ->
+                        active.getAsBoolean()
+                                && commandAllowed(owner, mode, selectionRevision, cycle);
+        BooleanSupplier send =
+                fuelTarget >= 0
+                        ? () ->
+                                SaveChargeController.applyTemporary(
+                                        context, fuelTarget, selectionRevision, cycle, active)
+                        : () ->
+                                OemVehicleStateTransport.sendTemporaryEnergyMode(
+                                                context, mode, selectionRevision, cycle)
+                                        .accepted();
         ApplyEngine.postWakeAction(
-                "smart Save",
-                () -> {
-                    if (closed || generation != commandGeneration) {
-                        return false;
-                    }
-                    Bundle current = readConfiguration();
-                    if (!saveSelected(current)
-                            || current.getLong("revision", -1) != selectionRevision
-                            || current.getLong("cycle", -1) != cycle
-                            || current.getInt("acc", -1) != 2
-                            || (mode == VehicleRestorePolicy.SOC_EV
-                                    && !current.getBoolean(SmartSaveSettings.ENABLED, false))) {
-                        return false;
-                    }
-                    return CanSender.runGuardedSend(
-                            () -> !closed && generation == commandGeneration,
-                            () ->
-                                    OemVehicleStateTransport.sendTemporaryEnergyMode(
-                                                    context,
-                                                    mode,
-                                                    current.getLong("revision", -1),
-                                                    current.getLong("cycle", -1))
-                                            .accepted());
-                },
-                result ->
-                        handler.post(
-                                () -> {
-                                    if (closed || generation != commandGeneration) {
-                                        return;
-                                    }
-                                    if (result != ApplyEngine.WakeActionResult.SUCCESS) {
-                                        requestedMode = -1;
-                                        Log.w(TAG, "Temporary mode was not submitted: " + result);
-                                    } else if (requestedMode == mode) {
-                                        requestSubmitted = true;
-                                    }
-                                }));
+                "energy mode " + owner,
+                () -> CanSender.runGuardedSend(allowed, send),
+                result -> handler.post(() -> finishRequest(generation, modeBeforeRequest, result)));
+    }
+
+    private void finishRequest(
+            long generation, long modeBeforeRequest, ApplyEngine.WakeActionResult result) {
+        if (closed || generation != commandGeneration) return;
+        if (result != ApplyEngine.WakeActionResult.SUCCESS) {
+            // Retry an unconfirmed target on the next state poll. A speed reversal takes priority.
+            if (requestedFuelTarget >= 0) {
+                requestSubmitted = true;
+            } else {
+                requestedMode = -1;
+                if (session == null) handler.postDelayed(retryConfiguration, CHARGE_INTERVAL_MS);
+            }
+            Log.w(TAG, "Energy mode request incomplete: " + result);
+            return;
+        }
+        if (requestedFuelTarget < 0) {
+            requestSubmitted = requestedMode >= 0;
+            return;
+        }
+        confirmedFuelTarget = requestedFuelTarget;
+        if (modeRevision == modeBeforeRequest) observedMode = requestedMode;
+        modeRevision++;
+        requestedMode = -1;
+        requestedFuelTarget = EnergyModeSession.NO_FUEL_TARGET;
+        evaluate();
+    }
+
+    private boolean commandAllowed(Automation owner, int mode, long revision, long cycle) {
+        Bundle current = readConfiguration();
+        return selectedAutomation(current) == owner
+                && current.getLong("revision", -1) == revision
+                && current.getLong("cycle", -1) == cycle
+                && current.getInt("acc", -1) == 2
+                && owner.allows(mode, current.getBoolean(owner.option, false));
     }
 
     private void persistState() {
+        long cycle = configuration.getLong("cycle", -1);
+        long selection = configuration.getLong("energySelectionRevision", 0);
         if (preferences.getBoolean("chargingLocked", false) == policy.isChargingLocked()
                 && preferences.getBoolean("temporaryElectric", false) == temporaryElectric
+                && preferences.getInt("temporaryFuelTarget", EnergyModeSession.NO_FUEL_TARGET)
+                        == temporaryFuelTarget
+                && preferences.getLong("energyCycle", -1) == cycle
+                && preferences.getLong("energySelectionRevision", 0) == selection
                 && preferences.getBoolean("manualSaveHeld", false) == policy.isManualSaveHeld()) {
             return;
         }
         preferences
                 .edit()
+                .putLong("energyCycle", cycle)
+                .putLong("energySelectionRevision", selection)
+                .putInt("temporaryFuelTarget", temporaryFuelTarget)
                 .putBoolean("manualSaveHeld", policy.isManualSaveHeld())
                 .putBoolean("chargingLocked", policy.isChargingLocked())
                 .putBoolean("temporaryElectric", temporaryElectric)
@@ -453,6 +503,8 @@ final class SmartSaveController implements AutoCloseable {
         lastDecision = null;
         observedMode = -1;
         requestedMode = -1;
+        requestedFuelTarget = EnergyModeSession.NO_FUEL_TARGET;
+        confirmedFuelTarget = EnergyModeSession.NO_FUEL_TARGET;
         requestSubmitted = false;
     }
 

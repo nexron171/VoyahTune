@@ -5,6 +5,8 @@ import android.os.Bundle;
 
 import ru.big.town.common.DoorMediaSettings;
 import ru.big.town.common.DriveSelectionPolicy;
+import ru.big.town.common.SmartSaveSettings;
+import ru.big.town.common.SmartSaveSettings.Automation;
 
 /** Serializes durable target changes and hook bootstrap claims across provider Binder threads. */
 public final class DriveSelectionPreferences {
@@ -62,6 +64,16 @@ public final class DriveSelectionPreferences {
             e.putString("energy", mode);
         }
         return e.commit();
+    }
+
+    public static synchronized void setAutomationEnabled(
+            SharedPreferences preferences, Automation automation, boolean enabled) {
+        if (preferences.getBoolean(automation.option, false) == enabled) return;
+        SharedPreferences.Editor change = preferences.edit().putBoolean(automation.option, enabled);
+        Automation selected =
+                Automation.selected(energy(preferences), preferences.getBoolean("forcedEv", false));
+        if (selected == automation) change.putLong(REV, preferences.getLong(REV, 0) + 1);
+        change.apply();
     }
 
     public static synchronized boolean selectRecycle(SharedPreferences prefs, String mode) {
@@ -208,6 +220,19 @@ public final class DriveSelectionPreferences {
                     throw new IllegalStateException("Recuperation target not persisted");
                 }
             }
+        } else if (SmartSaveSettings.TAKE_OVER_HYBRID_ENERGY.equals(action)) {
+            String chosen = args.getString("energy");
+            boolean accepted =
+                    accRestore
+                            && prefs.getInt(ACC, -1) == 2
+                            && prefs.getBoolean(SmartSaveSettings.HYBRID_ENGINE_HOLD, false)
+                            && !prefs.getBoolean("forcedEv", false)
+                            && "REV".equals(energy(prefs))
+                            && ("EV".equals(chosen) || "SREV".equals(chosen))
+                            && selectEnergy(prefs, chosen, false);
+            Bundle result = snapshot(prefs, accRestore);
+            result.putBoolean("accepted", accepted);
+            return result;
         } else if ("user".equals(action)) {
             if (accRestore
                     && args.containsKey("recycle")
@@ -263,7 +288,9 @@ public final class DriveSelectionPreferences {
             result.putBoolean(
                     "applySettingsOnDrive", prefs.getBoolean("applySettingsOnDrive", false));
             result.putLong("energySelectionRevision", prefs.getLong("energySelectionRevision", 0));
-            result.putBoolean("smartSaveEnabled", prefs.getBoolean("smartSaveEnabled", false));
+            for (Automation automation : Automation.values()) {
+                result.putBoolean(automation.option, prefs.getBoolean(automation.option, false));
+            }
             result.putBoolean("forcedEv", prefs.getBoolean("forcedEv", false));
         }
         result.putString("configuredEnergy", prefs.getString("energy", "SREV"));

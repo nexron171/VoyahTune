@@ -41,7 +41,7 @@ final class ModeFeedbackController implements AutoCloseable {
             };
 
     private boolean receiverRegistered;
-    private SmartSaveController smartSaveController;
+    private EnergyModeAutomationController energyModeController;
     private DriveEntryRestoreController driveEntryRestoreController;
     private volatile boolean closed;
 
@@ -68,7 +68,7 @@ final class ModeFeedbackController implements AutoCloseable {
             receiverRegistered = true;
 
             if (ApplyEngine.usesAccRestore()) {
-                smartSaveController = new SmartSaveController(appContext);
+                energyModeController = new EnergyModeAutomationController(appContext);
                 driveEntryRestoreController = new DriveEntryRestoreController(appContext);
             }
 
@@ -106,9 +106,9 @@ final class ModeFeedbackController implements AutoCloseable {
             driveEntryRestoreController.close();
             driveEntryRestoreController = null;
         }
-        if (smartSaveController != null) {
-            smartSaveController.close();
-            smartSaveController = null;
+        if (energyModeController != null) {
+            energyModeController.close();
+            energyModeController = null;
         }
 
         if (receiverRegistered) {

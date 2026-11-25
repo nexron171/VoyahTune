@@ -38,6 +38,7 @@ public interface SharedPreferences {
         Editor putLong(String k,long v);
         Editor remove(String k);
         boolean commit();
+        default void apply(){ commit(); }
     }
 }
 """
@@ -89,6 +90,7 @@ public final class AccPreferencesHarness {
         scenario("smart Save snapshot retains user intent and honors forced EV",()->{
             Memory p=new Memory();p.disk.put("energy","SREV");
             equal(false,action(p,"snapshot",null,1).getBoolean("smartSaveEnabled"));
+            equal(false,action(p,"snapshot",null,1).getBoolean("hybridEngineHoldEnabled"));
             equal(false,action(p,"snapshot",null,1).getBoolean("applySettingsOnDrive"));
             p.disk.put("applySettingsOnDrive",true);
             equal(true,action(p,"snapshot",null,1).getBoolean("applySettingsOnDrive"));
@@ -98,13 +100,16 @@ public final class AccPreferencesHarness {
             equal("SREV",enabled.getString("energy"));
             p.disk.put("energyRememberLast",false);
             DriveSelectionPreferences.selectEnergy(p,"REV",false);
+            p.disk.put("hybridEngineHoldEnabled",true);
             Bundle manual=action(p,"snapshot",null,1);
             equal("REV",manual.getString("energy"));
+            equal(true,manual.getBoolean("hybridEngineHoldEnabled"));
             equal("SREV",manual.getString("configuredEnergy"));
             DriveSelectionPreferences.selectEnergy(p,"FORCE_EV",false);
             equal(true,action(p,"snapshot",null,1).getBoolean("forcedEv"));
             Bundle pi=DriveSelectionPreferences.hook(p,"snapshot",null,1,false);
             equal(false,pi.containsKey("smartSaveEnabled"));
+            equal(false,pi.containsKey("hybridEngineHoldEnabled"));
         });
         scenario("explicit energy choices have an independent durable revision",()->{
             Memory p=new Memory();acc(p,2,1);
@@ -117,6 +122,32 @@ public final class AccPreferencesHarness {
             Memory restarted=new Memory(new HashMap<>(p.disk));
             equal(2L,action(restarted,"snapshot",null,1).getLong("energySelectionRevision",-1));
             equal(false,DriveSelectionPreferences.hook(p,"snapshot",null,1,false).containsKey("energySelectionRevision"));
+        });
+        scenario("toggling hybrid automation invalidates queued commands without selecting a mode",()->{
+            Memory p=new Memory();p.disk.put("energy","REV");Bundle initial=acc(p,2,1);
+            long revision=initial.getLong("revision",-1);
+            var hybrid=ru.big.town.common.SmartSaveSettings.Automation.HYBRID;
+            DriveSelectionPreferences.setAutomationEnabled(p,hybrid,true);
+            DriveSelectionPreferences.setAutomationEnabled(p,hybrid,true);
+            DriveSelectionPreferences.setAutomationEnabled(p,hybrid,false);
+            DriveSelectionPreferences.setAutomationEnabled(p,hybrid,true);
+            DriveSelectionPreferences.setAutomationEnabled(p,ru.big.town.common.SmartSaveSettings.Automation.SMART_SAVE,true);
+            Bundle after=action(p,"snapshot",null,1);
+            equal(revision+3,after.getLong("revision",-1));
+            equal(initial.getLong("energySelectionRevision",-1),after.getLong("energySelectionRevision",-1));
+            equal("REV",after.getString("energy"));
+        });
+        scenario("driver can keep the fuel mode already shown during hybrid automation",()->{
+            Memory p=new Memory(); p.disk.put("energy","REV"); acc(p,2,1);
+            Bundle tap=new Bundle();tap.putString("energy","SREV");
+            equal("REV",action(p,"takeOverHybridEnergy",tap,1).getString("energy"));
+            p.disk.put("hybridEngineHoldEnabled",true);
+            p.disk.put("energyRememberLast",false);
+            Bundle manual=action(p,"takeOverHybridEnergy",tap,1);
+            equal(true,manual.getBoolean("accepted"));
+            equal("SREV",manual.getString("energy"));
+            equal("REV",manual.getString("configuredEnergy"));
+            equal(false,action(p,"takeOverHybridEnergy",tap,1).getBoolean("accepted"));
         });
         scenario("one settings claim per ACC survives provider recreation",()->{
             Memory p=new Memory();Bundle first=acc(p,2,1);
@@ -211,7 +242,8 @@ def main():
             sources.append(str(path))
         sources += [str(ROOT / "RestoreMode/app/src/main/java/ru/big/town/restoremode/vehicle/DriveSelectionPreferences.java"),
                     str(ROOT / "SharedAndroid/src/main/java/ru/big/town/common/DriveSelectionPolicy.java"),
-                    str(ROOT / "SharedAndroid/src/main/java/ru/big/town/common/DoorMediaSettings.java")]
+                    str(ROOT / "SharedAndroid/src/main/java/ru/big/town/common/DoorMediaSettings.java"),
+                    str(ROOT / "SharedAndroid/src/main/java/ru/big/town/common/SmartSaveSettings.java")]
         subprocess.run([javac, "--release", "11", "-d", str(temp), *sources], check=True)
         subprocess.run([java, "-cp", str(temp), "ru.big.town.restoremode.vehicle.AccPreferencesHarness"], check=True)
 

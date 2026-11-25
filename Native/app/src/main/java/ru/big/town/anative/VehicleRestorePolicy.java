@@ -15,13 +15,28 @@ final class VehicleRestorePolicy {
     static final int SOC_FORCE_EV = 5;
     static final String SAVE_CHARGE_LEVEL = "SREV_SOC_SET";
     static final int SAVE_CHARGE_LEVEL_ID = 1196;
+    static final int MIN_SAVE_PERCENT = 25;
+    static final int MAX_SAVE_PERCENT = 80;
+    static final int SAVE_PERCENT_STEP = 5;
+
+    static boolean validSaveTarget(int percent) {
+        return percent >= MIN_SAVE_PERCENT
+                && percent <= MAX_SAVE_PERCENT
+                && percent % SAVE_PERCENT_STEP == 0;
+    }
+
+    static int saveTargetPercent(int level) {
+        if (level < 0 || level > (MAX_SAVE_PERCENT - MIN_SAVE_PERCENT) / SAVE_PERCENT_STEP)
+            return -1;
+        return MIN_SAVE_PERCENT + level * SAVE_PERCENT_STEP;
+    }
 
     /** UI normalizes speech; the service accepts only a valid, already rounded target. */
     static int requireSaveChargeLevel(int percent) {
-        if (percent < 25 || percent > 80 || percent % 5 != 0) {
+        if (!validSaveTarget(percent)) {
             throw new IllegalArgumentException("Unsupported SREV charge target: " + percent);
         }
-        return (percent - 25) / 5;
+        return (percent - MIN_SAVE_PERCENT) / SAVE_PERCENT_STEP;
     }
 
     static final String REGEN_LEVEL = "HUM_ENERGY_PTREGEN_LEVL";
@@ -35,7 +50,8 @@ final class VehicleRestorePolicy {
     static final int PEDESTRIAN_SOUND_DISABLED = 1;
     static final int PEDESTRIAN_SOUND_ENABLED = 2;
 
-    // VehicleSettings HintSwitch: checked=2, unchecked=1 (not DFVehicleState's stale 0/1 constants).
+    // VehicleSettings HintSwitch: checked=2, unchecked=1 (not DFVehicleState's stale 0/1
+    // constants).
     static final String SUSPENSION_MAINTENANCE = "ASC_MAINTAIN_SWITCH";
     static final int SUSPENSION_MAINTENANCE_ID = 711;
 
@@ -43,16 +59,14 @@ final class VehicleRestorePolicy {
         return enabled ? 2 : 1;
     }
 
-    private VehicleRestorePolicy() {
-    }
+    private VehicleRestorePolicy() {}
 
     /**
      * Appends only explicit user-owned restore fields. Shared charge/chassis/ambient fields are
      * deliberately absent and will be filled by the Android 11 OEM CanBusService from its cache.
      */
-    static void appendPrimaryTo(Map<String, Integer> target,
-                                boolean energyEnabled, String energy,
-                                boolean forcedEv) {
+    static void appendPrimaryTo(
+            Map<String, Integer> target, boolean energyEnabled, String energy, boolean forcedEv) {
         if (target == null) throw new IllegalArgumentException("Target bundle is null");
         if (energyEnabled) target.put(SOC_MODE, requireEnergy(energy));
         // Forced EV intentionally wins over the ordinary energy selection in the same OEM bundle.
@@ -64,9 +78,8 @@ final class VehicleRestorePolicy {
      * HashMap, while its Snow branch owns the minimum level. VoyahTune therefore omits the field for
      * Snow entirely and otherwise keeps the explicit target in a deterministic following OEM task.
      */
-    static void appendRecuperationTo(Map<String, Integer> target,
-                                     boolean recycleEnabled, String recycle,
-                                     String driveMode) {
+    static void appendRecuperationTo(
+            Map<String, Integer> target, boolean recycleEnabled, String recycle, String driveMode) {
         if (target == null) throw new IllegalArgumentException("Target bundle is null");
         if (recycleEnabled && allowsRecuperationRestore(driveMode)) {
             target.put(REGEN_LEVEL, requireRecycle(recycle));

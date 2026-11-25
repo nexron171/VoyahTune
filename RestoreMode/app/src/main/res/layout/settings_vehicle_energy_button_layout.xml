@@ -6,7 +6,7 @@
     android:layout_height="wrap_content"
     android:layout_marginBottom="16dp"
     android:orientation="vertical"
-    app:settingsColumns="2">
+    app:settingsColumns="1">
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -31,43 +31,82 @@
             android:track="@drawable/switch_track"
             android:contentDescription="Три режима топлива" />
     </LinearLayout>
+    <LinearLayout
+        android:id="@+id/smartSaveRow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@drawable/settings_card"
+        android:padding="25dp">
         <LinearLayout
-            android:id="@+id/smartSaveRow"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:background="@drawable/settings_card"
-            android:padding="25dp">
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:layout_marginBottom="14dp">
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="@string/smart_save_title"
-                    android:textSize="24sp"
-                    android:textColor="#f3f5fa"
-                    android:includeFontPadding="false" />
-                <ru.big.town.restoremode.settings.ui.controls.SettingsToggle
-                    android:id="@+id/switchSmartSave"
-                    android:layout_width="58dp"
-                    android:layout_height="32dp"
-                    android:checked="false"
-                    android:thumb="@drawable/switch_thumb"
-                    android:track="@drawable/switch_track" />
-            </LinearLayout>
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="14dp">
             <TextView
-                android:layout_width="match_parent"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:text="@string/smart_save_description"
-                android:textSize="18sp"
-                android:textColor="#a9b3c5"
+                android:layout_weight="1"
+                android:layout_marginEnd="16dp"
+                android:text="@string/smart_save_title"
+                android:textSize="24sp"
+                android:textColor="#f3f5fa"
                 android:includeFontPadding="false" />
+            <ru.big.town.restoremode.settings.ui.controls.SettingsToggle
+                android:id="@+id/switchSmartSave"
+                android:layout_width="58dp"
+                android:layout_height="32dp"
+                android:contentDescription="@string/smart_save_title"
+                android:thumb="@drawable/switch_thumb"
+                android:track="@drawable/switch_track" />
         </LinearLayout>
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/smart_save_description"
+            android:textSize="18sp"
+            android:textColor="#a9b3c5"
+            android:includeFontPadding="false" />
+    </LinearLayout>
+    <LinearLayout
+        android:id="@+id/hybridEngineHoldRow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@drawable/settings_card"
+        android:padding="25dp">
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="14dp">
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="16dp"
+                android:text="@string/hybrid_engine_hold_title"
+                android:textSize="24sp"
+                android:textColor="#f3f5fa"
+                android:includeFontPadding="false" />
+            <ru.big.town.restoremode.settings.ui.controls.SettingsToggle
+                android:id="@+id/switchHybridEngineHold"
+                android:layout_width="58dp"
+                android:layout_height="32dp"
+                android:contentDescription="@string/hybrid_engine_hold_title"
+                android:thumb="@drawable/switch_thumb"
+                android:track="@drawable/switch_track" />
+        </LinearLayout>
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/hybrid_engine_hold_description"
+            android:textSize="18sp"
+            android:textColor="#a9b3c5"
+            android:includeFontPadding="false" />
+    </LinearLayout>
     <LinearLayout
         android:id="@+id/driveEntryRestoreRow"
         android:layout_width="match_parent"

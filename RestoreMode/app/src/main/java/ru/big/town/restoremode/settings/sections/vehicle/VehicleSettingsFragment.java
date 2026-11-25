@@ -5,8 +5,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.os.Bundle;
-import android.os.Parcelable;
 import android.os.Message;
+import android.os.Parcelable;
 import android.os.RemoteException;
 import android.util.Log;
 import android.view.View;
@@ -17,6 +17,7 @@ import android.widget.Switch;
 import android.widget.TextView;
 
 import ru.big.town.common.ScreenBrightnessSettings;
+import ru.big.town.common.SmartSaveSettings.Automation;
 import ru.big.town.restoremode.R;
 import ru.big.town.restoremode.integration.GlobalVars;
 import ru.big.town.restoremode.settings.core.SettingsHost;
@@ -24,14 +25,14 @@ import ru.big.town.restoremode.settings.core.SettingsSection;
 import ru.big.town.restoremode.settings.core.SettingsSectionFragment;
 import ru.big.town.restoremode.settings.core.SettingsSectionLayouts;
 import ru.big.town.restoremode.settings.ui.controls.SettingsControls;
-import ru.big.town.restoremode.settings.ui.list.SettingsList;
 import ru.big.town.restoremode.settings.ui.layout.SettingsGrid;
+import ru.big.town.restoremode.settings.ui.list.SettingsList;
 import ru.big.town.restoremode.settings.ui.style.SettingsDesign;
 import ru.big.town.restoremode.vehicle.DriveSelectionPreferences;
 import ru.big.town.restoremode.vehicle.FragranceSettings;
 
-import java.util.List;
 import java.util.ArrayList;
+import java.util.List;
 
 public final class VehicleSettingsFragment extends SettingsSectionFragment {
     @Override
@@ -82,18 +83,20 @@ public final class VehicleSettingsFragment extends SettingsSectionFragment {
 
     private View categoryGrid(LinearLayout parent) {
         SettingsGrid grid =
-                (SettingsGrid) getLayoutInflater()
-                        .inflate(R.layout.settings_main_categories, parent, false);
+                (SettingsGrid)
+                        getLayoutInflater()
+                                .inflate(R.layout.settings_main_categories, parent, false);
         for (VehicleSettingsCategory item : VehicleSettingsCategory.values()) {
             View tile = getLayoutInflater().inflate(R.layout.settings_main_category, grid, false);
             ((TextView) tile.findViewById(R.id.mainCategoryTitle)).setText(item.title);
             ((TextView) tile.findViewById(R.id.mainCategoryDescription)).setText(item.description);
             tile.setMinimumHeight(SettingsDesign.dp(tile, 150));
-            tile.setOnClickListener(view -> {
-                menuScroll = settingsList.getLayoutManager().onSaveInstanceState();
-                category = item;
-                showRows(true);
-            });
+            tile.setOnClickListener(
+                    view -> {
+                        menuScroll = settingsList.getLayoutManager().onSaveInstanceState();
+                        category = item;
+                        showRows(true);
+                    });
             grid.addView(tile);
         }
         return grid;
@@ -497,8 +500,8 @@ public final class VehicleSettingsFragment extends SettingsSectionFragment {
         bindRememberLastSwitch(R.id.switchRecycleRememberLast, "recycleRememberLast", "recycle");
     }
 
-    private void bindSmartSave() {
-        View row = settingView(R.id.smartSaveRow);
+    private void bindEnergyOption(int rowId, int switchId, Automation automation) {
+        View row = settingView(rowId);
         if (row == null) {
             return;
         }
@@ -507,15 +510,12 @@ public final class VehicleSettingsFragment extends SettingsSectionFragment {
         if (!supported) {
             return;
         }
-        Switch toggle = settingView(R.id.switchSmartSave);
-        toggle.setChecked(
-                preferences.getBoolean(ru.big.town.common.SmartSaveSettings.ENABLED, false));
+        Switch toggle = settingView(switchId);
+        toggle.setChecked(preferences.getBoolean(automation.option, false));
         toggle.setOnCheckedChangeListener(
                 (button, checked) ->
-                        preferences
-                                .edit()
-                                .putBoolean(ru.big.town.common.SmartSaveSettings.ENABLED, checked)
-                                .apply());
+                        DriveSelectionPreferences.setAutomationEnabled(
+                                preferences, automation, checked));
     }
 
     private void bindRememberLastSwitch(int switchId, String prefKey, String modeKey) {
@@ -693,7 +693,8 @@ public final class VehicleSettingsFragment extends SettingsSectionFragment {
         initModeRadios();
         initModeEnableToggles();
         initModeRememberLastToggles();
-        bindSmartSave();
+        bindEnergyOption(R.id.smartSaveRow, R.id.switchSmartSave, Automation.SMART_SAVE);
+        bindEnergyOption(R.id.hybridEngineHoldRow, R.id.switchHybridEngineHold, Automation.HYBRID);
         View driveEntryRow = settingView(R.id.driveEntryRestoreRow);
         if (driveEntryRow != null) {
             driveEntryRow.setVisibility(

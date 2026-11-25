@@ -32,6 +32,7 @@ public class SettingsContentProvider extends ContentProvider {
             (preferences, key) -> {
                 if ("applySettingsOnDrive".equals(key)
                         || SmartSaveSettings.ENABLED.equals(key)
+                        || SmartSaveSettings.HYBRID_ENGINE_HOLD.equals(key)
                         || "energy".equals(key)
                         || "currentTripEnergy".equals(key)
                         || "forcedEv".equals(key)
@@ -257,7 +258,10 @@ public class SettingsContentProvider extends ContentProvider {
             if ("dispatchSettings".equals(arg)) {
                 result.putBoolean("settingsDispatched", dispatched);
             }
-            if ("user".equals(arg) && extras != null) {
+            boolean tookOver =
+                    SmartSaveSettings.TAKE_OVER_HYBRID_ENERGY.equals(arg)
+                            && result.getBoolean("accepted");
+            if (("user".equals(arg) || tookOver) && extras != null) {
                 if (extras.containsKey("mode")) {
                     notifySavedMode(
                             "driveMode",

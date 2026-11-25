@@ -433,7 +433,9 @@ final class OemVehicleStateTransport {
 
     static Result sendTemporaryEnergyMode(Context context, int mode, long revision, long cycle) {
         if (!ru.big.town.common.VehiclePlatform.current().isH97XY()
-                || (mode != VehicleRestorePolicy.SOC_EV && mode != VehicleRestorePolicy.SOC_SREV)) {
+                || (mode != VehicleRestorePolicy.SOC_EV
+                        && mode != VehicleRestorePolicy.SOC_SREV
+                        && mode != VehicleRestorePolicy.SOC_REV)) {
             return Result.TRANSIENT_FAILURE;
         }
         StateKey key =
@@ -452,7 +454,7 @@ final class OemVehicleStateTransport {
         values.putLong(SmartSaveSettings.REVISION, revision);
         values.putLong(SmartSaveSettings.CYCLE, cycle);
         synchronized (INSTANCE.transactionLock) {
-            return INSTANCE.transactBundle(binder, values, "smart Save temporary mode");
+            return INSTANCE.transactBundle(binder, values, "temporary energy mode");
         }
     }
 

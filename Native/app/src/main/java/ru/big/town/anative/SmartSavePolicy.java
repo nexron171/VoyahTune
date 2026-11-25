@@ -35,9 +35,7 @@ final class SmartSavePolicy {
         if (!Float.isFinite(charge)
                 || charge < 0
                 || charge > 100
-                || target < 25
-                || target > 80
-                || target % 5 != 0) {
+                || !VehicleRestorePolicy.validSaveTarget(target)) {
             return VehicleRestorePolicy.SOC_SREV;
         }
 
