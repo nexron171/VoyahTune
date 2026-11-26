@@ -23,29 +23,36 @@ func TestNavigationAudioAgentsNormalizeAndKeepExistingNavigationTargets(t *testi
 }
 
 func TestNavigationAudioSharesNavigationProcessAndCanBeDisabledIndependently(t *testing.T) {
-	manager, _ := supervisorFixture(t, nil)
-	var existing nativeAgentConfig
-	for _, agent := range compiledAgents() {
-		if agent.Target == "ru.yandex.yandexnavi" {
-			existing = agent
-			break
-		}
-	}
-	audio := navigationAudioAgents(existing.Target)[0]
-	manager.wanted[existing.ID] = true
-	manager.wanted[audio.ID] = true
-	group, _, err := manager.selection(context.Background(), []nativeAgentConfig{existing, audio}, processIdentity{})
-	if err != nil || !reflect.DeepEqual(group.Modules, []string{
-		"client.ru.yandex.yandexnavi", "navigation-audio.ru.yandex.yandexnavi", "yandex-navigation",
-	}) {
-		t.Fatal("navigation modules were replaced or split", group, err)
-	}
-	manager.wanted[audio.ID] = false
-	group, _, err = manager.selection(context.Background(), []nativeAgentConfig{existing, audio}, processIdentity{})
-	if err != nil || !reflect.DeepEqual(group.Modules, []string{
-		"client.ru.yandex.yandexnavi", "yandex-navigation",
-	}) {
-		t.Fatal("removing audio selection disabled existing navigation hooks", group, err)
+	for _, target := range []string{"ru.yandex.yandexnavi", "ru.yandex.yandexmaps", "com.yango.maps.android"} {
+		t.Run(target, func(t *testing.T) {
+			manager, _ := supervisorFixture(t, nil)
+			var existing nativeAgentConfig
+			for _, agent := range compiledAgents() {
+				if agent.Target == target {
+					existing = agent
+					break
+				}
+			}
+			if existing.ID == "" {
+				t.Fatal("navigation agent is missing")
+			}
+			audio := navigationAudioAgents(target)[0]
+			manager.wanted[existing.ID] = true
+			manager.wanted[audio.ID] = true
+			group, _, err := manager.selection(context.Background(), []nativeAgentConfig{existing, audio}, processIdentity{})
+			if err != nil || !reflect.DeepEqual(group.Modules, []string{
+				"client." + target, "navigation-audio." + target, "yandex-navigation",
+			}) {
+				t.Fatal("navigation modules were replaced or split", group, err)
+			}
+			manager.wanted[audio.ID] = false
+			group, _, err = manager.selection(context.Background(), []nativeAgentConfig{existing, audio}, processIdentity{})
+			if err != nil || !reflect.DeepEqual(group.Modules, []string{
+				"client." + target, "yandex-navigation",
+			}) {
+				t.Fatal("removing audio selection disabled existing navigation hooks", group, err)
+			}
+		})
 	}
 }
 

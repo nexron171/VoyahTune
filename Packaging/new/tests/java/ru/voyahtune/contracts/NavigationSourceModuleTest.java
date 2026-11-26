@@ -97,6 +97,7 @@ public final class NavigationSourceModuleTest {
         verifyListenerVariant(DirectGuidance.class);
         verifyListenerVariant(WeakSubscribedGuidance.class);
         verifyListenerVariant(SubscribedGuidance.class);
+        verifyModernYandex();
         for (Class<?> type :
                 List.of(UnsupportedGuidance.class, MissingRemovalGuidance.class, String.class)) {
             try (Harness harness = new Harness("yandex-navigation", type)) {
@@ -187,6 +188,58 @@ public final class NavigationSourceModuleTest {
         }
     }
 
+    private static void verifyModernYandex() throws Throwable {
+        try (Harness harness = new Harness("yandex-navigation", ModernGuidance.class)) {
+            ModernGuidance guidance = new ModernGuidance("active-route");
+            MapKitNavigation unrelated = new MapKitNavigation(new ModernGuidance("other-route"));
+            Method getGuidance = MapKitNavigation.class.getDeclaredMethod("getGuidance");
+            harness.invoke(getGuidance, unrelated);
+            harness.invoke(ModernGuidance.class.getDeclaredMethod("getNextManeuver"), guidance);
+            harness.flush();
+            harness.advance(1000);
+            require(harness.unsupported.isEmpty(), "Modern Yandex navigation was skipped");
+            require(harness.last() == null, "Another route supplied the maneuver annotation");
+
+            MapKitNavigation existingNavigation = new MapKitNavigation(guidance);
+            harness.invoke(getGuidance, existingNavigation);
+            harness.advance(1000);
+            NavigationSourceModule.Sample lateSample = harness.last();
+            require(
+                    lateSample != null && lateSample.icon == 7 && lateSample.distance == 250,
+                    "Late attached MapKit guidance did not supply the active maneuver");
+
+            ModernGuidance replacement = new ModernGuidance("next-route");
+            replacement.source.distance = 83;
+            MapKitNavigation createdNavigation = new MapKitNavigation(replacement);
+            harness.invoke(
+                    MapKitFactory.class.getDeclaredMethod(
+                            "createNavigationGuidance", Object.class, MapKitNavigation.class),
+                    null,
+                    new Object(),
+                    createdNavigation);
+            harness.flush();
+            harness.advance(1000);
+            NavigationSourceModule.Sample factorySample = harness.last();
+            require(
+                    factorySample != null && factorySample.distance == 83
+                            && factorySample.road.equals("Yandex road"),
+                    "Newly created MapKit guidance did not supply the maneuver");
+            require(guidance.source.removals == 1, "Previous modern guidance listener leaked");
+
+            createdNavigation.engine.routeStatus = Status.NOT_ON_ROUTE;
+            harness.advance(1000);
+            require(harness.last() == null, "Modern off-route maneuver remained active");
+            createdNavigation.engine.routeStatus = Status.ON_ROUTE;
+            harness.advance(1000);
+            require(harness.last() != null, "Modern guidance did not resume on route");
+            replacement.source.listener.get().onFinishedRoute();
+            harness.flush();
+            require(harness.last() == null, "Modern finished route was not cleared");
+            harness.runtime.close();
+            require(replacement.source.removals == 1, "Modern guidance listener leaked");
+        }
+    }
+
     static final class Harness implements AutoCloseable, NavigationSourceModule.Platform {
         final FixtureHookBackend backend = new FixtureHookBackend(PhoneContractDriver.nativeHooks);
         final HookRegistry hooks = new HookRegistry(backend);
@@ -223,6 +276,11 @@ public final class NavigationSourceModuleTest {
                                         return Listener.class;
                                     case "com.yandex.mapkit.navigation.automotive.UpcomingManoeuvre":
                                         return Upcoming.class;
+                                    case "com.yandex.mapkit.navigation.automotive.Navigation":
+                                    case "com.yandex.mapkit.navigation.automotive.internal.NavigationBinding":
+                                        return MapKitNavigation.class;
+                                    case "com.yandex.navikit.NaviKitNativeFactory":
+                                        return MapKitFactory.class;
                                     case "ru.dublgis.qsdk.IntegrationApplicationStateDispatcher":
                                         return Dispatcher.class;
                                     default:
@@ -545,6 +603,72 @@ public final class NavigationSourceModuleTest {
     }
 
     static final class UnsupportedGuidance extends GuidanceBase {}
+
+    static final class ModernGuidance {
+        final GuidanceBase source = new GuidanceBase();
+        final MapKitRoute route;
+
+        ModernGuidance(String routeId) {
+            route = new MapKitRoute(routeId);
+        }
+
+        boolean isValid() {
+            return source.isValid();
+        }
+
+        MapKitRoute route() {
+            return route;
+        }
+
+        Next getNextManeuver() {
+            return source.getNextManeuver();
+        }
+
+        void addGuidanceListener(WeakReference<Listener> listener) {
+            source.attach(listener);
+        }
+
+        void removeGuidanceListener(WeakReference<Listener> listener) {
+            source.detach(listener);
+        }
+    }
+
+    static final class MapKitRoute {
+        final String id;
+
+        MapKitRoute(String id) {
+            this.id = id;
+        }
+
+        String getRouteId() {
+            return id;
+        }
+    }
+
+    static final class MapKitNavigation {
+        final ModernGuidance guidance;
+        final GuidanceBase engine;
+
+        MapKitNavigation(ModernGuidance guidance) {
+            this.guidance = guidance;
+            engine = new GuidanceBase() {
+                @Override
+                Object getCurrentRoute() {
+                    return new MapKitRoute(guidance.route.id);
+                }
+            };
+        }
+
+        GuidanceBase getGuidance() {
+            return engine;
+        }
+    }
+
+    static final class MapKitFactory {
+        static ModernGuidance createNavigationGuidance(Object formatter, MapKitNavigation navigation) {
+            return navigation.guidance;
+        }
+    }
 
     enum Status {
         ON_ROUTE,

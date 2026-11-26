@@ -14,9 +14,11 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.Proxy;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.WeakHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -55,6 +57,10 @@ public final class NavigationSourceModule implements ModuleRuntime.Module {
     }
 
     private static final String GUIDANCE = "com.yandex.navikit.guidance.internal.GuidanceBinding";
+    private static final String NAVIKIT_FACTORY = "com.yandex.navikit.NaviKitNativeFactory";
+    private static final String MAPKIT_NAVIGATION = "com.yandex.mapkit.navigation.automotive.Navigation";
+    private static final String MAPKIT_NAVIGATION_BINDING =
+            "com.yandex.mapkit.navigation.automotive.internal.NavigationBinding";
     private static final String DISPATCHER =
             "ru.dublgis.qsdk.IntegrationApplicationStateDispatcher";
     private static final Set<String> ROUTE_STATUSES =
@@ -65,6 +71,9 @@ public final class NavigationSourceModule implements ModuleRuntime.Module {
     private final Platform platform;
     private final List<Executable> targets = new ArrayList<>();
     private final List<Binding> bindings = new ArrayList<>();
+    private final List<Method> mapKitFactories = new ArrayList<>();
+    private final Set<Object> mapKitNavigations =
+            Collections.synchronizedSet(Collections.newSetFromMap(new WeakHashMap<>()));
     private final AtomicReference<Object> candidate = new AtomicReference<>();
     private final AtomicBoolean mainPending = new AtomicBoolean();
     private final Object deliveryLock = new Object();
@@ -74,6 +83,7 @@ public final class NavigationSourceModule implements ModuleRuntime.Module {
     private Method removeListener;
     private Method routeGetter;
     private Method navigationGetter;
+    private Method mapKitGuidanceGetter;
     private Method maneuverGetter;
     private boolean weakListener;
     private boolean prepared;
@@ -137,10 +147,11 @@ public final class NavigationSourceModule implements ModuleRuntime.Module {
     private void prepareYandex() throws ReflectiveOperationException {
         maneuverGetter = getter("getNextManeuver", "getNextManoeuvre");
         routeGetter = getter("route", "getRoute");
-        navigationGetter = getter("navigation", "getNavigation");
         targets.add(maneuverGetter);
         targets.add(routeGetter);
-        targets.add(navigationGetter);
+        navigationGetter = optionalGetter("navigation", "getNavigation");
+        if (navigationGetter != null) targets.add(navigationGetter);
+        else prepareMapKitNavigation();
         Method start = methods.optional(GUIDANCE, "onStart");
         if (start != null) targets.add(start);
         try {
@@ -196,14 +207,44 @@ public final class NavigationSourceModule implements ModuleRuntime.Module {
                 "No supported GuidanceBinding listener registration/removal pair");
     }
 
+    private void prepareMapKitNavigation() throws ReflectiveOperationException {
+        methods.require(routeGetter.getReturnType().getName(), "getRouteId");
+        mapKitGuidanceGetter = methods.require(MAPKIT_NAVIGATION_BINDING, "getGuidance");
+        targets.add(mapKitGuidanceGetter);
+        List<Method> factories;
+        try {
+            factories = methods.overloads(NAVIKIT_FACTORY, "createNavigationGuidance");
+        } catch (ClassNotFoundException absent) {
+            return;
+        }
+        Class<?> navigationType = methods.type(MAPKIT_NAVIGATION);
+        Class<?> guidanceType = methods.type(GUIDANCE);
+        for (Method factory : factories) {
+            Class<?>[] parameters = factory.getParameterTypes();
+            if (Modifier.isStatic(factory.getModifiers())
+                    && parameters.length > 0
+                    && parameters[parameters.length - 1] == navigationType
+                    && factory.getReturnType().isAssignableFrom(guidanceType)) {
+                targets.add(factory);
+                mapKitFactories.add(factory);
+            }
+        }
+    }
+
     private Method getter(String... names) throws ClassNotFoundException, NoSuchMethodException {
+        Method method = optionalGetter(names);
+        if (method != null) return method;
+        throw new NoSuchMethodException(GUIDANCE + "." + String.join("/", names));
+    }
+
+    private Method optionalGetter(String... names) throws ClassNotFoundException {
         for (String name : names) {
             Method method = methods.optional(GUIDANCE, name);
             if (method != null
                     && !Modifier.isStatic(method.getModifiers())
                     && method.getReturnType() != void.class) return method;
         }
-        throw new NoSuchMethodException(GUIDANCE + "." + String.join("/", names));
+        return null;
     }
 
     private boolean listenerMethod(Method method) {
@@ -225,9 +266,17 @@ public final class NavigationSourceModule implements ModuleRuntime.Module {
                                     invocation -> {
                                         Object result = invocation.proceed();
                                         try {
-                                            if (id.equals("yandex-navigation"))
+                                            if (target.equals(mapKitGuidanceGetter)) {
+                                                mapKitNavigations.add(invocation.receiver());
+                                            } else if (mapKitFactories.contains(target)) {
+                                                Object[] arguments = invocation.arguments();
+                                                if (result != null) {
+                                                    mapKitNavigations.add(arguments[arguments.length - 1]);
+                                                    capture(result);
+                                                }
+                                            } else if (id.equals("yandex-navigation")) {
                                                 capture(invocation.receiver());
-                                            else {
+                                            } else {
                                                 String mode =
                                                         target.getName()
                                                                         .equals(
@@ -409,12 +458,16 @@ public final class NavigationSourceModule implements ModuleRuntime.Module {
                 || !valid(current)
                 || finished
                 || changedAt < 0
-                || platform.now() - changedAt >= 30000
-                || OemAccess.call(current, routeGetter.getName()) == null) return null;
+                || platform.now() - changedAt >= 30000) return null;
+        Object route = OemAccess.call(current, routeGetter.getName());
+        if (route == null) return null;
         Object next = OemAccess.call(current, maneuverGetter.getName());
         if (next == null) return null;
         Object engine =
-                OemAccess.call(OemAccess.call(current, navigationGetter.getName()), "getGuidance");
+                navigationGetter != null
+                        ? OemAccess.call(OemAccess.call(current, navigationGetter.getName()), "getGuidance")
+                        : mapKitGuidance(route);
+        if (engine == null) return null;
         String status =
                 String.valueOf(OemAccess.call(OemAccess.call(engine, "getRouteStatus"), "name"));
         if (OemAccess.call(engine, "getCurrentRoute") == null || !ROUTE_STATUSES.contains(status))
@@ -436,6 +489,24 @@ public final class NavigationSourceModule implements ModuleRuntime.Module {
                     NavigationSourcePolicy.yandexIcon(action),
                     (int) Math.round(distance),
                     road == null ? "" : road.toString());
+        }
+        return null;
+    }
+
+    private Object mapKitGuidance(Object route) throws Exception {
+        // A process can host several MapKit engines with independent routes.
+        Object routeId = OemAccess.call(route, "getRouteId");
+        if (!(routeId instanceof String) || ((String) routeId).isEmpty()) return null;
+        List<Object> navigations;
+        synchronized (mapKitNavigations) {
+            navigations = new ArrayList<>(mapKitNavigations);
+        }
+        for (Object navigation : navigations) {
+            Object engine = OemAccess.call(navigation, mapKitGuidanceGetter.getName());
+            if (engine == null || !valid(engine)) continue;
+            Object engineRoute = OemAccess.call(engine, "getCurrentRoute");
+            if (engineRoute != null && routeId.equals(OemAccess.call(engineRoute, "getRouteId")))
+                return engine;
         }
         return null;
     }
@@ -529,6 +600,7 @@ public final class NavigationSourceModule implements ModuleRuntime.Module {
         }
         guidance = null;
         candidate.set(null);
+        mapKitNavigations.clear();
         if (failure != null) throw failure;
     }
 
