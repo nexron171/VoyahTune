@@ -22,6 +22,7 @@ import androidx.appcompat.app.AlertDialog;
 
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 
+import ru.big.town.common.EnergyWidgetSettings;
 import ru.big.town.common.FuelFlapWidgetProtocol;
 import ru.big.town.restoremode.R;
 
@@ -32,6 +33,8 @@ public final class FuelFlapWidgetView extends View {
     private static final int MINT = 0xff75f6c8;
     private static final String OPEN_CAPTION = "Открыть лючок";
     private static final String IDLE = "Нажмите для открытия";
+    private static final int TANK_CAPACITY_LITERS =
+            Math.round(EnergyWidgetSettings.DEFAULT_TANK_LITERS);
 
     private final Path chamber = new Path();
     private final TextPaint paint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
@@ -114,17 +117,14 @@ public final class FuelFlapWidgetView extends View {
     }
 
     public void update(Bundle state) {
-        int refill = state.getInt(FuelFlapWidgetProtocol.REFILL_LITERS, -1);
-        int capacity = state.getInt(FuelFlapWidgetProtocol.CAPACITY_LITERS, -1);
         float reading = state.getFloat(FuelFlapWidgetProtocol.REMAINING_PERCENT, -1);
+        boolean hasLevel = reading >= 0 && reading <= 100;
+        int remaining = hasLevel ? Math.round(TANK_CAPACITY_LITERS * reading / 100f) : -1;
+        int refill =
+                hasLevel
+                        ? TANK_CAPACITY_LITERS - remaining
+                        : state.getInt(FuelFlapWidgetProtocol.REFILL_LITERS, -1);
         boolean hasRefill = refill >= 0 && refill <= 200;
-        boolean hasLevel =
-                hasRefill
-                        && capacity > 0
-                        && refill <= capacity
-                        && capacity <= 200
-                        && reading >= 0
-                        && reading <= 100;
         percent = hasLevel ? reading : -1;
         boolean reserve = percent <= 5;
         liquid =
@@ -138,7 +138,7 @@ public final class FuelFlapWidgetView extends View {
                                 reserve ? 0xff985a22 : 0xff116d52)
                         : null;
         refillText = hasRefill ? refill + " л" : "—";
-        remainingText = hasLevel ? (capacity - refill) + " л" : "—";
+        remainingText = hasLevel ? remaining + " л" : "—";
         volumeDescription = hasRefill ? "Можно заправить ≈ " + refillText : "Нет данных о топливе";
         if (hasLevel) volumeDescription += ". В баке ≈ " + remainingText;
         String status = state.getString(FuelFlapWidgetProtocol.MESSAGE, IDLE);

@@ -124,7 +124,7 @@ public class FuelFlapWidgetTest {
     }
 
     @Test
-    public void remainingVolumeUsesVehicleCapacityAndClearsOnLegacyOrInvalidReading() {
+    public void fuelVolumesTotal56LitersAndClearOnLegacyOrInvalidReading() {
         FuelFlapWidgetView card =
                 new FuelFlapWidgetView(
                         RuntimeEnvironment.getApplication(),
@@ -132,12 +132,18 @@ public class FuelFlapWidgetTest {
                         () -> {});
         Bundle reading = state(true, 39);
         reading.putInt(FuelFlapWidgetProtocol.CAPACITY_LITERS, 52);
-        reading.putFloat(FuelFlapWidgetProtocol.REMAINING_PERCENT, 25f);
-        card.update(reading);
-        assertTrue(card.getContentDescription().toString().contains("В баке ≈ 13 л"));
-        reading.putFloat(FuelFlapWidgetProtocol.REMAINING_PERCENT, Float.NaN);
-        card.update(reading);
-        assertFalse(card.getContentDescription().toString().contains("В баке"));
+        for (float[] values : new float[][] {{25, 14, 42}, {6.25f, 4, 52}, {0, 0, 56}, {100, 56, 0}}) {
+            reading.putFloat(FuelFlapWidgetProtocol.REMAINING_PERCENT, values[0]);
+            card.update(reading);
+            String description = card.getContentDescription().toString();
+            assertTrue(description, description.contains("Можно заправить ≈ " + (int) values[2] + " л"));
+            assertTrue(description, description.contains("В баке ≈ " + (int) values[1] + " л"));
+        }
+        for (float invalidReading : new float[] {Float.NaN, -1, 101}) {
+            reading.putFloat(FuelFlapWidgetProtocol.REMAINING_PERCENT, invalidReading);
+            card.update(reading);
+            assertFalse(card.getContentDescription().toString().contains("В баке"));
+        }
         card.update(state(true, 39));
         assertTrue(card.getContentDescription().toString().contains("Можно заправить ≈ 39 л"));
         assertFalse(card.getContentDescription().toString().contains("В баке"));
