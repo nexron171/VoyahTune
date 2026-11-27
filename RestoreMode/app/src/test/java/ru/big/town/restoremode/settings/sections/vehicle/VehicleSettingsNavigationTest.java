@@ -8,7 +8,10 @@ import static org.junit.Assert.assertTrue;
 import static org.robolectric.Shadows.shadowOf;
 
 import android.app.Application;
+import android.graphics.Rect;
 import android.os.Looper;
+import android.view.ContextThemeWrapper;
+import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Switch;
@@ -18,6 +21,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.Robolectric;
 import org.robolectric.RobolectricTestRunner;
+import org.robolectric.RuntimeEnvironment;
 import org.robolectric.android.controller.ActivityController;
 import org.robolectric.annotation.Config;
 import org.robolectric.annotation.LooperMode;
@@ -106,6 +110,63 @@ public class VehicleSettingsNavigationTest {
         } finally {
             controller.pause().stop().destroy();
         }
+    }
+
+    @Test
+    @Config(qualifiers = "w900dp-h720dp-mdpi")
+    public void energySettingsUseTwoAlignedColumns() {
+        ContextThemeWrapper context = new ContextThemeWrapper(
+                RuntimeEnvironment.getApplication(), R.style.Theme_RestoreMode_Settings);
+        ViewGroup row = (ViewGroup) LayoutInflater.from(context).inflate(
+                R.layout.settings_vehicle_energy_button_layout, null);
+        View fuelModesToggle = row.findViewById(R.id.checkBox34);
+        View fuelModesCard = (View) fuelModesToggle.getParent();
+        View driveEntryCard = row.findViewById(R.id.driveEntryRestoreRow);
+        View smartSaveCard = row.findViewById(R.id.smartSaveRow);
+        View hybridCard = row.findViewById(R.id.hybridEngineHoldRow);
+        layoutEnergySettings(row);
+
+        Rect fuelModes = boundsIn(row, fuelModesCard);
+        Rect driveEntry = boundsIn(row, driveEntryCard);
+        Rect smartSave = boundsIn(row, smartSaveCard);
+        Rect hybrid = boundsIn(row, hybridCard);
+        assertCardsShareRow(fuelModes, driveEntry);
+        assertCardsShareRow(smartSave, hybrid);
+        assertEquals(fuelModes.left, smartSave.left);
+        assertEquals(driveEntry.right, hybrid.right);
+        assertEquals(fuelModes.width(), smartSave.width());
+        assertTrue(fuelModes.bottom < smartSave.top);
+        assertEquals(boundsIn(row, fuelModesToggle).top,
+                boundsIn(row, row.findViewById(R.id.switchDriveEntryRestore)).top);
+        assertEquals(boundsIn(row, row.findViewById(R.id.switchSmartSave)).top,
+                boundsIn(row, row.findViewById(R.id.switchHybridEngineHold)).top);
+
+        driveEntryCard.setVisibility(View.GONE);
+        smartSaveCard.setVisibility(View.GONE);
+        hybridCard.setVisibility(View.GONE);
+        layoutEnergySettings(row);
+        assertEquals(row.getWidth(), fuelModesCard.getWidth());
+        assertEquals(row.getHeight(), fuelModesCard.getHeight());
+    }
+
+    private static void layoutEnergySettings(View row) {
+        row.measure(View.MeasureSpec.makeMeasureSpec(900, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+        row.layout(0, 0, 900, row.getMeasuredHeight());
+    }
+
+    private static void assertCardsShareRow(Rect left, Rect right) {
+        assertEquals("Both cards must start in the same row", left.top, right.top);
+        assertTrue(left.right < right.left);
+        assertEquals(left.width(), right.width());
+        assertEquals(left.bottom, right.bottom);
+    }
+
+    private static Rect boundsIn(ViewGroup row, View child) {
+        Rect bounds = new Rect();
+        child.getDrawingRect(bounds);
+        row.offsetDescendantRectToMyCoords(child, bounds);
+        return bounds;
     }
 
     private static void open(SettingsList list, String title) {
