@@ -1,30 +1,52 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.constraintlayout.widget.ConstraintLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/cardSuspensionMaintenance"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@drawable/card_dark_ripple"
     android:clickable="true"
     android:focusable="true"
-    android:gravity="center"
     android:onClick="onCardSuspensionMaintenance"
-    android:orientation="vertical"
-    android:padding="8dp">
+    android:paddingHorizontal="8dp"
+    android:paddingVertical="6dp">
+
     <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:id="@+id/suspensionMaintenanceTitle"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:autoSizeMaxTextSize="28px"
+        android:autoSizeMinTextSize="14px"
+        android:autoSizeStepGranularity="1px"
+        android:autoSizeTextType="uniform"
+        android:ellipsize="end"
         android:gravity="center"
+        android:includeFontPadding="false"
+        android:maxLines="2"
         android:text="Заблокировать подвеску"
         android:textColor="#FFFFFF"
         android:textSize="28px"
-        android:textStyle="bold" />
+        android:textStyle="bold"
+        app:layout_constraintBottom_toTopOf="@id/suspensionMaintenanceBadge"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintHeight_max="wrap"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintVertical_chainStyle="packed" />
+
     <TextView
         android:id="@+id/suspensionMaintenanceBadge"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="10dp"
+        android:layout_marginTop="6dp"
         android:background="@drawable/pill_inactive"
         android:text="не активно"
         android:textColor="#FFFFFF"
-        android:textSize="18px" />
-</LinearLayout>
+        android:textSize="18px"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/suspensionMaintenanceTitle" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>
